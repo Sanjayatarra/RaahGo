@@ -1,0 +1,688 @@
+{
+	"info": {
+		"_postman_id": "raahgo-api-v1-collection",
+		"name": "RaahGo API Collection",
+		"description": "Complete Postman Collection for RaahGo Backend Platform API (v1). Includes endpoints for Users, Drivers, Vehicles, Services, Bookings, Payments, Tracking, Notifications, Reviews, Wallets, and Coupons.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://127.0.0.1:8000/api/v1",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "driver_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "booking_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "vehicle_type_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "wallet_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "1. Users & Auth",
+			"item": [
+				{
+					"name": "Step 1 - Signup (Email or Phone)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"john@example.com\",\n  \"role\": \"Customer\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/users/signup/",
+							"host": ["{{base_url}}"],
+							"path": ["users", "users", "signup", ""]
+						}
+					}
+				},
+				{
+					"name": "Step 2 - Verify Signup OTP",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"otp\": \"123456\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/users/verify_signup_otp/",
+							"host": ["{{base_url}}"],
+							"path": ["users", "users", "verify_signup_otp", ""]
+						}
+					}
+				},
+				{
+					"name": "Step 3 - Complete Profile (Customer - Signup via Email)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"full_name\": \"John Doe\",\n  \"phone_number\": \"+919876543210\",\n  \"password\": \"securepassword123\",\n  \"gender\": \"Male\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/users/complete_profile/",
+							"host": ["{{base_url}}"],
+							"path": ["users", "users", "complete_profile", ""]
+						}
+					}
+				},
+				{
+					"name": "Step 3 - Complete Profile (Customer - Signup via Phone)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"full_name\": \"John Doe\",\n  \"email\": \"john@example.com\",\n  \"password\": \"securepassword123\",\n  \"gender\": \"Male\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/users/complete_profile/",
+							"host": ["{{base_url}}"],
+							"path": ["users", "users", "complete_profile", ""]
+						}
+					}
+				},
+				{
+					"name": "List Users",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/users/users/",
+							"host": ["{{base_url}}"],
+							"path": ["users", "users", ""]
+						}
+					}
+				},
+				{
+					"name": "Send OTP (Standalone)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"john@example.com\",\n  \"purpose\": \"Login\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/otps/send_otp/",
+							"host": ["{{base_url}}"],
+							"path": ["users", "otps", "send_otp", ""]
+						}
+					}
+				},
+				{
+					"name": "Verify OTP (Standalone)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"john@example.com\",\n  \"otp\": \"123456\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/otps/verify_otp/",
+							"host": ["{{base_url}}"],
+							"path": ["users", "otps", "verify_otp", ""]
+						}
+					}
+				},
+				{
+					"name": "Add User Address",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user\": \"{{user_id}}\",\n  \"title\": \"Home\",\n  \"contact_name\": \"John Doe\",\n  \"contact_phone\": \"+919876543210\",\n  \"address_line_1\": \"123 MG Road\",\n  \"city\": \"Bengaluru\",\n  \"state\": \"Karnataka\",\n  \"postal_code\": \"560001\",\n  \"latitude\": 12.971598,\n  \"longitude\": 77.594566,\n  \"is_default\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/addresses/",
+							"host": ["{{base_url}}"],
+							"path": ["users", "addresses", ""]
+						}
+					}
+				},
+				{
+					"name": "Register User Device",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user\": \"{{user_id}}\",\n  \"device_type\": \"Android\",\n  \"firebase_token\": \"fcm_dummy_token_123456\",\n  \"app_version\": \"1.0.0\",\n  \"device_name\": \"Pixel 7\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/users/devices/",
+							"host": ["{{base_url}}"],
+							"path": ["users", "devices", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "2. Drivers",
+			"item": [
+				{
+					"name": "Create Driver Profile",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user\": \"{{user_id}}\",\n  \"license_number\": \"DL1420110012345\",\n  \"experience_years\": 4,\n  \"approval_status\": \"Approved\",\n  \"availability_status\": \"Online\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/drivers/drivers/",
+							"host": ["{{base_url}}"],
+							"path": ["drivers", "drivers", ""]
+						}
+					}
+				},
+				{
+					"name": "Toggle Driver Availability",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"Online\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/drivers/drivers/{{driver_id}}/toggle_availability/",
+							"host": ["{{base_url}}"],
+							"path": ["drivers", "drivers", "{{driver_id}}", "toggle_availability", ""]
+						}
+					}
+				},
+				{
+					"name": "Upload Driver Document",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"driver\": \"{{driver_id}}\",\n  \"document_type\": \"License\",\n  \"document_number\": \"DL1420110012345\",\n  \"document_url\": \"https://s3.amazonaws.com/bucket/license.jpg\",\n  \"verification_status\": \"Verified\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/drivers/documents/",
+							"host": ["{{base_url}}"],
+							"path": ["drivers", "documents", ""]
+						}
+					}
+				},
+				{
+					"name": "Add Driver Bank Account",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"driver\": \"{{driver_id}}\",\n  \"account_holder_name\": \"John Driver\",\n  \"account_number\": \"987654321012\",\n  \"ifsc_code\": \"HDFC0001234\",\n  \"bank_name\": \"HDFC Bank\",\n  \"is_verified\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/drivers/bank-accounts/",
+							"host": ["{{base_url}}"],
+							"path": ["drivers", "bank-accounts", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "3. Vehicles",
+			"item": [
+				{
+					"name": "List Vehicle Types",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/vehicles/types/",
+							"host": ["{{base_url}}"],
+							"path": ["vehicles", "types", ""]
+						}
+					}
+				},
+				{
+					"name": "Create Vehicle Type",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Sedan\",\n  \"description\": \"Comfortable 4-seater sedan\",\n  \"capacity_passengers\": 4,\n  \"base_fare\": 50.00,\n  \"per_km_rate\": 12.00,\n  \"per_minute_rate\": 1.50\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/vehicles/types/",
+							"host": ["{{base_url}}"],
+							"path": ["vehicles", "types", ""]
+						}
+					}
+				},
+				{
+					"name": "Add Driver Vehicle",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"driver\": \"{{driver_id}}\",\n  \"vehicle_type\": \"{{vehicle_type_id}}\",\n  \"registration_number\": \"KA01AB1234\",\n  \"make\": \"Honda\",\n  \"model\": \"City\",\n  \"year\": 2022,\n  \"color\": \"White\",\n  \"is_approved\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/vehicles/vehicles/",
+							"host": ["{{base_url}}"],
+							"path": ["vehicles", "vehicles", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "4. Services",
+			"item": [
+				{
+					"name": "List Services",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/services/services/",
+							"host": ["{{base_url}}"],
+							"path": ["services", "services", ""]
+						}
+					}
+				},
+				{
+					"name": "Create Service",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Daily Ride\",\n  \"code\": \"RIDE\",\n  \"description\": \"On-demand city rides\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/services/services/",
+							"host": ["{{base_url}}"],
+							"path": ["services", "services", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "5. Bookings",
+			"item": [
+				{
+					"name": "Calculate Fare",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"vehicle_type_id\": \"{{vehicle_type_id}}\",\n  \"distance_km\": 12.5,\n  \"estimated_duration_mins\": 30\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/bookings/bookings/calculate_fare/",
+							"host": ["{{base_url}}"],
+							"path": ["bookings", "bookings", "calculate_fare", ""]
+						}
+					}
+				},
+				{
+					"name": "Create Booking",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"customer\": \"{{user_id}}\",\n  \"service\": \"{{service_id}}\",\n  \"vehicle_type\": \"{{vehicle_type_id}}\",\n  \"pickup_address\": \"MG Road, Indiranagar\",\n  \"dropoff_address\": \"Koramangala 5th Block\",\n  \"pickup_latitude\": 12.971598,\n  \"pickup_longitude\": 77.594566,\n  \"dropoff_latitude\": 12.935242,\n  \"dropoff_longitude\": 77.624481,\n  \"distance_km\": 8.5,\n  \"estimated_duration_mins\": 25,\n  \"base_fare\": 150.00,\n  \"tax_amount\": 7.50,\n  \"total_fare\": 157.50\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/bookings/bookings/",
+							"host": ["{{base_url}}"],
+							"path": ["bookings", "bookings", ""]
+						}
+					}
+				},
+				{
+					"name": "Accept Booking",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"driver_id\": \"{{driver_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/bookings/bookings/{{booking_id}}/accept/",
+							"host": ["{{base_url}}"],
+							"path": ["bookings", "bookings", "{{booking_id}}", "accept", ""]
+						}
+					}
+				},
+				{
+					"name": "Start Trip",
+					"request": {
+						"method": "POST",
+						"url": {
+							"raw": "{{base_url}}/bookings/bookings/{{booking_id}}/start_trip/",
+							"host": ["{{base_url}}"],
+							"path": ["bookings", "bookings", "{{booking_id}}", "start_trip", ""]
+						}
+					}
+				},
+				{
+					"name": "Complete Trip",
+					"request": {
+						"method": "POST",
+						"url": {
+							"raw": "{{base_url}}/bookings/bookings/{{booking_id}}/complete/",
+							"host": ["{{base_url}}"],
+							"path": ["bookings", "bookings", "{{booking_id}}", "complete", ""]
+						}
+					}
+				},
+				{
+					"name": "Cancel Booking",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"Change of plans\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/bookings/bookings/{{booking_id}}/cancel/",
+							"host": ["{{base_url}}"],
+							"path": ["bookings", "bookings", "{{booking_id}}", "cancel", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "6. Payments",
+			"item": [
+				{
+					"name": "Create Payment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"booking\": \"{{booking_id}}\",\n  \"user\": \"{{user_id}}\",\n  \"amount\": 157.50,\n  \"payment_method\": \"UPI\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/payments/payments/",
+							"host": ["{{base_url}}"],
+							"path": ["payments", "payments", ""]
+						}
+					}
+				},
+				{
+					"name": "Mark Payment Success",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"transaction_id\": \"UPI1234567890\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/payments/payments/{{payment_id}}/mark_success/",
+							"host": ["{{base_url}}"],
+							"path": ["payments", "payments", "{{payment_id}}", "mark_success", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "7. Tracking",
+			"item": [
+				{
+					"name": "Update Driver Location",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"driver_id\": \"{{driver_id}}\",\n  \"latitude\": 12.971598,\n  \"longitude\": 77.594566,\n  \"heading\": 90.0,\n  \"speed\": 35.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/tracking/locations/update_location/",
+							"host": ["{{base_url}}"],
+							"path": ["tracking", "locations", "update_location", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "8. Notifications",
+			"item": [
+				{
+					"name": "List User Notifications",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/notifications/notifications/?user_id={{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["notifications", "notifications", ""],
+							"query": [
+								{ "key": "user_id", "value": "{{user_id}}" }
+							]
+						}
+					}
+				},
+				{
+					"name": "Mark All Notifications Read",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"{{user_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/notifications/notifications/mark_all_read/",
+							"host": ["{{base_url}}"],
+							"path": ["notifications", "notifications", "mark_all_read", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "9. Reviews",
+			"item": [
+				{
+					"name": "Submit Rating",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"booking\": \"{{booking_id}}\",\n  \"reviewer\": \"{{user_id}}\",\n  \"reviewee_driver\": \"{{driver_id}}\",\n  \"rating\": 5,\n  \"comment\": \"Great driver, very punctual!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/reviews/ratings/",
+							"host": ["{{base_url}}"],
+							"path": ["reviews", "ratings", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "10. Wallets",
+			"item": [
+				{
+					"name": "Create Wallet",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user\": \"{{user_id}}\",\n  \"balance\": 500.00,\n  \"currency\": \"INR\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/wallets/wallets/",
+							"host": ["{{base_url}}"],
+							"path": ["wallets", "wallets", ""]
+						}
+					}
+				},
+				{
+					"name": "Top-up Wallet",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 200.00,\n  \"description\": \"UPI Topup\",\n  \"reference_id\": \"UPI987654\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/wallets/wallets/{{wallet_id}}/topup/",
+							"host": ["{{base_url}}"],
+							"path": ["wallets", "wallets", "{{wallet_id}}", "topup", ""]
+						}
+					}
+				},
+				{
+					"name": "Debit Wallet",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 150.00,\n  \"description\": \"Payment for Ride #RG12345678\",\n  \"reference_id\": \"{{booking_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/wallets/wallets/{{wallet_id}}/debit/",
+							"host": ["{{base_url}}"],
+							"path": ["wallets", "wallets", "{{wallet_id}}", "debit", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "11. Coupons",
+			"item": [
+				{
+					"name": "Create Coupon",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"code\": \"WELCOME50\",\n  \"discount_type\": \"Percentage\",\n  \"discount_value\": 20.00,\n  \"max_discount_amount\": 50.00,\n  \"min_booking_amount\": 100.00,\n  \"valid_from\": \"2026-01-01T00:00:00Z\",\n  \"valid_until\": \"2026-12-31T23:59:59Z\",\n  \"usage_limit\": 1000\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/coupons/coupons/",
+							"host": ["{{base_url}}"],
+							"path": ["coupons", "coupons", ""]
+						}
+					}
+				},
+				{
+					"name": "Validate Coupon Code",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"code\": \"WELCOME50\",\n  \"booking_amount\": 200.00\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/coupons/coupons/validate_coupon/",
+							"host": ["{{base_url}}"],
+							"path": ["coupons", "coupons", "validate_coupon", ""]
+						}
+					}
+				}
+			]
+		}
+	]
+}

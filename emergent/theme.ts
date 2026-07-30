@@ -1,0 +1,37 @@
+export const theme = {
+  colors: {
+    surface: '#FFFFFF',
+    onSurface: '#1C1C1E',
+    surfaceSecondary: '#F8F9FA',
+    onSurfaceSecondary: '#3A3A3C',
+    surfaceTertiary: '#F1F3F5',
+    onSurfaceTertiary: '#636366',
+    surfaceInverse: '#121212',
+    onSurfaceInverse: '#FFFFFF',
+    brand: '#FFC000',
+    brandPrimary: '#FFC000',
+    onBrandPrimary: '#000000',
+    brandSecondary: '#FFF3D1',
+    onBrandSecondary: '#4A3500',
+    brandTertiary: '#FFFAED',
+    onBrandTertiary: '#8A6500',
+    success: '#34C759',
+    onSuccess: '#FFFFFF',
+    warning: '#FF9F0A',
+    onWarning: '#FFFFFF',
+    error: '#FF3B30',
+    onError: '#FFFFFF',
+    info: '#8E8E93',
+    onInfo: '#FFFFFF',
+    border: '#E5E5EA',
+    borderStrong: '#C7C7CC',
+    divider: '#E5E5EA',
+  },
+  spacing: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32, xxxl: 48 },
+  radius: { sm: 6, md: 12, lg: 20, pill: 999 },
+  font: {
+    sm: 12, base: 14, lg: 16, xl: 20, xxl: 24, xxxl: 32,
+  },
+};
+
+export const mapBg = 'https://images.unsplash.com/photo-1754299375507-72f63a9a065e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwxfHxtaW5pbWFsJTIwY2l0eSUyMG1hcCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg1MzQxNjc0fDA&ixlib=rb-4.1.0&q=85';
