@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { RefreshCw, CheckCircle, ArrowLeft } from 'lucide-react';
 
-export default function OtpInput({ identifier, type, onVerify, onBack, onResend }) {
+export default function OtpInput({ identifier, type, onVerify, onBack, onResend, externalError }) {
   const [otp, setOtp] = useState(['', '', '', '']);
   const [timer, setTimer] = useState(30);
   const [canResend, setCanResend] = useState(false);
@@ -26,6 +26,14 @@ export default function OtpInput({ identifier, type, onVerify, onBack, onResend 
 
     return () => clearInterval(countdown);
   }, []);
+
+  useEffect(() => {
+    if (externalError) {
+      setError(externalError);
+      setIsLoading(false);
+      setIsSuccess(false);
+    }
+  }, [externalError]);
 
   const handleChange = (index, value) => {
     if (value && !/^\d+$/.test(value)) return;
@@ -66,12 +74,13 @@ export default function OtpInput({ identifier, type, onVerify, onBack, onResend 
     setCanResend(false);
     setOtp(['', '', '', '']);
     setError('');
+    setIsSuccess(false);
     inputRefs[0].current?.focus();
     if (onResend) onResend();
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  const handleSubmit = async (e) => {
+    if (e) e.preventDefault();
     const fullOtp = otp.join('');
     if (fullOtp.length < 4) {
       setError('Please enter the complete 4-digit OTP');
@@ -80,18 +89,13 @@ export default function OtpInput({ identifier, type, onVerify, onBack, onResend 
 
     setIsLoading(true);
     setError('');
+    setIsSuccess(true);
 
     setTimeout(() => {
-      setIsLoading(false);
-      if (fullOtp === '1234' || fullOtp.length === 4) {
-        setIsSuccess(true);
-        setTimeout(() => {
-          if (onVerify) onVerify(fullOtp);
-        }, 1200);
-      } else {
-        setError('Invalid OTP code. Please try again.');
+      if (onVerify) {
+        onVerify(fullOtp);
       }
-    }, 1000);
+    }, 400);
   };
 
   return (
@@ -140,7 +144,7 @@ export default function OtpInput({ identifier, type, onVerify, onBack, onResend 
           </p>
         )}
 
-        {isSuccess && (
+        {isSuccess && !error && (
           <div className="flex items-center justify-center gap-2 text-xs font-bold text-black bg-[#FFC000] py-2.5 px-3 rounded-xl shadow-md shadow-[#FFC000]/20">
             <CheckCircle className="w-4 h-4 text-black animate-bounce" /> OTP Verified Successfully!
           </div>
@@ -148,7 +152,7 @@ export default function OtpInput({ identifier, type, onVerify, onBack, onResend 
 
         <button
           type="submit"
-          disabled={isLoading || isSuccess}
+          disabled={isLoading}
           className="w-full py-3.5 px-4 bg-[#FFC000] hover:bg-[#e6ad00] active:scale-[0.99] text-black font-bold text-sm rounded-xl shadow-lg shadow-[#FFC000]/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {isLoading ? (
@@ -156,8 +160,6 @@ export default function OtpInput({ identifier, type, onVerify, onBack, onResend 
               <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
               <span>Verifying OTP...</span>
             </>
-          ) : isSuccess ? (
-            <span>Verified!</span>
           ) : (
             <span>Verify & Continue</span>
           )}

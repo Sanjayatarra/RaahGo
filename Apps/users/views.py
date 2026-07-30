@@ -4,6 +4,7 @@ from datetime import timedelta
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.core.mail import send_mail
 from django.conf import settings
@@ -79,7 +80,7 @@ class UserViewSet(viewsets.ModelViewSet):
             )
 
         # Generate OTP
-        otp_code = f"{random.randint(100000, 999999)}"
+        otp_code = f"{random.randint(1000, 9999)}"
         expires_at = timezone.now() + timedelta(minutes=10)
 
         otp_record = OTPVerification.objects.create(
@@ -160,9 +161,14 @@ class UserViewSet(viewsets.ModelViewSet):
                 elif user.phone_number and not user.email:
                     required_fields.append('email')
 
+            refresh = RefreshToken.for_user(user)
+
             return Response({
                 'status': 'OTP verified successfully.',
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
                 'user_id': str(user.id),
+                'user': UserSerializer(user).data,
                 'next_step': 'complete_profile',
                 'required_fields': required_fields
             }, status=status.HTTP_200_OK)
@@ -288,7 +294,7 @@ class OTPVerificationViewSet(viewsets.ModelViewSet):
         if not phone_number and not email:
             return Response({'error': 'Either phone_number or email is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        otp_code = f"{random.randint(100000, 999999)}"
+        otp_code = f"{random.randint(1000, 9999)}"
         expires_at = timezone.now() + timedelta(minutes=10)
 
         otp_record = OTPVerification.objects.create(
@@ -299,6 +305,13 @@ class OTPVerificationViewSet(viewsets.ModelViewSet):
             purpose=purpose,
             expires_at=expires_at
         )
+
+        print(f"\n==========================================")
+        print(f"🔑 [DJANGO BACKEND OTP GENERATED]")
+        print(f"Target: {email or phone_number}")
+        print(f"Purpose: {purpose}")
+        print(f"OTP Code: {otp_code}")
+        print(f"==========================================\n")
 
         if email:
             send_otp_email(email, otp_code)
@@ -338,14 +351,39 @@ class OTPVerificationViewSet(viewsets.ModelViewSet):
         if otp_record.otp == otp_code:
             otp_record.is_verified = True
             otp_record.save()
-            if otp_record.user:
+            user = otp_record.user
+
+            if not user:
                 if email:
-                    otp_record.user.is_email_verified = True
-                if phone_number:
-                    otp_record.user.is_phone_verified = True
-                otp_record.user.is_verified = True
-                otp_record.user.save()
-            return Response({'status': 'OTP verified successfully'}, status=status.HTTP_200_OK)
+                    user = User.objects.filter(email__iexact=email).first()
+                elif phone_number:
+                    user = User.objects.filter(phone_number=phone_number).first()
+
+                if not user:
+                    temp_username = f"user_{random.randint(100000, 999999)}"
+                    user = User.objects.create(
+                        username=temp_username,
+                        email=email if email else None,
+                        phone_number=phone_number if phone_number else None,
+                        role=User.RoleChoices.CUSTOMER,
+                        is_verified=True
+                    )
+
+            if email:
+                user.is_email_verified = True
+            if phone_number:
+                user.is_phone_verified = True
+            user.is_verified = True
+            user.save()
+
+            refresh = RefreshToken.for_user(user)
+
+            return Response({
+                'status': 'OTP verified successfully',
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': UserSerializer(user).data
+            }, status=status.HTTP_200_OK)
 
         otp_record.save()
         return Response({'error': 'Incorrect OTP'}, status=status.HTTP_400_BAD_REQUEST)

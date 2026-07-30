@@ -36,8 +36,29 @@ class Driver(models.Model):
         choices=AvailabilityStatus.choices,
         default=AvailabilityStatus.OFFLINE
     )
+    current_latitude = models.DecimalField(max_digits=12, decimal_places=7, null=True, blank=True)
+    current_longitude = models.DecimalField(max_digits=12, decimal_places=7, null=True, blank=True)
+    last_location_update = models.DateTimeField(null=True, blank=True)
+    daily_online_seconds = models.PositiveIntegerField(default=0)
+    last_online_start = models.DateTimeField(null=True, blank=True)
+    last_duty_reset_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def get_current_daily_online_seconds(self):
+        from django.utils import timezone
+        today = timezone.now().date()
+        
+        # Reset counter if new day
+        if self.last_duty_reset_date != today:
+            return 0
+
+        total_sec = self.daily_online_seconds
+        if self.availability_status in [self.AvailabilityStatus.ONLINE, self.AvailabilityStatus.IN_TRIP] and self.last_online_start:
+            session_sec = int((timezone.now() - self.last_online_start).total_seconds())
+            total_sec += max(0, session_sec)
+
+        return min(total_sec, 43200) # 12 Hours Max limit (43,200 seconds)
 
     class Meta:
         db_table = 'drivers'

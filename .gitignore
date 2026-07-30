@@ -13,7 +13,8 @@ media/
 staticfiles/
 
 # Django Migrations Cache
-*/migrations/__pycache__/
+*/migrations/
+__pycache__/
 *.pyc
 
 # Environment Files & Credentials
@@ -48,3 +49,6 @@ lerna-debug.log*
 Thumbs.db
 tmp/
 .gemini/
+**/migrations/*.py
+**/migrations/*.pyc
+*/__pycache__/

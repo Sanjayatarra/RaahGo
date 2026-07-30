@@ -10,8 +10,8 @@ class DriverLocation(models.Model):
         on_delete=models.CASCADE,
         related_name='locations'
     )
-    latitude = models.DecimalField(max_digits=10, decimal_places=7)
-    longitude = models.DecimalField(max_digits=10, decimal_places=7)
+    latitude = models.DecimalField(max_digits=12, decimal_places=7)
+    longitude = models.DecimalField(max_digits=12, decimal_places=7)
     heading = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
     speed = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
     is_online = models.BooleanField(default=True)

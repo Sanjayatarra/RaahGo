@@ -67,6 +67,7 @@ class Booking(models.Model):
         choices=PaymentStatus.choices,
         default=PaymentStatus.PENDING
     )
+    ride_pin = models.CharField(max_length=10, default='4829')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Mail, Phone, User, ArrowRight, CheckSquare, Square } from 'lucide-react';
 import OtpInput from './OtpInput';
-import GoogleAuthModal from './GoogleAuthModal';
 
 // Standard Phone Number Formatter (e.g. 98765 43210)
 const formatPhone = (val) => {
@@ -13,31 +12,123 @@ const formatPhone = (val) => {
 export default function SignupForm({ onSuccess, onSwitchToLogin }) {
   const [authMethod, setAuthMethod] = useState('mobile'); // 'mobile' | 'email'
   const [name, setName] = useState('');
-  const [identifier, setIdentifier] = useState('');
+  const [mobileNumber, setMobileNumber] = useState('');
+  const [emailAddress, setEmailAddress] = useState('');
   const [agreeTerms, setAgreeTerms] = useState(true);
   const [showOtp, setShowOtp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showGoogleAuth, setShowGoogleAuth] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const identifier = authMethod === 'mobile' ? mobileNumber : emailAddress;
+
+  useEffect(() => {
+    if (window.google?.accounts?.id) {
+      try {
+        window.google.accounts.id.initialize({
+          client_id: "230188895926-tahfl2kalg.apps.googleusercontent.com",
+          callback: handleGoogleResponse,
+          auto_select: false,
+          cancel_on_tap_outside: true,
+        });
+      } catch (e) {
+        console.log('Google GSI Init:', e);
+      }
+    }
+  }, []);
+
+  const handleGoogleResponse = async (response) => {
+    if (response?.credential) {
+      setGoogleLoading(true);
+      setError('');
+      try {
+        const res = await fetch('/api/v1/users/google-auth/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: response.credential })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.access) localStorage.setItem('access_token', data.access);
+          if (data.refresh) localStorage.setItem('refresh_token', data.refresh);
+
+          if (onSuccess) {
+            onSuccess({
+              type: 'signup',
+              authMethod: 'google',
+              jwtAccess: data.access,
+              jwtRefresh: data.refresh,
+              user: data.user
+            });
+          }
+        } else {
+          setError('Google authentication failed. Please enter your details below.');
+          setAuthMethod('email');
+        }
+      } catch (err) {
+        setError('Network error during Google authentication.');
+      } finally {
+        setGoogleLoading(false);
+      }
+    } else {
+      setError('Google Sign-Up was not confirmed.');
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleGoogleAuthClick = () => {
+    setError('');
+    setGoogleLoading(true);
+
+    if (window.google?.accounts?.id) {
+      window.google.accounts.id.initialize({
+        client_id: "230188895926-tahfl2kalg.apps.googleusercontent.com",
+        callback: handleGoogleResponse,
+        auto_select: false,
+        cancel_on_tap_outside: true,
+      });
+
+      window.google.accounts.id.prompt((notification) => {
+        setGoogleLoading(false);
+        if (
+          notification.isNotDisplayed() ||
+          notification.isSkippedMoment() ||
+          notification.isDismissedMoment()
+        ) {
+          setError('Google authorization incomplete. Please enter your Gmail / Email address below.');
+          setAuthMethod('email');
+        }
+      });
+    } else {
+      setGoogleLoading(false);
+      setError('Google SDK unavailable. Please enter your Gmail / Email address below.');
+      setAuthMethod('email');
+    }
+  };
 
   const validateInput = () => {
     if (!name.trim()) {
       setError('Please enter your full name');
       return false;
     }
-    const rawValue = identifier.replace(/\D/g, '');
-    if (!identifier.trim()) {
-      setError(authMethod === 'mobile' ? 'Please enter your mobile number' : 'Please enter your Gmail / Email address');
-      return false;
-    }
     if (authMethod === 'mobile') {
+      const rawValue = mobileNumber.replace(/\D/g, '');
+      if (!mobileNumber.trim()) {
+        setError('Please enter your mobile number');
+        return false;
+      }
       if (rawValue.length < 10) {
         setError('Please enter a valid 10-digit mobile number');
         return false;
       }
     } else {
+      if (!emailAddress.trim()) {
+        setError('Please enter your Gmail / Email address');
+        return false;
+      }
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(identifier)) {
+      if (!emailRegex.test(emailAddress)) {
         setError('Please enter a valid email address');
         return false;
       }
@@ -49,50 +140,91 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
     return true;
   };
 
-  const handleSendOtp = (e) => {
+  // Hit Django REST Framework Send OTP API Endpoint
+  const handleSendOtp = async (e) => {
     if (e) e.preventDefault();
     setError('');
 
     if (!validateInput()) return;
 
     setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      setShowOtp(true);
-    }, 800);
-  };
+    const cleanTarget = authMethod === 'mobile' ? mobileNumber.replace(/\D/g, '') : emailAddress.trim();
+    const payload = authMethod === 'mobile'
+      ? { phone_number: cleanTarget, purpose: 'Register' }
+      : { email: cleanTarget, purpose: 'Register' };
 
-  const handleGoogleSignUp = () => {
-    setError('');
-    setShowGoogleAuth(true);
-  };
-
-  const handleGoogleAccountSelect = (email, accountName) => {
-    setName(accountName);
-    setAuthMethod('email');
-    setIdentifier(email);
-    setError('');
-  };
-
-  const handleVerifyOtp = (otpCode) => {
-    if (onSuccess) {
-      onSuccess({
-        type: 'signup',
-        name,
-        identifier,
-        authMethod,
-        otp: otpCode,
+    try {
+      const response = await fetch('/api/v1/users/otps/send_otp/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setShowOtp(true);
+        if (data.otp) console.log('[Django Backend] Sent Signup OTP:', data.otp);
+      } else {
+        setShowOtp(true);
+      }
+    } catch (err) {
+      setShowOtp(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Hit Django REST Framework Verify OTP API Endpoint -> Transition to CompleteProfileForm
+  const handleVerifyOtp = async (otpCode) => {
+    setError('');
+    const cleanTarget = authMethod === 'mobile' ? mobileNumber.replace(/\D/g, '') : emailAddress.trim();
+    const payload = authMethod === 'mobile'
+      ? { phone_number: cleanTarget, otp: otpCode }
+      : { email: cleanTarget, otp: otpCode };
+
+    let jwtAccess = `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.otp_user_${Date.now()}`;
+    let jwtRefresh = `refresh_token_${Date.now()}`;
+    let backendUser = null;
+
+    try {
+      const response = await fetch('/api/v1/users/otps/verify_otp/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        if (data.access) jwtAccess = data.access;
+        if (data.refresh) jwtRefresh = data.refresh;
+        if (data.user) backendUser = data.user;
+
+        localStorage.setItem('access_token', jwtAccess);
+        localStorage.setItem('refresh_token', jwtRefresh);
+
+        if (onSuccess) {
+          onSuccess({
+            type: 'signup',
+            name,
+            identifier,
+            authMethod,
+            otp: otpCode,
+            jwtAccess,
+            jwtRefresh,
+            user: backendUser
+          });
+        }
+      } else {
+        setError(data.error || 'Incorrect OTP code. Please try again.');
+      }
+    } catch (err) {
+      setError('Network error while verifying OTP.');
     }
   };
 
   return (
     <div className="w-full">
-      <GoogleAuthModal
-        isOpen={showGoogleAuth}
-        onClose={() => setShowGoogleAuth(false)}
-        onSelectAccount={handleGoogleAccountSelect}
-      />
       {!showOtp ? (
         <div className="space-y-5 animate-fade-in">
           {/* Header text */}
@@ -101,13 +233,17 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
             <p className="text-xs text-[#636366] mt-1">Join RaahGo with Mobile Number or Gmail</p>
           </div>
 
-          {/* Quick Google Sign Up */}
+          {/* Native Google OAuth Button */}
           <button
             type="button"
-            onClick={handleGoogleSignUp}
+            onClick={handleGoogleAuthClick}
+            disabled={googleLoading}
             className="w-full py-3 px-4 bg-white hover:bg-[#F8F9FA] border border-[#E5E5EA] rounded-xl text-[#1C1C1E] text-xs font-bold transition-all duration-200 flex items-center justify-center gap-3 hover:border-[#C7C7CC] active:scale-[0.99]"
           >
-            <svg className="w-4 h-4" viewBox="0 0 24 24">
+            {googleLoading ? (
+              <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+            ) : (
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
                 <path
                   fill="#EA4335"
                   d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z"
@@ -124,7 +260,8 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
                   fill="#34A853"
                   d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.4-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z"
                 />
-            </svg>
+              </svg>
+            )}
             <span>Sign up with Google / Gmail</span>
           </button>
 
@@ -144,10 +281,11 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
                 setAuthMethod('mobile');
                 setError('');
               }}
-              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${authMethod === 'mobile'
-                ? 'bg-[#FFC000] text-black shadow-sm'
-                : 'text-[#636366] hover:text-[#1C1C1E]'
-                }`}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${
+                authMethod === 'mobile'
+                  ? 'bg-[#FFC000] text-black shadow-sm'
+                  : 'text-[#636366] hover:text-[#1C1C1E]'
+              }`}
             >
               <Phone className="w-3.5 h-3.5" /> Mobile Number
             </button>
@@ -157,10 +295,11 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
                 setAuthMethod('email');
                 setError('');
               }}
-              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${authMethod === 'email'
-                ? 'bg-[#FFC000] text-black shadow-sm'
-                : 'text-[#636366] hover:text-[#1C1C1E]'
-                }`}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${
+                authMethod === 'email'
+                  ? 'bg-[#FFC000] text-black shadow-sm'
+                  : 'text-[#636366] hover:text-[#1C1C1E]'
+              }`}
             >
               <Mail className="w-3.5 h-3.5" /> Gmail / Email
             </button>
@@ -195,35 +334,46 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
               </label>
               <div className="relative">
                 {authMethod === 'mobile' ? (
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center text-[#3A3A3C] font-bold text-base border-r border-[#E5E5EA] pr-2.5 h-6">
-                    <span>+91</span>
-                  </div>
+                  <>
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center text-[#3A3A3C] font-bold text-base border-r border-[#E5E5EA] pr-2.5 h-6">
+                      <span>+91</span>
+                    </div>
+                    <input
+                      type="tel"
+                      value={mobileNumber}
+                      maxLength={11}
+                      onChange={(e) => {
+                        let val = formatPhone(e.target.value);
+                        setMobileNumber(val);
+                        if (error) setError('');
+                      }}
+                      placeholder="98765 43210"
+                      className={`w-full bg-white text-[#1C1C1E] font-extrabold text-base sm:text-lg tracking-wide placeholder:font-normal placeholder:text-[#8E8E93] placeholder:tracking-normal rounded-xl py-2 pl-14 pr-3 border transition-all duration-200 focus:outline-none ${
+                        error
+                          ? 'border-[#FF3B30] focus:ring-2 focus:ring-[#FF3B30]/20'
+                          : 'border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20'
+                      }`}
+                    />
+                  </>
                 ) : (
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#636366]" />
+                  <>
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-5 text-[#636366]" />
+                    <input
+                      type="email"
+                      value={emailAddress}
+                      onChange={(e) => {
+                        setEmailAddress(e.target.value);
+                        if (error) setError('');
+                      }}
+                      placeholder="name@gmail.com"
+                      className={`w-full bg-white text-[#1C1C1E] font-bold text-base tracking-wide placeholder:font-normal placeholder:text-[#8E8E93] placeholder:tracking-normal rounded-xl py-2 pl-10 pr-3 border transition-all duration-200 focus:outline-none ${
+                        error
+                          ? 'border-[#FF3B30] focus:ring-2 focus:ring-[#FF3B30]/20'
+                          : 'border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20'
+                      }`}
+                    />
+                  </>
                 )}
-                <input
-                  type={authMethod === 'mobile' ? 'tel' : 'email'}
-                  value={identifier}
-                  maxLength={authMethod === 'mobile' ? 11 : undefined}
-                  onChange={(e) => {
-                    let val = e.target.value;
-                    if (authMethod === 'mobile') {
-                      val = formatPhone(val);
-                    }
-                    setIdentifier(val);
-                    if (error) setError('');
-                  }}
-                  placeholder={
-                    authMethod === 'mobile'
-                      ? '98765 43210'
-                      : 'name@gmail.com'
-                  }
-                  className={`w-full bg-white text-[#1C1C1E] font-extrabold text-base sm:text-lg tracking-wide placeholder:font-normal placeholder:text-[#8E8E93] placeholder:tracking-normal rounded-xl py-2 border transition-all duration-200 focus:outline-none ${authMethod === 'mobile' ? 'pl-14 pr-3' : 'pl-10 pr-3'
-                    } ${error
-                      ? 'border-[#FF3B30] focus:ring-2 focus:ring-[#FF3B30]/20'
-                      : 'border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20'
-                    }`}
-                />
               </div>
             </div>
 
@@ -291,6 +441,7 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
         <OtpInput
           identifier={identifier}
           type={authMethod}
+          externalError={error}
           onBack={() => setShowOtp(false)}
           onVerify={handleVerifyOtp}
           onResend={() => {
