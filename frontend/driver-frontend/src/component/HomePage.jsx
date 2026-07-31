@@ -1,9 +1,90 @@
 import React, { useState, useEffect } from 'react';
-import { Car, Navigation, Power, DollarSign, Star, CheckCircle, Clock, ShieldCheck, MapPin, Phone, User, LogOut, RefreshCw, KeyRound, ArrowRight, Compass, AlertCircle } from 'lucide-react';
+import { Car, Navigation, Power, DollarSign, Star, CheckCircle, Clock, ShieldCheck, MapPin, Phone, User, LogOut, RefreshCw, KeyRound, ArrowRight, Compass, AlertCircle, X, Sliders, MoveLeft, MoveRight } from 'lucide-react';
 import RealtimeMap from './RealtimeMap';
 
 export default function HomePage({ user, onLogout }) {
   const [isOnline, setIsOnline] = useState(true);
+
+  // Live Touch/Mouse Floating Drag & Snap Handling
+  const [floatingPos, setFloatingPos] = useState({
+    side: 'right', // 'right' | 'left'
+    topY: 280,     // vertical position in px when snapped
+    currX: null,   // live drag X
+    currY: null,   // live drag Y
+  });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartPos = React.useRef({ x: 0, y: 0 });
+  const initialPos = React.useRef({ x: 0, y: 280 });
+
+  const handleDragStart = (e) => {
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    if (clientX === undefined || clientY === undefined) return;
+
+    setIsDragging(false);
+    dragStartPos.current = { x: clientX, y: clientY };
+
+    // Calculate starting button top-left position
+    const startX = floatingPos.currX !== null
+      ? floatingPos.currX
+      : (floatingPos.side === 'right' ? window.innerWidth - 60 : 0);
+    const startY = floatingPos.currY !== null ? floatingPos.currY : floatingPos.topY;
+    initialPos.current = { x: startX, y: startY };
+
+    let moved = false;
+    let latestX = startX;
+    let latestY = startY;
+
+    const onPointerMove = (moveEvt) => {
+      const moveX = moveEvt.touches ? moveEvt.touches[0].clientX : moveEvt.clientX;
+      const moveY = moveEvt.touches ? moveEvt.touches[0].clientY : moveEvt.clientY;
+      if (moveX === undefined || moveY === undefined) return;
+
+      const deltaX = moveX - dragStartPos.current.x;
+      const deltaY = moveY - dragStartPos.current.y;
+
+      if (Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4) {
+        moved = true;
+        setIsDragging(true);
+      }
+
+      if (moved) {
+        latestX = Math.max(0, Math.min(window.innerWidth - 56, initialPos.current.x + deltaX));
+        latestY = Math.max(60, Math.min(window.innerHeight - 80, initialPos.current.y + deltaY));
+        setFloatingPos((prev) => ({
+          ...prev,
+          currX: latestX,
+          currY: latestY,
+        }));
+      }
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener('mousemove', onPointerMove);
+      window.removeEventListener('mouseup', onPointerUp);
+      window.removeEventListener('touchmove', onPointerMove);
+      window.removeEventListener('touchend', onPointerUp);
+
+      if (moved) {
+        // Snap to nearest side (Left or Right) upon release
+        const snapSide = latestX < window.innerWidth / 2 ? 'left' : 'right';
+        setFloatingPos({
+          side: snapSide,
+          topY: latestY,
+          currX: null,
+          currY: null,
+        });
+      }
+
+      setTimeout(() => setIsDragging(false), 150);
+    };
+
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
+    window.addEventListener('touchmove', onPointerMove, { passive: false });
+    window.addEventListener('touchend', onPointerUp);
+  };
+
   const [driverProfile, setDriverProfile] = useState(null);
   const [liveBookings, setLiveBookings] = useState([]);
   const [completedBookings, setCompletedBookings] = useState([]);
@@ -318,53 +399,41 @@ export default function HomePage({ user, onLogout }) {
     <div className="min-h-screen bg-[#F8F9FA] text-[#1C1C1E] flex flex-col font-sans">
       {/* Top Navbar */}
       <header className="w-full bg-white border-b border-[#E5E5EA] sticky top-0 z-30 shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#FFC000] text-black flex items-center justify-center shadow-md shadow-[#FFC000]/25">
-              <Car className="w-6 h-6 text-black" />
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2 sm:py-3.5 flex items-center justify-between">
+          {/* Logo Brand */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-[#FFC000] text-black flex items-center justify-center shadow-md shadow-[#FFC000]/25 shrink-0">
+              <Car className="w-4 h-4 sm:w-6 sm:h-6 text-black" />
             </div>
             <div>
-              <span className="text-xl font-extrabold tracking-wider text-[#1C1C1E] block leading-tight">
+              <span className="text-base sm:text-xl font-extrabold tracking-wider text-[#1C1C1E] block leading-tight">
                 RaahGo
               </span>
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#636366] flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-[#34C759] inline-block animate-pulse"></span>
-                Driver Partner Portal
+              <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-widest text-[#636366] hidden sm:flex items-center gap-1">
+                <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${isOnline ? 'bg-[#34C759] animate-pulse' : 'bg-[#8E8E93]'}`}></span>
+                Captain Portal
               </span>
             </div>
           </div>
 
-          {/* Center Toggle: Online / Offline */}
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleToggleOnline}
-              className={`px-4 sm:px-6 py-2 rounded-full font-extrabold text-xs transition-all duration-300 flex items-center gap-2 shadow-sm cursor-pointer ${isOnline
-                  ? 'bg-[#34C759] text-white shadow-emerald-500/20'
-                  : 'bg-[#8E8E93] text-white'
-                }`}
-            >
-              <Power className="w-4 h-4" />
-              <span>{isOnline ? 'ONLINE' : 'OFFLINE'}</span>
-            </button>
-          </div>
 
-          {/* Right Header Navigation & Profile */}
-          <div className="flex items-center gap-3 text-xs">
-            <div className="flex items-center gap-2.5 bg-[#F8F9FA] border border-[#E5E5EA] px-3 py-1.5 rounded-full">
-              <div className="w-7 h-7 rounded-full bg-[#FFC000] text-black font-extrabold flex items-center justify-center text-xs">
+
+          {/* Profile & Logout */}
+          <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-2 bg-[#F8F9FA] border border-[#E5E5EA] px-2 sm:px-3 py-1 sm:py-1.5 rounded-full">
+              <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-[#FFC000] text-black font-extrabold flex items-center justify-center text-xs shrink-0">
                 {driverName.charAt(0).toUpperCase()}
               </div>
-              <span className="font-extrabold text-[#1C1C1E] hidden sm:inline">
+              <span className="font-extrabold text-[#1C1C1E] hidden sm:inline truncate max-w-[120px]">
                 {driverName}
               </span>
               <button
                 type="button"
                 onClick={onLogout}
-                className="text-[#636366] hover:text-[#FF3B30] font-bold transition-colors ml-1 cursor-pointer"
+                className="text-[#636366] hover:text-[#FF3B30] font-bold transition-colors ml-0.5 cursor-pointer p-0.5"
                 title="Log Out"
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
             </div>
           </div>
@@ -493,10 +562,10 @@ export default function HomePage({ user, onLogout }) {
             {/* Trip Action Controls */}
             {activeAcceptedRide.status !== 'In Trip' ? (
               /* STAGE 1: ENTER 4-DIGIT PIN & START TRIP */
-              <div className="bg-[#FFF9E6] border border-[#FFC000] p-5 rounded-2xl space-y-4">
+              <div className="bg-[#FFF9E6] border border-[#FFC000] p-4 sm:p-5 rounded-2xl space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="text-xs font-extrabold text-[#8A6500] uppercase tracking-wider block flex items-center gap-1">
+                    <h4 className="text-xs font-extrabold text-[#8A6500] uppercase tracking-wider flex items-center gap-1.5">
                       <KeyRound className="w-4 h-4 text-[#8A6500]" /> Enter Passenger 4-Digit Security PIN
                     </h4>
                     <p className="text-xs text-[#1C1C1E] mt-0.5 font-medium">
@@ -505,8 +574,8 @@ export default function HomePage({ user, onLogout }) {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                  <div className="flex justify-center sm:justify-start gap-2.5">
                     {[0, 1, 2, 3].map((idx) => (
                       <input
                         key={idx}
@@ -522,7 +591,7 @@ export default function HomePage({ user, onLogout }) {
                             e.target.nextSibling.focus();
                           }
                         }}
-                        className="w-12 h-12 text-center font-extrabold text-xl bg-white border border-[#FFC000] rounded-xl focus:ring-2 focus:ring-[#FFC000] focus:outline-none shadow-sm"
+                        className="w-11 h-11 sm:w-12 sm:h-12 text-center font-extrabold text-xl bg-white border border-[#FFC000] rounded-xl focus:ring-2 focus:ring-[#FFC000] focus:outline-none shadow-xs text-[#1C1C1E]"
                       />
                     ))}
                   </div>
@@ -530,7 +599,7 @@ export default function HomePage({ user, onLogout }) {
                   <button
                     type="button"
                     onClick={handleVerifyPinAndStartTrip}
-                    className="flex-1 py-3 px-4 bg-[#34C759] hover:bg-[#2fb350] text-white font-extrabold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full sm:flex-1 py-3 px-4 bg-[#34C759] hover:bg-[#2fb350] active:scale-[0.99] text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <span>Verify PIN & Start Trip</span>
                     <ArrowRight className="w-4 h-4" />
@@ -545,7 +614,7 @@ export default function HomePage({ user, onLogout }) {
               </div>
             ) : (
               /* STAGE 2: IN TRIP -> COMPLETE TRIP & COLLECT FARE */
-              <div className="bg-[#007AFF]/10 border border-[#007AFF] p-5 rounded-2xl flex items-center justify-between">
+              <div className="bg-[#007AFF]/10 border border-[#007AFF] p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div>
                   <h4 className="text-sm font-extrabold text-[#1C1C1E]">
                     Arrived at Dropoff Destination
@@ -558,7 +627,7 @@ export default function HomePage({ user, onLogout }) {
                 <button
                   type="button"
                   onClick={handleCompleteTrip}
-                  className="py-3.5 px-6 bg-gradient-to-r from-[#FFC000] to-[#FF9F0A] hover:from-[#e6ad00] hover:to-[#e68f00] text-black font-extrabold text-sm rounded-xl shadow-lg shadow-[#FFC000]/30 transition-all flex items-center gap-2 cursor-pointer"
+                  className="w-full sm:w-auto py-3.5 px-6 bg-gradient-to-r from-[#FFC000] to-[#FF9F0A] hover:from-[#e6ad00] hover:to-[#e68f00] active:scale-[0.99] text-black font-extrabold text-sm rounded-xl shadow-lg shadow-[#FFC000]/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <CheckCircle className="w-5 h-5 text-black" />
                   <span>Complete Trip (Collect ₹{activeAcceptedRide.total_fare || '350'})</span>
@@ -692,6 +761,45 @@ export default function HomePage({ user, onLogout }) {
       <footer className="w-full text-center py-4 border-t border-[#E5E5EA] text-[11px] text-[#636366] bg-white mt-auto">
         &copy; {new Date().getFullYear()} RaahGo Driver Partner Network. All rights reserved.
       </footer>
+
+      {/* Mobile Accessibility Style Floating Duty Icon Button (Live Drag & Edge Snap) */}
+      <div
+        style={
+          floatingPos.currX !== null && floatingPos.currY !== null
+            ? { left: `${floatingPos.currX}px`, top: `${floatingPos.currY}px` }
+            : { top: `${floatingPos.topY}px` }
+        }
+        onMouseDown={handleDragStart}
+        onTouchStart={handleDragStart}
+        className={`fixed ${
+          floatingPos.currX !== null
+            ? ''
+            : floatingPos.side === 'right'
+            ? 'right-0'
+            : 'left-0'
+        } z-50 transition-all duration-75 select-none touch-none shadow-2xl`}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            if (!isDragging) handleToggleOnline();
+          }}
+          className={`p-3.5 ${
+            floatingPos.currX !== null
+              ? 'rounded-full border shadow-2xl scale-110'
+              : floatingPos.side === 'right'
+              ? 'rounded-l-full border-l border-y'
+              : 'rounded-r-full border-r border-y'
+          } border-white/40 text-white shadow-2xl backdrop-blur-md cursor-grab active:cursor-grabbing transition-transform duration-150 active:scale-95 flex items-center justify-center ${
+            isOnline
+              ? 'bg-[#34C759] text-white shadow-emerald-500/60 ring-4 ring-emerald-500/30 hover:bg-[#2fb350]'
+              : 'bg-[#FF3B30] text-white shadow-red-500/60 ring-4 ring-red-500/30 hover:bg-[#e03126]'
+          }`}
+          title={isOnline ? 'ONLINE - Tap to go Offline (Hold & drag to move)' : 'OFFLINE - Tap to go Online (Hold & drag to move)'}
+        >
+          <Power className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+        </button>
+      </div>
     </div>
   );
 }

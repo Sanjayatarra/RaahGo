@@ -15,11 +15,11 @@ class User(models.Model):
         SUPER_ADMIN = 'Super Admin', 'Super Admin'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    username = models.CharField(max_length=150, unique=True, null=True, blank=True)
+    username = models.CharField(max_length=150, null=True, blank=True)
     first_name = models.CharField(max_length=100, blank=True, null=True)
     last_name = models.CharField(max_length=100, blank=True, null=True)
-    email = models.EmailField(unique=True, null=True, blank=True)
-    phone_number = models.CharField(max_length=15, unique=True, null=True, blank=True)
+    email = models.EmailField(null=True, blank=True)
+    phone_number = models.CharField(max_length=15, null=True, blank=True)
     password = models.CharField(max_length=255, null=True, blank=True)
     profile_image = models.CharField(max_length=500, blank=True, null=True)
     gender = models.CharField(
@@ -42,7 +42,9 @@ class User(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    USERNAME_FIELD = 'username'
+    # Authentication is OTP-based. Using the UUID as Django's identity field
+    # allows usernames to be unique within a role instead of globally.
+    USERNAME_FIELD = 'id'
     REQUIRED_FIELDS = []
 
     @property
@@ -57,6 +59,15 @@ class User(models.Model):
         db_table = 'users'
         verbose_name = 'User'
         verbose_name_plural = 'Users'
+        constraints = [
+            models.UniqueConstraint(fields=['role', 'username'], name='unique_username_per_role'),
+            models.UniqueConstraint(
+                models.functions.Lower('email'),
+                models.F('role'),
+                name='unique_email_per_role',
+            ),
+            models.UniqueConstraint(fields=['role', 'phone_number'], name='unique_phone_per_role'),
+        ]
 
     def __str__(self):
         return f"{self.username} ({self.role})"

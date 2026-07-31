@@ -1,4 +1,7 @@
 import random
+import uuid
+from pathlib import Path
+from django.core.files.storage import default_storage
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -19,6 +22,64 @@ class DriverViewSet(viewsets.ModelViewSet):
     serializer_class = DriverSerializer
     permission_classes = [permissions.AllowAny]
 
+    @action(detail=False, methods=['get'])
+    def onboarding_profile(self, request):
+        phone_number = (request.query_params.get('phone_number') or '').replace(' ', '').replace('-', '')
+        email = request.query_params.get('email')
+        users = User.objects.filter(role=User.RoleChoices.DRIVER)
+        user = users.filter(phone_number=phone_number).first() if phone_number else None
+        if not user and email:
+            user = users.filter(email__iexact=email).first()
+        if not user:
+            return Response({'error': 'Captain profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        driver = Driver.objects.filter(user=user).first()
+        vehicle = driver.vehicles.select_related('vehicle_type').first() if driver else None
+        bank = driver.bank_accounts.filter(is_primary=True).first() if driver else None
+        emergency = driver.emergency_contacts.first() if driver else None
+        document_key_by_type = {
+            DriverDocument.DocumentType.LICENSE: 'license',
+            DriverDocument.DocumentType.RC: 'rc',
+            DriverDocument.DocumentType.INSURANCE: 'insurance',
+            DriverDocument.DocumentType.BACKGROUND_CHECK: 'aadhaar',
+            DriverDocument.DocumentType.PERMIT: 'photo',
+        }
+        documents = {}
+        if driver:
+            for document in driver.documents.all():
+                key = document_key_by_type.get(document.document_type)
+                if key:
+                    documents[key] = {
+                        'name': Path(document.document_url).name,
+                        'url': document.document_url,
+                        'status': document.verification_status,
+                    }
+
+        completed_steps = []
+        if user.first_name and user.last_name and user.email and user.date_of_birth:
+            completed_steps.append(3)
+        if vehicle:
+            completed_steps.append(5)
+        if len(documents) == 5:
+            completed_steps.append(6)
+        if bank:
+            completed_steps.append(7)
+        if emergency:
+            completed_steps.append(8)
+
+        return Response({
+            'user': UserSerializer(user).data,
+            'vehicle': {
+                'category': vehicle.vehicle_type.name,
+                'number': vehicle.registration_number,
+                'model': vehicle.model,
+            } if vehicle else None,
+            'documents': documents,
+            'bank': DriverBankAccountSerializer(bank).data if bank else None,
+            'emergency_contact': DriverEmergencyContactSerializer(emergency).data if emergency else None,
+            'completed_steps': completed_steps,
+        })
+
     @action(detail=False, methods=['post'])
     def complete_captain_profile(self, request):
         phone_number = request.data.get('phone_number')
@@ -27,14 +88,15 @@ class DriverViewSet(viewsets.ModelViewSet):
         last_name = request.data.get('last_name', '')
         username = request.data.get('username')
         gender = request.data.get('gender', 'Male')
+        date_of_birth = request.data.get('date_of_birth')
 
         # Vehicle info
-        vehicle_number = request.data.get('vehicle_number', 'DL 01 AB 1234')
-        vehicle_model = request.data.get('vehicle_model', 'Swift Dzire')
-        vehicle_category = request.data.get('vehicle_category', 'Sedan')
+        vehicle_number = request.data.get('vehicle_number')
+        vehicle_model = request.data.get('vehicle_model')
+        vehicle_category = request.data.get('vehicle_category')
 
         # License info
-        license_number = request.data.get('license_number', f"DL-{random.randint(10000, 99999)}")
+        license_number = request.data.get('license_number')
 
         # Bank info
         account_holder_name = request.data.get('account_holder_name', f"{first_name} {last_name}".strip())
@@ -52,24 +114,25 @@ class DriverViewSet(viewsets.ModelViewSet):
         # 1. Get or create User safely
         user = None
         if clean_phone:
-            user = User.objects.filter(phone_number=clean_phone).first()
+            user = User.objects.filter(phone_number=clean_phone, role=User.RoleChoices.DRIVER).first()
         if not user and email:
-            user = User.objects.filter(email__iexact=email).first()
+            user = User.objects.filter(email__iexact=email, role=User.RoleChoices.DRIVER).first()
 
         if not user:
             base_uname = username or f"captain_{random.randint(1000, 9999)}"
             final_uname = base_uname
-            if User.objects.filter(username=final_uname).exists():
+            if User.objects.filter(username=final_uname, role=User.RoleChoices.DRIVER).exists():
                 final_uname = f"{base_uname}_{random.randint(100, 999)}"
 
             user = User.objects.create(
                 username=final_uname,
-                email=email if email and not User.objects.filter(email__iexact=email).exists() else None,
-                phone_number=clean_phone if clean_phone and not User.objects.filter(phone_number=clean_phone).exists() else None,
+                email=email if email and not User.objects.filter(email__iexact=email, role=User.RoleChoices.DRIVER).exists() else None,
+                phone_number=clean_phone if clean_phone and not User.objects.filter(phone_number=clean_phone, role=User.RoleChoices.DRIVER).exists() else None,
                 role=User.RoleChoices.DRIVER,
                 first_name=first_name,
                 last_name=last_name,
                 gender=gender,
+                date_of_birth=date_of_birth or None,
                 is_verified=True,
                 is_phone_verified=True
             )
@@ -78,15 +141,16 @@ class DriverViewSet(viewsets.ModelViewSet):
             if first_name: user.first_name = first_name
             if last_name: user.last_name = last_name
             if gender: user.gender = gender
+            if date_of_birth: user.date_of_birth = date_of_birth
             
             # Safe username update (ignore if taken by another user)
             if username and username != user.username:
-                if not User.objects.filter(username=username).exclude(id=user.id).exists():
+                if not User.objects.filter(username=username, role=User.RoleChoices.DRIVER).exclude(id=user.id).exists():
                     user.username = username
             
             # Safe email update (ignore if taken by another user)
             if email and email != user.email:
-                if not User.objects.filter(email__iexact=email).exclude(id=user.id).exists():
+                if not User.objects.filter(email__iexact=email, role=User.RoleChoices.DRIVER).exclude(id=user.id).exists():
                     user.email = email
 
             user.is_verified = True
@@ -96,20 +160,52 @@ class DriverViewSet(viewsets.ModelViewSet):
         # 2. Get or create Driver record safely
         driver = Driver.objects.filter(user=user).first()
         if not driver:
-            final_lic = license_number
-            if Driver.objects.filter(license_number=final_lic).exists():
+            final_lic = license_number or f"PENDING-{uuid.uuid4()}"
+            if license_number and Driver.objects.filter(license_number=final_lic).exists():
                 final_lic = f"DL-{random.randint(10000, 99999)}"
 
             driver = Driver.objects.create(
                 user=user,
                 license_number=final_lic,
-                approval_status=Driver.ApprovalStatus.APPROVED,
-                availability_status=Driver.AvailabilityStatus.ONLINE
+                approval_status=Driver.ApprovalStatus.PENDING,
+                availability_status=Driver.AvailabilityStatus.OFFLINE
             )
         else:
-            driver.approval_status = Driver.ApprovalStatus.APPROVED
-            driver.availability_status = Driver.AvailabilityStatus.ONLINE
+            if license_number:
+                driver.license_number = license_number
             driver.save()
+
+        # Store actual multipart files and persist their storage URLs.
+        document_types = {
+            'document_license': DriverDocument.DocumentType.LICENSE,
+            'document_rc': DriverDocument.DocumentType.RC,
+            'document_insurance': DriverDocument.DocumentType.INSURANCE,
+            'document_aadhaar': DriverDocument.DocumentType.BACKGROUND_CHECK,
+            'document_photo': DriverDocument.DocumentType.PERMIT,
+        }
+        for field_name, document_type in document_types.items():
+            uploaded_file = request.FILES.get(field_name)
+            if not uploaded_file:
+                continue
+            extension = Path(uploaded_file.name).suffix.lower()
+            if extension not in {'.pdf', '.jpg', '.jpeg', '.png', '.webp'}:
+                return Response({'error': f'Unsupported file type for {field_name}.'}, status=status.HTTP_400_BAD_REQUEST)
+            if uploaded_file.size > 10 * 1024 * 1024:
+                return Response({'error': f'{field_name} must be 10 MB or smaller.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            storage_path = default_storage.save(
+                f'driver_documents/{driver.id}/{document_type}/{uploaded_file.name}',
+                uploaded_file,
+            )
+            document_url = request.build_absolute_uri(default_storage.url(storage_path))
+            DriverDocument.objects.update_or_create(
+                driver=driver,
+                document_type=document_type,
+                defaults={
+                    'document_url': document_url,
+                    'verification_status': DriverDocument.VerificationStatus.PENDING,
+                },
+            )
 
         # 3. Bank details
         if account_number:
@@ -162,7 +258,7 @@ class DriverViewSet(viewsets.ModelViewSet):
             )
 
         print(f"\n==========================================")
-        print(f"✅ [DJANGO BACKEND DRIVER SAVED TO DB]")
+        print("[DJANGO BACKEND DRIVER SAVED TO DB]")
         print(f"Captain User ID: {user.id}")
         print(f"Driver ID: {driver.id}")
         print(f"Phone: {user.phone_number}")
@@ -173,7 +269,8 @@ class DriverViewSet(viewsets.ModelViewSet):
             'status': 'Captain profile and driver details saved to database successfully.',
             'driver_id': str(driver.id),
             'user_id': str(user.id),
-            'user': UserSerializer(user).data
+            'user': UserSerializer(user).data,
+            'documents': DriverDocumentSerializer(driver.documents.all(), many=True).data,
         }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'])

@@ -11,7 +11,7 @@ const formatPhone = (val) => {
 };
 
 export default function CompleteProfileForm({ initialData, onComplete }) {
-  const [currentStep, setCurrentStep] = useState(1);
+  const [currentStep, setCurrentStep] = useState(3);
 
   // Form Data State
   const [phone, setPhone] = useState(initialData?.identifier && !initialData.identifier.includes('@') ? initialData.identifier : '98765 43210');
@@ -27,6 +27,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
 
   // Backend API vehicle types
   const [backendVehicleTypes, setBackendVehicleTypes] = useState([]);
+  const [completedSteps, setCompletedSteps] = useState(new Set());
 
   // Fetch initial profile & vehicle types from Django Backend API
   React.useEffect(() => {
@@ -36,7 +37,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
         const userPhone = initialData?.identifier && !initialData.identifier.includes('@') ? initialData.identifier.replace(/\D/g, '') : '';
         const userEmail = initialData?.identifier && initialData.identifier.includes('@') ? initialData.identifier : '';
 
-        let queryUrl = '/api/v1/users/users/';
+        let queryUrl = '/api/v1/drivers/profile/';
         if (userPhone) queryUrl += `?phone_number=${userPhone}`;
         else if (userEmail) queryUrl += `?email=${userEmail}`;
 
@@ -46,16 +47,42 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
 
         if (res.ok) {
           const data = await res.json();
-          const userList = Array.isArray(data) ? data : (data.results || []);
-          if (userList.length > 0) {
-            const u = userList[0];
+          const u = data.user;
+          if (u) {
             if (u.first_name) setFirstName(u.first_name);
             if (u.last_name) setLastName(u.last_name);
             if (u.username) setUsername(u.username);
             if (u.email) setEmail(u.email);
             if (u.phone_number) setPhone(formatPhone(u.phone_number));
             if (u.gender) setGender(u.gender);
+            if (u.date_of_birth) setDob(u.date_of_birth);
           }
+          if (data.vehicle) {
+            setVehicleCategory(data.vehicle.category || '');
+            setVehicleNumber(data.vehicle.number || '');
+            setVehicleModel(data.vehicle.model || '');
+          }
+          if (data.documents) {
+            setDocuments((previous) => {
+              const next = { ...previous };
+              Object.entries(data.documents).forEach(([key, document]) => {
+                next[key] = { uploaded: true, name: document.name, url: document.url };
+              });
+              return next;
+            });
+          }
+          if (data.bank) {
+            setAccountHolder(data.bank.account_holder_name || '');
+            setBankName(data.bank.bank_name || '');
+            setAccountNumber(data.bank.account_number || '');
+            setIfscCode(data.bank.ifsc_code || '');
+          }
+          if (data.emergency_contact) {
+            setEmergencyName(data.emergency_contact.name || '');
+            setEmergencyRelation(data.emergency_contact.relationship || '');
+            setEmergencyPhone(formatPhone(data.emergency_contact.phone_number || ''));
+          }
+          setCompletedSteps(new Set(data.completed_steps || []));
         }
       } catch (err) {
         console.log('Backend profile fetch note:', err);
@@ -82,6 +109,8 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
   }, []);
 
   const [formError, setFormError] = useState('');
+  const [basicDetailErrors, setBasicDetailErrors] = useState({});
+  const [emergencyErrors, setEmergencyErrors] = useState({});
 
   // Step 3: Basic Details
   const [firstName, setFirstName] = useState(initialData?.name?.split(' ')[0] || '');
@@ -306,15 +335,39 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
     };
 
     try {
+      const isDocumentStep = stepNum === 6;
+      let body;
+      let headers;
+      if (isDocumentStep) {
+        body = new FormData();
+        Object.entries(payload).forEach(([key, value]) => {
+          if (Array.isArray(value)) body.append(key, JSON.stringify(value));
+          else if (value !== null && value !== undefined) body.append(key, value);
+        });
+        Object.entries(documents).forEach(([key, document]) => {
+          if (document.file) body.append(`document_${key}`, document.file);
+        });
+        headers = {};
+      } else {
+        body = JSON.stringify(payload);
+        headers = { 'Content-Type': 'application/json' };
+      }
       const res = await fetch('/api/v1/drivers/complete_profile/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        headers,
+        body
       });
       const data = await res.json();
+      if (!res.ok) {
+        setFormError(data.error || 'Unable to save this step. Please try again.');
+        return false;
+      }
       console.log(`[Django Backend API Step ${stepNum} Saved]:`, data);
+      setCompletedSteps((previous) => new Set([...previous, stepNum]));
+      return true;
     } catch (err) {
-      console.log(`Step ${stepNum} API save note:`, err);
+      setFormError('Unable to connect to the server. Please try again.');
+      return false;
     }
   };
 
@@ -349,8 +402,13 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
     }
 
     if (currentStep === 3) {
-      if (!firstName.trim() || !lastName.trim() || !email.trim() || !dob) {
-        setFormError('Please fill out all required basic details (First Name, Last Name, Email, DOB).');
+      const errors = {};
+      if (!firstName.trim()) errors.firstName = 'First name is required.';
+      if (!lastName.trim()) errors.lastName = 'Last name is required.';
+      if (!email.trim()) errors.email = 'Email address is required.';
+      if (!dob) errors.dob = 'Date of birth is required.';
+      setBasicDetailErrors(errors);
+      if (Object.keys(errors).length > 0) {
         return;
       }
     }
@@ -385,8 +443,13 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
 
     if (currentStep === 8) {
       const cleanEm = emergencyPhone.replace(/\D/g, '');
-      if (!emergencyName.trim() || !emergencyRelation.trim() || !emergencyPhone.trim() || cleanEm.length < 10) {
-        setFormError('Please enter a valid Emergency Contact Name, Relationship, and 10-digit Phone Number.');
+      const errors = {};
+      if (!emergencyName.trim()) errors.name = 'Contact name is required.';
+      if (!emergencyRelation.trim()) errors.relationship = 'Relationship is required.';
+      if (!emergencyPhone.trim()) errors.phone = 'Phone number is required.';
+      else if (cleanEm.length !== 10) errors.phone = 'Enter a valid 10-digit phone number.';
+      setEmergencyErrors(errors);
+      if (Object.keys(errors).length > 0) {
         return;
       }
     }
@@ -399,7 +462,8 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
     }
 
     // Save step data to Django Backend API on every step!
-    await saveStepToBackend(currentStep);
+    const saved = await saveStepToBackend(currentStep);
+    if (!saved) return;
 
     if (currentStep < 12) {
       setCurrentStep((prev) => prev + 1);
@@ -407,7 +471,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
   };
 
   const handleBack = () => {
-    if (currentStep > 1) {
+    if (currentStep > 3) {
       setCurrentStep((prev) => prev - 1);
     }
   };
@@ -485,10 +549,11 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
     }
   };
 
-  const handleDocUpload = (docKey) => {
+  const handleDocUpload = (docKey, file) => {
+    if (!file) return;
     setDocuments((prev) => ({
       ...prev,
-      [docKey]: { uploaded: true, name: `${docKey}_uploaded.pdf` }
+      [docKey]: { uploaded: true, name: file.name, file }
     }));
   };
 
@@ -525,14 +590,14 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
         {/* Horizontal Scrollable Step Badges for Mobile */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
           {stepsList.map((st) => {
-            const isDone = currentStep > st.id;
+            const isDone = currentStep > st.id || completedSteps.has(st.id);
             const isCurr = currentStep === st.id;
             return (
               <button
                 key={st.id}
                 type="button"
                 onClick={() => {
-                  if (isDone) setCurrentStep(st.id);
+                  if (isDone && st.id >= 3) setCurrentStep(st.id);
                 }}
                 className={`flex items-center gap-1 shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
                   isCurr
@@ -575,14 +640,14 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
           <div className="space-y-1 relative overflow-y-auto max-h-[calc(100vh-280px)] lg:max-h-[480px] pr-1">
             {stepsList.map((step, index) => {
               const IconComp = step.icon;
-              const isCompleted = currentStep > step.id;
+              const isCompleted = currentStep > step.id || completedSteps.has(step.id);
               const isCurrent = currentStep === step.id;
 
               return (
                 <React.Fragment key={step.id}>
                   <div
                     onClick={() => {
-                      if (isCompleted) setCurrentStep(step.id);
+                      if (isCompleted && step.id >= 3) setCurrentStep(step.id);
                     }}
                     className={`flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200 ${
                       isCompleted
@@ -777,18 +842,26 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                   <input
                     type="text"
                     value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:outline-none"
+                    onChange={(e) => {
+                      setFirstName(e.target.value);
+                      setBasicDetailErrors((prev) => ({ ...prev, firstName: '' }));
+                    }}
+                    className={`w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border focus:outline-none ${basicDetailErrors.firstName ? 'border-[#FF3B30] focus:border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
                   />
+                  {basicDetailErrors.firstName && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{basicDetailErrors.firstName}</p>}
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-[#3A3A3C] mb-1">Last Name</label>
                   <input
                     type="text"
                     value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:outline-none"
+                    onChange={(e) => {
+                      setLastName(e.target.value);
+                      setBasicDetailErrors((prev) => ({ ...prev, lastName: '' }));
+                    }}
+                    className={`w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border focus:outline-none ${basicDetailErrors.lastName ? 'border-[#FF3B30] focus:border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
                   />
+                  {basicDetailErrors.lastName && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{basicDetailErrors.lastName}</p>}
                 </div>
               </div>
 
@@ -807,9 +880,13 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                 <input
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:outline-none"
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setBasicDetailErrors((prev) => ({ ...prev, email: '' }));
+                  }}
+                  className={`w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border focus:outline-none ${basicDetailErrors.email ? 'border-[#FF3B30] focus:border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
                 />
+                {basicDetailErrors.email && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{basicDetailErrors.email}</p>}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -830,9 +907,13 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                   <input
                     type="date"
                     value={dob}
-                    onChange={(e) => setDob(e.target.value)}
-                    className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:outline-none"
+                    onChange={(e) => {
+                      setDob(e.target.value);
+                      setBasicDetailErrors((prev) => ({ ...prev, dob: '' }));
+                    }}
+                    className={`w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border focus:outline-none ${basicDetailErrors.dob ? 'border-[#FF3B30] focus:border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
                   />
+                  {basicDetailErrors.dob && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{basicDetailErrors.dob}</p>}
                 </div>
               </div>
             </div>
@@ -960,13 +1041,17 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                         </span>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDocUpload(doc.key)}
+                    <label
                       className="px-3 py-1.5 bg-[#FFC000] hover:bg-[#e6ad00] text-black font-extrabold text-[10px] sm:text-[11px] rounded-xl transition-colors cursor-pointer shrink-0"
                     >
-                      Re-upload
-                    </button>
+                      {item.uploaded ? 'Re-upload' : 'Upload'}
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="image/*,.pdf"
+                        onChange={(e) => handleDocUpload(doc.key, e.target.files?.[0])}
+                      />
+                    </label>
                   </div>
                 );
               })}
@@ -1042,9 +1127,13 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                 <input
                   type="text"
                   value={emergencyName}
-                  onChange={(e) => setEmergencyName(e.target.value)}
-                  className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:outline-none"
+                  onChange={(e) => {
+                    setEmergencyName(e.target.value);
+                    setEmergencyErrors((prev) => ({ ...prev, name: '' }));
+                  }}
+                  className={`w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border focus:outline-none ${emergencyErrors.name ? 'border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
                 />
+                {emergencyErrors.name && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{emergencyErrors.name}</p>}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1053,18 +1142,27 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                   <input
                     type="text"
                     value={emergencyRelation}
-                    onChange={(e) => setEmergencyRelation(e.target.value)}
-                    className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:outline-none"
+                    onChange={(e) => {
+                      setEmergencyRelation(e.target.value);
+                      setEmergencyErrors((prev) => ({ ...prev, relationship: '' }));
+                    }}
+                    className={`w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border focus:outline-none ${emergencyErrors.relationship ? 'border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
                   />
+                  {emergencyErrors.relationship && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{emergencyErrors.relationship}</p>}
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-[#3A3A3C] mb-1">Phone Number</label>
                   <input
-                    type="text"
+                    type="tel"
                     value={emergencyPhone}
-                    onChange={(e) => setEmergencyPhone(e.target.value)}
-                    className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:outline-none"
+                    maxLength={11}
+                    onChange={(e) => {
+                      setEmergencyPhone(formatPhone(e.target.value));
+                      setEmergencyErrors((prev) => ({ ...prev, phone: '' }));
+                    }}
+                    className={`w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border focus:outline-none ${emergencyErrors.phone ? 'border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
                   />
+                  {emergencyErrors.phone && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{emergencyErrors.phone}</p>}
                 </div>
               </div>
             </div>
@@ -1187,7 +1285,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
             <button
               type="button"
               onClick={handleBack}
-              disabled={currentStep === 1}
+              disabled={currentStep === 3}
               className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl font-extrabold text-xs text-[#636366] hover:bg-[#F8F9FA] disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1 sm:gap-1.5 cursor-pointer"
             >
               <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Previous

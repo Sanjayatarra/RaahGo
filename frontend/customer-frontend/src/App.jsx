@@ -12,7 +12,7 @@ function App() {
           <Route path="/complete-profile" element={<Auth />} />
           <Route path="/home" element={<Auth />} />
           <Route path="/book-ride" element={<Auth />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/home" replace />} />
         </Routes>
       </div>
     </Router>

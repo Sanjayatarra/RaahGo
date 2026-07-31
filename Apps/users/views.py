@@ -17,6 +17,26 @@ from .serializers import (
 )
 
 
+def get_target_role(request):
+    """
+    Determines the target user role for authentication/registration.
+    Checks explicit 'role' in request payload, then HTTP headers (Origin/Referer)
+    for port 5175 (Driver) vs 5173 (Customer).
+    """
+    role = request.data.get('role')
+    valid_roles = [choice[0] for choice in User.RoleChoices.choices]
+    if role and role in valid_roles:
+        return role
+
+    origin = request.META.get('HTTP_ORIGIN', '') or request.META.get('HTTP_REFERER', '')
+    if '5175' in origin:
+        return User.RoleChoices.DRIVER
+    elif '5173' in origin:
+        return User.RoleChoices.CUSTOMER
+
+    return User.RoleChoices.CUSTOMER
+
+
 def send_otp_email(email, otp_code):
     if email and getattr(settings, 'EMAIL_HOST_USER', None):
         try:
@@ -36,6 +56,16 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
 
+    def get_queryset(self):
+        queryset = self.queryset
+        phone_number = self.request.query_params.get('phone_number')
+        email = self.request.query_params.get('email')
+        if phone_number:
+            queryset = queryset.filter(phone_number=phone_number)
+        if email:
+            queryset = queryset.filter(email__iexact=email)
+        return queryset
+
     @action(detail=True, methods=['patch'])
     def verify(self, request, pk=None):
         user = self.get_object()
@@ -48,7 +78,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def signup(self, request):
         email = request.data.get('email')
         phone_number = request.data.get('phone_number')
-        role = request.data.get('role', User.RoleChoices.CUSTOMER)
+        role = get_target_role(request)
 
         if not email and not phone_number:
             return Response(
@@ -56,18 +86,18 @@ class UserViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Check existing verified users
-        if email and User.objects.filter(email__iexact=email, is_verified=True).exists():
-            return Response({'error': 'User with this email already exists and is verified.'}, status=status.HTTP_400_BAD_REQUEST)
-        if phone_number and User.objects.filter(phone_number=phone_number, is_verified=True).exists():
-            return Response({'error': 'User with this phone number already exists and is verified.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Check existing verified users for this role
+        if email and User.objects.filter(email__iexact=email, role=role, is_verified=True).exists():
+            return Response({'error': f'User with this email already exists and is verified as {role}. Please log in.'}, status=status.HTTP_400_BAD_REQUEST)
+        if phone_number and User.objects.filter(phone_number=phone_number, role=role, is_verified=True).exists():
+            return Response({'error': f'User with this phone number already exists and is verified as {role}. Please log in.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Re-use or create user record
+        # Re-use or create user record for this role
         user = None
         if email:
-            user = User.objects.filter(email__iexact=email, is_verified=False).first()
+            user = User.objects.filter(email__iexact=email, role=role, is_verified=False).first()
         elif phone_number:
-            user = User.objects.filter(phone_number=phone_number, is_verified=False).first()
+            user = User.objects.filter(phone_number=phone_number, role=role, is_verified=False).first()
 
         if not user:
             temp_username = f"user_{random.randint(100000, 999999)}"
@@ -109,6 +139,7 @@ class UserViewSet(viewsets.ModelViewSet):
         email = request.data.get('email')
         phone_number = request.data.get('phone_number')
         otp_code = request.data.get('otp')
+        target_role = get_target_role(request)
 
         if not otp_code or not (user_id or email or phone_number):
             return Response(
@@ -119,14 +150,14 @@ class UserViewSet(viewsets.ModelViewSet):
         # Query user
         user = None
         if user_id:
-            user = User.objects.filter(id=user_id).first()
+            user = User.objects.filter(id=user_id, role=target_role).first()
         elif email:
-            user = User.objects.filter(email__iexact=email).first()
+            user = User.objects.filter(email__iexact=email, role=target_role).first()
         elif phone_number:
-            user = User.objects.filter(phone_number=phone_number).first()
+            user = User.objects.filter(phone_number=phone_number, role=target_role).first()
 
         if not user:
-            return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': f'User not found for role {target_role}.'}, status=status.HTTP_404_NOT_FOUND)
 
         # Lookup OTP
         otp_query = OTPVerification.objects.filter(
@@ -152,7 +183,9 @@ class UserViewSet(viewsets.ModelViewSet):
             user.is_verified = True
             user.save()
 
-            # Determine required fields for Step 3 (Profile details)
+            from django.contrib.auth.models import update_last_login
+            update_last_login(None, user)
+
             required_fields = []
             if user.role == User.RoleChoices.CUSTOMER:
                 required_fields.append('full_name')
@@ -230,18 +263,18 @@ class UserViewSet(viewsets.ModelViewSet):
 
         # Process missing email or phone
         if email and not user.email:
-            if User.objects.filter(email__iexact=email).exclude(id=user.id).exists():
+            if User.objects.filter(email__iexact=email, role=user.role).exclude(id=user.id).exists():
                 return Response({'error': 'This email is already in use by another user.'}, status=status.HTTP_400_BAD_REQUEST)
             user.email = email
         if phone_number and not user.phone_number:
-            if User.objects.filter(phone_number=phone_number).exclude(id=user.id).exists():
+            if User.objects.filter(phone_number=phone_number, role=user.role).exclude(id=user.id).exists():
                 return Response({'error': 'This phone number is already in use by another user.'}, status=status.HTTP_400_BAD_REQUEST)
             user.phone_number = phone_number
 
         # Update username if auto-generated
         if user.email and (not user.username or user.username.startswith('user_')):
             base_uname = user.email.split('@')[0]
-            user.username = base_uname if not User.objects.filter(username=base_uname).exclude(id=user.id).exists() else f"{base_uname}_{random.randint(100, 999)}"
+            user.username = base_uname if not User.objects.filter(username=base_uname, role=user.role).exclude(id=user.id).exists() else f"{base_uname}_{random.randint(100, 999)}"
 
         if password:
             user.password = password
@@ -258,6 +291,63 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response({
             'status': 'Profile completed successfully.',
             'user': serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def google_auth(self, request):
+        token = request.data.get('token')
+        target_role = get_target_role(request)
+        email = request.data.get('email')
+        first_name = request.data.get('first_name', '')
+        last_name = request.data.get('last_name', '')
+
+        if token:
+            try:
+                import jwt
+                decoded = jwt.decode(token, options={"verify_signature": False})
+                email = decoded.get('email', email)
+                first_name = decoded.get('given_name', first_name)
+                last_name = decoded.get('family_name', last_name)
+            except Exception:
+                pass
+
+        if not email:
+            return Response({'error': 'Failed to extract email from Google auth payload.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if user exists for target_role
+        user = User.objects.filter(email__iexact=email, role=target_role).first()
+
+        if not user:
+            # Check if user exists under a DIFFERENT role
+            other_user = User.objects.filter(email__iexact=email).first()
+            if other_user:
+                return Response({
+                    'error': f'user not not register'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Auto-create user for target_role via Google Auth
+            base_uname = email.split('@')[0]
+            temp_username = base_uname if not User.objects.filter(username=base_uname, role=target_role).exists() else f"{base_uname}_{random.randint(100, 999)}"
+            user = User.objects.create(
+                username=temp_username,
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                role=target_role,
+                is_verified=True,
+                is_email_verified=True
+            )
+
+        from django.contrib.auth.models import update_last_login
+        update_last_login(None, user)
+
+        refresh = RefreshToken.for_user(user)
+
+        return Response({
+            'status': 'Google authentication successful',
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': UserSerializer(user).data
         }, status=status.HTTP_200_OK)
 
 
@@ -290,9 +380,45 @@ class OTPVerificationViewSet(viewsets.ModelViewSet):
         email = request.data.get('email')
         purpose = request.data.get('purpose', 'Login')
         user_id = request.data.get('user_id')
+        target_role = get_target_role(request)
 
         if not phone_number and not email:
             return Response({'error': 'Either phone_number or email is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if purpose == 'Login':
+            role_user = None
+            if phone_number:
+                role_user = User.objects.filter(phone_number=phone_number, role=target_role).first()
+            elif email:
+                role_user = User.objects.filter(email__iexact=email, role=target_role).first()
+
+            if not role_user:
+                # Check if registered under a different role
+                other_user = None
+                if phone_number:
+                    other_user = User.objects.filter(phone_number=phone_number).first()
+                elif email:
+                    other_user = User.objects.filter(email__iexact=email).first()
+
+                if other_user:
+                    return Response({
+                        'error': f'user not registerd.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    return Response({'error': 'User is not registered. Please sign up first.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if purpose == 'Register':
+            if phone_number and User.objects.filter(phone_number=phone_number, role=target_role, is_verified=True).exists():
+                return Response({'error': f'User is already registered as {target_role}. Please log in.'}, status=status.HTTP_400_BAD_REQUEST)
+            if email and User.objects.filter(email__iexact=email, role=target_role, is_verified=True).exists():
+                return Response({'error': f'User is already registered as {target_role}. Please log in.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get existing user instance for target_role if present
+        associated_user = None
+        if phone_number:
+            associated_user = User.objects.filter(phone_number=phone_number, role=target_role).first()
+        elif email:
+            associated_user = User.objects.filter(email__iexact=email, role=target_role).first()
 
         otp_code = f"{random.randint(1000, 9999)}"
         expires_at = timezone.now() + timedelta(minutes=10)
@@ -300,7 +426,7 @@ class OTPVerificationViewSet(viewsets.ModelViewSet):
         otp_record = OTPVerification.objects.create(
             phone_number=phone_number if phone_number else None,
             email=email if email else None,
-            user_id=user_id,
+            user=associated_user or (User.objects.filter(id=user_id).first() if user_id else None),
             otp=otp_code,
             purpose=purpose,
             expires_at=expires_at
@@ -308,7 +434,7 @@ class OTPVerificationViewSet(viewsets.ModelViewSet):
 
         print(f"\n==========================================")
         print(f"🔑 [DJANGO BACKEND OTP GENERATED]")
-        print(f"Target: {email or phone_number}")
+        print(f"Target: {email or phone_number} | Role: {target_role}")
         print(f"Purpose: {purpose}")
         print(f"OTP Code: {otp_code}")
         print(f"==========================================\n")
@@ -328,6 +454,7 @@ class OTPVerificationViewSet(viewsets.ModelViewSet):
         phone_number = request.data.get('phone_number')
         email = request.data.get('email')
         otp_code = request.data.get('otp')
+        target_role = get_target_role(request)
 
         if not (phone_number or email) or not otp_code:
             return Response({'error': 'Either phone_number or email, and OTP code are required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -353,21 +480,39 @@ class OTPVerificationViewSet(viewsets.ModelViewSet):
             otp_record.save()
             user = otp_record.user
 
-            if not user:
-                if email:
-                    user = User.objects.filter(email__iexact=email).first()
-                elif phone_number:
-                    user = User.objects.filter(phone_number=phone_number).first()
+            # Look up user specifically with target_role
+            role_user = None
+            if email:
+                role_user = User.objects.filter(email__iexact=email, role=target_role).first()
+            elif phone_number:
+                role_user = User.objects.filter(phone_number=phone_number, role=target_role).first()
 
-                if not user:
-                    temp_username = f"user_{random.randint(100000, 999999)}"
-                    user = User.objects.create(
-                        username=temp_username,
-                        email=email if email else None,
-                        phone_number=phone_number if phone_number else None,
-                        role=User.RoleChoices.CUSTOMER,
-                        is_verified=True
-                    )
+            if role_user:
+                user = role_user
+            elif user and user.role != target_role:
+                return Response({
+                    'error': f'user not registered'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            elif not user:
+                other_user = None
+                if email:
+                    other_user = User.objects.filter(email__iexact=email).first()
+                elif phone_number:
+                    other_user = User.objects.filter(phone_number=phone_number).first()
+
+                if other_user and other_user.role != target_role:
+                    return Response({
+                        'error': f'user not registered'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                temp_username = f"user_{random.randint(100000, 999999)}"
+                user = User.objects.create(
+                    username=temp_username,
+                    email=email if email else None,
+                    phone_number=phone_number if phone_number else None,
+                    role=target_role,
+                    is_verified=True
+                )
 
             if email:
                 user.is_email_verified = True
@@ -375,6 +520,9 @@ class OTPVerificationViewSet(viewsets.ModelViewSet):
                 user.is_phone_verified = True
             user.is_verified = True
             user.save()
+
+            from django.contrib.auth.models import update_last_login
+            update_last_login(None, user)
 
             refresh = RefreshToken.for_user(user)
 

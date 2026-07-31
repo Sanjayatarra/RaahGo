@@ -42,7 +42,7 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
       setGoogleLoading(true);
       setError('');
       try {
-        const res = await fetch('/api/v1/users/google-auth/', {
+        const res = await fetch('/api/v1/driver/google-auth/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token: response.credential })
@@ -63,7 +63,8 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
             });
           }
         } else {
-          setError('Google authentication failed. Please enter your details below.');
+          const errData = await res.json().catch(() => ({}));
+          setError(errData.error || 'Google authentication failed. Please enter your details below.');
           setAuthMethod('email');
         }
       } catch (err) {
@@ -149,11 +150,11 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
     setIsLoading(true);
     const cleanTarget = authMethod === 'mobile' ? mobileNumber.replace(/\D/g, '') : emailAddress.trim();
     const payload = authMethod === 'mobile'
-      ? { phone_number: cleanTarget, purpose: 'Register' }
-      : { email: cleanTarget, purpose: 'Register' };
+      ? { phone_number: cleanTarget, purpose: 'Register', role: 'Driver' }
+      : { email: cleanTarget, purpose: 'Register', role: 'Driver' };
 
     try {
-      const response = await fetch('/api/v1/users/otps/send_otp/', {
+      const response = await fetch('/api/v1/driver/send-otp/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -165,10 +166,10 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
         setShowOtp(true);
         if (data.otp) console.log('[Django Backend] Sent Driver Signup OTP:', data.otp);
       } else {
-        setShowOtp(true);
+        setError(data.error || 'Failed to send OTP.');
       }
     } catch (err) {
-      setShowOtp(true);
+      setError('Network error. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -178,15 +179,15 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
     setError('');
     const cleanTarget = authMethod === 'mobile' ? mobileNumber.replace(/\D/g, '') : emailAddress.trim();
     const payload = authMethod === 'mobile'
-      ? { phone_number: cleanTarget, otp: otpCode }
-      : { email: cleanTarget, otp: otpCode };
+      ? { phone_number: cleanTarget, otp: otpCode, role: 'Driver' }
+      : { email: cleanTarget, otp: otpCode, role: 'Driver' };
 
     let jwtAccess = `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.driver_user_${Date.now()}`;
     let jwtRefresh = `driver_refresh_token_${Date.now()}`;
     let backendUser = null;
 
     try {
-      const response = await fetch('/api/v1/users/otps/verify_otp/', {
+      const response = await fetch('/api/v1/driver/verify-otp/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

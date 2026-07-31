@@ -37,7 +37,8 @@ ALLOWED_HOSTS = ['*']
 ALLOWED_HOSTS = [
     "127.0.0.1",
     "localhost",
-    "192.168.0.104",   # Replace with your PC's IP
+    "192.168.137.1",
+    "10.0.0.74"   # Replace with your PC's IP
 ]
 
 # Application definition
@@ -145,6 +146,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -172,11 +175,11 @@ REST_FRAMEWORK = {
 AUTH_USER_MODEL = 'users.User'
 
 # Simple JWT Configuration (Durations imported from .env)
-ACCESS_TOKEN_LIFETIME_MINUTES = int(os.getenv('ACCESS_TOKEN_LIFETIME_MINUTES', 60))
+ACCESS_TOKEN_LIFETIME_DAYS = int(os.getenv('ACCESS_TOKEN_LIFETIME_DAYS', 1))
 REFRESH_TOKEN_LIFETIME_DAYS = int(os.getenv('REFRESH_TOKEN_LIFETIME_DAYS', 7))
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=ACCESS_TOKEN_LIFETIME_MINUTES),
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=ACCESS_TOKEN_LIFETIME_DAYS),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=REFRESH_TOKEN_LIFETIME_DAYS),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
@@ -187,4 +190,3 @@ SIMPLE_JWT = {
     'USER_ID_CLAIM': 'user_id',
     'USER_MODEL': 'users.User',
 }
-

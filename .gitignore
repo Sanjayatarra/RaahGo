@@ -50,5 +50,6 @@ Thumbs.db
 tmp/
 .gemini/
 **/migrations/*.py
+!Apps/users/migrations/0003_user_role_scoped_unique_fields.py
 **/migrations/*.pyc
 */__pycache__/

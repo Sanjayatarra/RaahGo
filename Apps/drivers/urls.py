@@ -15,6 +15,6 @@ router.register(r'emergency-contacts', DriverEmergencyContactViewSet, basename='
 
 urlpatterns = [
     path('complete_profile/', DriverViewSet.as_view({'post': 'complete_captain_profile'})),
+    path('profile/', DriverViewSet.as_view({'get': 'onboarding_profile'})),
     path('drivers/complete_captain_profile/', DriverViewSet.as_view({'post': 'complete_captain_profile'})),
 ] + router.urls
-

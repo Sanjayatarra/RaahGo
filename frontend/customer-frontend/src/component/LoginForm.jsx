@@ -41,7 +41,7 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
       setGoogleLoading(true);
       setError('');
       try {
-        const res = await fetch('/api/v1/users/google-auth/', {
+        const res = await fetch('/api/v1/customer/google-auth/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token: response.credential })
@@ -63,7 +63,8 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
             });
           }
         } else {
-          setError('Google authentication failed. Please enter your email below.');
+          const errData = await res.json().catch(() => ({}));
+          setError(errData.error || 'Google authentication failed. Please enter your email below.');
           setAuthMethod('email');
         }
       } catch (err) {
@@ -143,11 +144,11 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
     setIsLoading(true);
     const cleanTarget = authMethod === 'mobile' ? mobileNumber.replace(/\D/g, '') : emailAddress.trim();
     const payload = authMethod === 'mobile'
-      ? { phone_number: cleanTarget, purpose: 'Login' }
-      : { email: cleanTarget, purpose: 'Login' };
+      ? { phone_number: cleanTarget, purpose: 'Login', role: 'Customer' }
+      : { email: cleanTarget, purpose: 'Login', role: 'Customer' };
 
     try {
-      const response = await fetch('/api/v1/users/otps/send_otp/', {
+      const response = await fetch('/api/v1/customer/send-otp/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -159,16 +160,10 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
         setShowOtp(true);
         if (data.otp) console.log('[Django Backend] Sent OTP:', data.otp);
       } else {
-        if (data.error && data.error.toLowerCase().includes('not found')) {
-          setNotExistAlert(true);
-          setTimeout(() => setNotExistAlert(false), 3000);
-        } else {
-          // Open OTP view anyway for dev testing
-          setShowOtp(true);
-        }
+        setError(data.error || 'Failed to send OTP.');
       }
     } catch (err) {
-      setShowOtp(true);
+      setError('Network error. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -179,15 +174,15 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
     setError('');
     const cleanTarget = authMethod === 'mobile' ? mobileNumber.replace(/\D/g, '') : emailAddress.trim();
     const payload = authMethod === 'mobile'
-      ? { phone_number: cleanTarget, otp: otpCode }
-      : { email: cleanTarget, otp: otpCode };
+      ? { phone_number: cleanTarget, otp: otpCode, role: 'Customer' }
+      : { email: cleanTarget, otp: otpCode, role: 'Customer' };
 
     let jwtAccess = `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.otp_user_${Date.now()}`;
     let jwtRefresh = `refresh_token_${Date.now()}`;
     let backendUser = null;
 
     try {
-      const response = await fetch('/api/v1/users/otps/verify_otp/', {
+      const response = await fetch('/api/v1/customer/verify-otp/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

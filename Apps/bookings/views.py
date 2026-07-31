@@ -117,6 +117,9 @@ class BookingViewSet(viewsets.ModelViewSet):
         v_name_map = {
             'bike': 'Bike',
             'auto': 'Auto',
+            'e-rickshaw': 'E-Rickshaw',
+            'car': 'Car',
+            'taxi': 'Taxi',
             'sedan': 'Sedan',
             'suv': 'SUV'
         }
@@ -191,6 +194,14 @@ class BookingViewSet(viewsets.ModelViewSet):
             kwargs['vehicle_type'] = vehicle_type
 
         booking = serializer.save(**kwargs)
+
+        # Create RideDetail with notes_for_driver if provided
+        notes = self.request.data.get('notes_for_driver') or self.request.data.get('notes')
+        RideDetail.objects.create(
+            booking=booking,
+            notes_for_driver=notes or "",
+            passenger_count=1
+        )
         
         # Log initial status tracking
         BookingTracking.objects.create(

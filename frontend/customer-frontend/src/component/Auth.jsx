@@ -28,7 +28,7 @@ export default function Auth() {
 
   // Sync route path & authentication
   useEffect(() => {
-    if (location.pathname === '/' || location.pathname === '/home' || location.pathname === '/book-ride') {
+    if (location.pathname === '/complete-profile') {
       if (!user) {
         navigate('/login', { replace: true });
       }
@@ -66,7 +66,7 @@ export default function Auth() {
   };
 
   // Render Full-Width Home Page when on /home
-  if (pathView === 'home' && user) {
+  if (pathView === 'home') {
     return <HomePage user={user} onLogout={handleLogout} />;
   }
 
@@ -156,7 +156,7 @@ export default function Auth() {
               ) : (
                 <LoginForm
                   onSuccess={handleAuthSuccess}
-                  onSwitchToSignup={() => navigate('/signup')}
+                  onSwitchToSignup={(prefill) => navigate('/signup', { state: { prefill } })}
                 />
               )}
             </div>

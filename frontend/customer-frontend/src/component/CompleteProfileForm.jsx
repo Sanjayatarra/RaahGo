@@ -68,7 +68,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
       : { email: email.trim(), purpose: 'ProfileVerification' };
 
     try {
-      const res = await fetch('/api/v1/users/otps/send_otp/', {
+      const res = await fetch('/api/v1/customer/send-otp/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -116,7 +116,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
       : { email: email.trim(), otp_code: code, purpose: 'ProfileVerification' };
 
     try {
-      const res = await fetch('/api/v1/users/otps/verify_otp/', {
+      const res = await fetch('/api/v1/customer/verify-otp/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -211,7 +211,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
     };
 
     try {
-      const response = await fetch('/api/v1/users/profile/complete/', {
+      const response = await fetch('/api/v1/customer/complete-profile/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

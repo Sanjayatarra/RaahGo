@@ -26,8 +26,12 @@ export default function Auth() {
   const pathView = getTabFromPath(location.pathname);
 
   useEffect(() => {
-    if (location.pathname === '/' || location.pathname === '/home') {
-      if (!user) {
+    if (user) {
+      if (location.pathname === '/' || location.pathname === '/login' || location.pathname === '/signup') {
+        navigate('/home', { replace: true });
+      }
+    } else {
+      if (location.pathname === '/' || location.pathname === '/home') {
         navigate('/login', { replace: true });
       }
     }
@@ -43,13 +47,9 @@ export default function Auth() {
 
     setPendingAuthData(authData);
 
-    if (!data.profileCompleted && !data.user?.vehicle_number) {
-      navigate('/complete-profile');
-    } else {
-      setUser(authData);
-      localStorage.setItem('raahgo_driver_user', JSON.stringify(authData));
-      navigate('/home');
-    }
+    setUser(authData);
+    localStorage.setItem('raahgo_driver_user', JSON.stringify(authData));
+    navigate('/home');
   };
 
   const handleProfileComplete = (completedData) => {
