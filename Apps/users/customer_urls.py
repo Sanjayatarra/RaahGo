@@ -1,4 +1,5 @@
 from django.urls import path
+from rest_framework_simplejwt.views import TokenRefreshView
 from .customer_views import (
     CustomerSendOTPView,
     CustomerVerifyOTPView,
@@ -15,4 +16,5 @@ urlpatterns = [
     path('verify-signup-otp/', CustomerVerifySignupOTPView.as_view(), name='customer-verify-signup-otp'),
     path('complete-profile/', CustomerCompleteProfileView.as_view(), name='customer-complete-profile'),
     path('google-auth/', CustomerGoogleAuthView.as_view(), name='customer-google-auth'),
+    path('token/refresh/', TokenRefreshView.as_view(), name='customer-token-refresh'),
 ]

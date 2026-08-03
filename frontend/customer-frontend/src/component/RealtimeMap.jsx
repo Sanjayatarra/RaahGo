@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MapPin, Navigation, Car, LocateFixed, Compass, Route, ChevronDown, ChevronUp, Clock, Milestone } from 'lucide-react';
 
-export default function RealtimeMap({ pickup, destination, pickupCoords, destCoords, selectedRide, onRouteCalculated }) {
+export default function RealtimeMap({ pickup, destination, pickupCoords, destCoords, selectedRide, onRouteCalculated, onLocateMe }) {
   const mapRef = useRef(null);
   const leafletInstance = useRef(null);
   const markersRef = useRef([]);
@@ -57,10 +57,10 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
       zoomControl: false,
     });
 
-    // Clean, modern OpenStreetMap CartoDB tiles
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    // OpenStreetMap Standard Street Map tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -100,17 +100,53 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
     const pLat = pickupCoords?.lat || defaultLat;
     const pLng = pickupCoords?.lng || defaultLng;
 
+    // Smoothly fly & center map view to user's pickup location
+    if (pickupCoords?.lat && pickupCoords?.lng && (!destCoords?.lat || !destCoords?.lng)) {
+      map.flyTo([pickupCoords.lat, pickupCoords.lng], 16, { animate: true, duration: 0.8 });
+    }
+
     const bounds = L.latLngBounds();
 
-    // 1. Pickup Marker (Green Icon)
-    const pickupIcon = L.divIcon({
-      className: 'custom-pickup-pin',
-      html: `<div style="background-color: #34C759; color: white; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px; border: 3px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">🟢</div>`,
-      iconSize: [36, 36],
-      iconAnchor: [18, 18],
+    // 0. Live GPS Blue Pulsing Radar Icon
+    const liveGpsHtml = `
+      <div style="position: relative; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
+        <div style="position: absolute; width: 42px; height: 42px; background: rgba(0, 122, 255, 0.35); border-radius: 50%; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+        <div style="position: absolute; width: 24px; height: 24px; background: rgba(0, 122, 255, 0.2); border-radius: 50%;"></div>
+        <div style="background-color: #007AFF; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 12px rgba(0,122,255,0.8); z-index: 5;"></div>
+      </div>
+    `;
+
+    const liveGpsIcon = L.divIcon({
+      className: 'custom-live-gps-dot',
+      html: liveGpsHtml,
+      iconSize: [48, 48],
+      iconAnchor: [24, 24],
     });
 
-    const pickupMarker = L.marker([pLat, pLng], { icon: pickupIcon })
+    const liveGpsMarker = L.marker([pLat, pLng], { icon: liveGpsIcon, zIndexOffset: 2000 })
+      .addTo(map)
+      .bindPopup(`<b>Your Live GPS Location</b><br/>${pickup || 'GPS Active'}`);
+    
+    markersRef.current.push(liveGpsMarker);
+
+    // 1. Pickup Location Teardrop Pin Marker with 📍 Icon
+    const pickupPinHtml = `
+      <div style="position: relative; width: 44px; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;">
+        <div style="background-color: #34C759; color: white; width: 38px; height: 38px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center; border: 3px solid white; box-shadow: 0 6px 16px rgba(0,0,0,0.4); z-index: 10;">
+          <span style="transform: rotate(45deg); font-size: 16px; font-weight: bold;">📍</span>
+        </div>
+        <div style="width: 16px; height: 5px; background: rgba(0,0,0,0.3); border-radius: 50%; margin-top: 1px; filter: blur(1px);"></div>
+      </div>
+    `;
+
+    const pickupIcon = L.divIcon({
+      className: 'custom-pickup-pin',
+      html: pickupPinHtml,
+      iconSize: [44, 54],
+      iconAnchor: [22, 54],
+    });
+
+    const pickupMarker = L.marker([pLat, pLng], { icon: pickupIcon, zIndexOffset: 3000 })
       .addTo(map)
       .bindPopup(`<b>Pickup Location</b><br/>${pickup || 'Your current location'}`);
     
@@ -120,9 +156,9 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
     // 2. Real-time Nearby Cabs
     const vehicleIcon = selectedRide === 'bike' ? '🏍️' : selectedRide === 'auto' ? '🛺' : selectedRide === 'suv' ? '🚙' : '🚗';
     const nearbyCabs = [
-      { lat: pLat + 0.004, lng: pLng + 0.003, icon: vehicleIcon, name: `${selectedRide.toUpperCase()} (1m away)` },
-      { lat: pLat - 0.003, lng: pLng + 0.005, icon: vehicleIcon, name: `${selectedRide.toUpperCase()} (3m away)` },
-      { lat: pLat + 0.006, lng: pLng - 0.004, icon: vehicleIcon, name: `${selectedRide.toUpperCase()} (4m away)` }
+      { lat: pLat + 0.003, lng: pLng + 0.002, icon: vehicleIcon, name: `${selectedRide.toUpperCase()} (1m away)` },
+      { lat: pLat - 0.002, lng: pLng + 0.004, icon: vehicleIcon, name: `${selectedRide.toUpperCase()} (3m away)` },
+      { lat: pLat + 0.004, lng: pLng - 0.003, icon: vehicleIcon, name: `${selectedRide.toUpperCase()} (4m away)` }
     ];
 
     nearbyCabs.forEach((cab) => {
@@ -145,14 +181,23 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
       const dLat = destCoords.lat;
       const dLng = destCoords.lng;
 
+      const destPinHtml = `
+        <div style="position: relative; width: 44px; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;">
+          <div style="background-color: #FF3B30; color: white; width: 38px; height: 38px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center; border: 3px solid white; box-shadow: 0 6px 16px rgba(0,0,0,0.4); z-index: 10;">
+            <span style="transform: rotate(45deg); font-size: 16px; font-weight: bold;">🏁</span>
+          </div>
+          <div style="width: 16px; height: 5px; background: rgba(0,0,0,0.3); border-radius: 50%; margin-top: 1px; filter: blur(1px);"></div>
+        </div>
+      `;
+
       const destIcon = L.divIcon({
         className: 'custom-dest-pin',
-        html: `<div style="background-color: #FF3B30; color: white; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px; border: 3px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">🔴</div>`,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18],
+        html: destPinHtml,
+        iconSize: [44, 54],
+        iconAnchor: [22, 54],
       });
 
-      const destMarker = L.marker([dLat, dLng], { icon: destIcon })
+      const destMarker = L.marker([dLat, dLng], { icon: destIcon, zIndexOffset: 3000 })
         .addTo(map)
         .bindPopup(`<b>Destination</b><br/>${destination}`);
 
@@ -161,8 +206,16 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
 
       setIsRouting(true);
       
+      // Immediately fit map bounds to center Pickup and Destination pins cleanly
+      const routeBounds = L.latLngBounds([
+        [pLat, pLng],
+        [dLat, dLng]
+      ]);
+      map.invalidateSize();
+      map.fitBounds(routeBounds, { padding: [40, 40], maxZoom: 15 });
+
       // Query Multi-Route Driving Engine via Django REST Framework Backend Proxy API
-      const backendRouteUrl = `/api/v1/services/services/location/route/?pLat=${pLat}&pLng=${pLng}&dLat=${dLat}&dLng=${dLng}`;
+      const backendRouteUrl = `/api/v1/services/location/route/?pLat=${pLat}&pLng=${pLng}&dLat=${dLat}&dLng=${dLng}`;
 
       fetch(backendRouteUrl)
         .then((res) => res.json())
@@ -243,17 +296,24 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
               rt.latLngs.forEach(([lLat, lLng]) => bounds.extend([lLat, lLng]));
             });
 
-            map.fitBounds(bounds, { padding: [50, 50] });
+            map.invalidateSize();
+            map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
           }
         })
         .catch((err) => {
           console.error('OSRM Multi-Route Error:', err);
+          if (destCoords?.lat && destCoords?.lng) {
+            const fitB = L.latLngBounds([[pLat, pLng], [destCoords.lat, destCoords.lng]]);
+            map.invalidateSize();
+            map.fitBounds(fitB, { padding: [40, 40], maxZoom: 15 });
+          }
         })
         .finally(() => {
           setIsRouting(false);
         });
     } else {
-      map.setView([pLat, pLng], 14);
+      map.invalidateSize();
+      map.setView([pLat, pLng], 15);
       setRoutes([]);
     }
   }, [mapLoaded, pickup, destination, pickupCoords, destCoords, selectedRide]);
@@ -273,16 +333,36 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
         <button
           type="button"
           onClick={() => {
+            if (onLocateMe) {
+              onLocateMe();
+            }
             if (leafletInstance.current && pickupCoords?.lat) {
-              leafletInstance.current.setView([pickupCoords.lat, pickupCoords.lng], 15);
+              leafletInstance.current.flyTo([pickupCoords.lat, pickupCoords.lng], 16, {
+                animate: true,
+                duration: 1
+              });
             }
           }}
-          className="bg-white hover:bg-[#F8F9FA] text-[#1C1C1E] p-2.5 rounded-2xl border border-[#E5E5EA] shadow-lg pointer-events-auto transition-transform active:scale-95"
-          title="Recenter Map"
+          className="bg-white hover:bg-[#F8F9FA] text-[#1C1C1E] p-2.5 rounded-2xl border border-[#E5E5EA] shadow-xl pointer-events-auto transition-all active:scale-95 cursor-pointer flex items-center gap-1 font-bold text-xs"
+          title="Recenter Map to Current GPS Location"
         >
-          <LocateFixed className="w-4 h-4 text-[#007AFF]" />
+          <LocateFixed className="w-4 h-4 text-[#007AFF] animate-pulse" />
         </button>
       </div>
+
+      {/* Floating Center Location Pin Overlay */}
+      {(!destCoords?.lat || !destCoords?.lng) && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-full z-[300] pointer-events-none flex flex-col items-center">
+          <div className="bg-[#1C1C1E] text-white text-[10px] font-black px-2.5 py-1 rounded-full shadow-xl mb-1 border border-white/20 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#34C759] animate-pulse"></span>
+            <span>Pickup Point</span>
+          </div>
+          <div className="w-9 h-9 bg-[#34C759] text-white rounded-full border-2 border-white shadow-2xl flex items-center justify-center font-bold text-base">
+            📍
+          </div>
+          <div className="w-3.5 h-1 bg-black/40 rounded-full blur-[1px] mt-0.5"></div>
+        </div>
+      )}
 
       {/* Leaflet Map Canvas */}
       <div ref={mapRef} className="w-full h-full min-h-[440px] z-10"></div>

@@ -4,6 +4,7 @@ import LoginForm from './LoginForm';
 import SignupForm from './SignupForm';
 import CompleteProfileForm from './CompleteProfileForm';
 import HomePage from './HomePage';
+import BookRidePage from './BookRidePage';
 import { Car, Shield, Sparkles, LogOut } from 'lucide-react';
 
 export default function Auth() {
@@ -14,7 +15,8 @@ export default function Auth() {
   const getTabFromPath = (pathname) => {
     if (pathname === '/signup') return 'signup';
     if (pathname === '/complete-profile') return 'complete-profile';
-    if (pathname === '/home' || pathname === '/book-ride') return 'home';
+    if (pathname === '/book-ride') return 'book-ride';
+    if (pathname === '/home') return 'home';
     return 'login';
   };
 
@@ -68,6 +70,11 @@ export default function Auth() {
   // Render Full-Width Home Page when on /home
   if (pathView === 'home') {
     return <HomePage user={user} onLogout={handleLogout} />;
+  }
+
+  // Render Standalone Book Ride Page when on /book-ride
+  if (pathView === 'book-ride') {
+    return <BookRidePage user={user} onLogout={handleLogout} />;
   }
 
   const activeUser = user || pendingAuthData;

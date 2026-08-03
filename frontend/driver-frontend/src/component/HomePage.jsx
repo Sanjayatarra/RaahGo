@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Car, Navigation, Power, DollarSign, Star, CheckCircle, Clock, ShieldCheck, MapPin, Phone, User, LogOut, RefreshCw, KeyRound, ArrowRight, Compass, AlertCircle, X, Sliders, MoveLeft, MoveRight } from 'lucide-react';
+import { fetchWithAuth } from '../common/apiClient';
 import RealtimeMap from './RealtimeMap';
 
 export default function HomePage({ user, onLogout }) {
@@ -241,13 +242,9 @@ export default function HomePage({ user, onLogout }) {
           (err) => {
             console.log('Device Geolocation Notice:', err);
             if (driverProfile?.id) {
-              const token = localStorage.getItem('driver_access_token');
-              fetch('/api/v1/tracking/locations/save_driver_location/', {
+              fetchWithAuth('/api/v1/tracking/locations/save_driver_location/', {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ driver_id: driverProfile.id, latitude: captainLocation.lat, longitude: captainLocation.lng, is_online: true })
               }).catch((e) => console.log('Tracking fallback save notice:', e));
             }
@@ -272,7 +269,7 @@ export default function HomePage({ user, onLogout }) {
     setLiveBookings((prev) => prev.filter((b) => b.id !== bookingId));
 
     try {
-      const res = await fetch(`/api/v1/bookings/bookings/${bookingId}/accept/`, {
+      const res = await fetchWithAuth(`/api/v1/bookings/bookings/${bookingId}/accept/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ driver_id: driverProfile?.id })
@@ -292,7 +289,7 @@ export default function HomePage({ user, onLogout }) {
     setLiveBookings((prev) => prev.filter((b) => b.id !== bookingId));
 
     try {
-      await fetch(`/api/v1/bookings/bookings/${bookingId}/decline/`, {
+      await fetchWithAuth(`/api/v1/bookings/bookings/${bookingId}/decline/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Captain unavailable' })
@@ -313,7 +310,7 @@ export default function HomePage({ user, onLogout }) {
 
     if (activeAcceptedRide?.id) {
       try {
-        const res = await fetch(`/api/v1/bookings/bookings/${activeAcceptedRide.id}/start_trip/`, {
+        const res = await fetchWithAuth(`/api/v1/bookings/bookings/${activeAcceptedRide.id}/start_trip/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pin: pinStr })
@@ -334,14 +331,14 @@ export default function HomePage({ user, onLogout }) {
   const handleCompleteTrip = async () => {
     if (activeAcceptedRide?.id) {
       try {
-        const res = await fetch(`/api/v1/bookings/bookings/${activeAcceptedRide.id}/complete/`, {
+        const res = await fetchWithAuth(`/api/v1/bookings/bookings/${activeAcceptedRide.id}/complete/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
         });
         if (res.ok) {
           setActiveAcceptedRide(null);
           setEnteredPin(['', '', '', '']);
-          const bRes = await fetch('/api/v1/bookings/bookings/');
+          const bRes = await fetchWithAuth('/api/v1/bookings/bookings/');
           if (bRes.ok) {
             const bData = await bRes.json();
             const bList = Array.isArray(bData) ? bData : (bData.results || []);
@@ -361,14 +358,10 @@ export default function HomePage({ user, onLogout }) {
 
     if (driverProfile?.id) {
       try {
-        const token = localStorage.getItem('driver_access_token');
-        const res = await fetch(`/api/v1/drivers/drivers/${driverProfile.id}/toggle_availability/`, {
+        const res = await fetchWithAuth(`/api/v1/drivers/drivers/${driverProfile.id}/toggle_availability/`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-          },
-          body: JSON.stringify({ status: newStatus })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ availability_status: newStatus })
         });
         const data = await res.json();
         if (res.ok) {

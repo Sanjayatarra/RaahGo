@@ -199,10 +199,6 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
       ? { phone_number: cleanTarget, otp: otpCode, role: 'Customer' }
       : { email: cleanTarget, otp: otpCode, role: 'Customer' };
 
-    let jwtAccess = `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.otp_user_${Date.now()}`;
-    let jwtRefresh = `refresh_token_${Date.now()}`;
-    let backendUser = null;
-
     try {
       const response = await fetch('/api/v1/customer/verify-otp/', {
         method: 'POST',
@@ -212,9 +208,14 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
 
       const data = await response.json();
       if (response.ok) {
-        if (data.access) jwtAccess = data.access;
-        if (data.refresh) jwtRefresh = data.refresh;
-        if (data.user) backendUser = data.user;
+        const jwtAccess = data.access;
+        const jwtRefresh = data.refresh;
+        const backendUser = data.user;
+
+        if (!jwtAccess || !jwtRefresh) {
+          setError('Authentication failed: Server did not return valid JWT tokens.');
+          return;
+        }
 
         localStorage.setItem('access_token', jwtAccess);
         localStorage.setItem('refresh_token', jwtRefresh);
