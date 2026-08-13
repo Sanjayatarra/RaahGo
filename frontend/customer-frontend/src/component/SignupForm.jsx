@@ -246,8 +246,8 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
         <div className="space-y-5 animate-fade-in">
           {/* Header text */}
           <div className="text-center">
-            <h2 className="text-2xl font-extrabold text-[#1C1C1E] tracking-tight">Create Your Account</h2>
-            <p className="text-xs text-[#636366] mt-1">Join RaahGo with Mobile Number or Gmail</p>
+            <h2 className="text-2xl font-extrabold text-gray-900 tracking-tight">Create Your Account</h2>
+            <p className="text-xs text-gray-500 mt-1">Join RaahGo with Mobile Number or Gmail</p>
           </div>
 
           {/* Native Google OAuth Button */}
@@ -255,7 +255,7 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
             type="button"
             onClick={handleGoogleAuthClick}
             disabled={googleLoading}
-            className="w-full py-3 px-4 bg-white hover:bg-[#F8F9FA] border border-[#E5E5EA] rounded-xl text-[#1C1C1E] text-xs font-bold transition-all duration-200 flex items-center justify-center gap-3 hover:border-[#C7C7CC] active:scale-[0.99]"
+            className="w-full py-3 px-4 bg-white hover:bg-gray-50 border border-gray-200 rounded-xl text-gray-900 text-xs font-bold transition-all duration-200 flex items-center justify-center gap-3 hover:border-gray-300 active:scale-95"
           >
             {googleLoading ? (
               <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
@@ -284,14 +284,14 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
 
           {/* Divider */}
           <div className="relative flex items-center justify-center my-2">
-            <div className="border-t border-[#E5E5EA] w-full"></div>
-            <span className="bg-white px-3 text-[11px] font-bold text-[#8E8E93] uppercase tracking-wider absolute">
+            <div className="border-t border-gray-200 w-full"></div>
+            <span className="bg-white px-3 text-xs font-bold text-gray-400 uppercase tracking-wider absolute">
               OR SIGN UP WITH
             </span>
           </div>
 
           {/* Toggle between Mobile & Email */}
-          <div className="flex bg-[#F8F9FA] p-1 rounded-xl border border-[#E5E5EA]">
+          <div className="flex bg-gray-50 p-1 rounded-xl border border-gray-200">
             <button
               type="button"
               onClick={() => {
@@ -300,8 +300,8 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
               }}
               className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${
                 authMethod === 'mobile'
-                  ? 'bg-[#FFC000] text-black shadow-sm'
-                  : 'text-[#636366] hover:text-[#1C1C1E]'
+                  ? 'bg-yellow-400 text-black shadow-sm'
+                  : 'text-gray-500 hover:text-gray-900'
               }`}
             >
               <Phone className="w-3.5 h-3.5" /> Mobile Number
@@ -314,8 +314,8 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
               }}
               className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${
                 authMethod === 'email'
-                  ? 'bg-[#FFC000] text-black shadow-sm'
-                  : 'text-[#636366] hover:text-[#1C1C1E]'
+                  ? 'bg-yellow-400 text-black shadow-sm'
+                  : 'text-gray-500 hover:text-gray-900'
               }`}
             >
               <Mail className="w-3.5 h-3.5" /> Gmail / Email
@@ -326,11 +326,11 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
           <form onSubmit={handleSendOtp} className="space-y-3.5">
             {/* Name Input */}
             <div>
-              <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+              <label className="block text-xs font-bold text-gray-700 mb-1">
                 Full Name
               </label>
               <div className="relative">
-                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#636366]" />
+                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                 <input
                   type="text"
                   value={name}
@@ -339,20 +339,20 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
                     if (error) setError('');
                   }}
                   placeholder="John Doe"
-                  className="w-full bg-white text-[#1C1C1E] font-bold placeholder:font-normal placeholder:text-[#8E8E93] text-sm rounded-xl py-2.5 pl-10 pr-4 border border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20 transition-all duration-200 focus:outline-none"
+                  className="w-full bg-white text-gray-900 font-bold placeholder:font-normal placeholder:text-gray-400 text-sm rounded-xl py-2.5 pl-10 pr-4 border border-gray-200 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 transition-all duration-200 focus:outline-none"
                 />
               </div>
             </div>
 
             {/* Mobile / Gmail Input */}
             <div>
-              <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+              <label className="block text-xs font-bold text-gray-700 mb-1">
                 {authMethod === 'mobile' ? 'Mobile Number' : 'Gmail / Email Address'}
               </label>
               <div className="relative">
                 {authMethod === 'mobile' ? (
                   <>
-                    <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center text-[#3A3A3C] font-bold text-base border-r border-[#E5E5EA] pr-2.5 h-6">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center text-gray-700 font-bold text-base border-r border-gray-200 pr-2.5 h-6">
                       <span>+91</span>
                     </div>
                     <input
@@ -365,16 +365,16 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
                         if (error) setError('');
                       }}
                       placeholder="98765 43210"
-                      className={`w-full bg-white text-[#1C1C1E] font-extrabold text-base sm:text-lg tracking-wide placeholder:font-normal placeholder:text-[#8E8E93] placeholder:tracking-normal rounded-xl py-2 pl-14 pr-3 border transition-all duration-200 focus:outline-none ${
+                      className={`w-full bg-white text-gray-900 font-extrabold text-base sm:text-lg tracking-wide placeholder:font-normal placeholder:text-gray-400 placeholder:tracking-normal rounded-xl py-2 pl-14 pr-3 border transition-all duration-200 focus:outline-none ${
                         error
-                          ? 'border-[#FF3B30] focus:ring-2 focus:ring-[#FF3B30]/20'
-                          : 'border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20'
+                          ? 'border-red-500 focus:ring-2 focus:ring-red-500/20'
+                          : 'border-gray-200 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20'
                       }`}
                     />
                   </>
                 ) : (
                   <>
-                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-5 text-[#636366]" />
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-5 text-gray-500" />
                     <input
                       type="email"
                       value={emailAddress}
@@ -383,10 +383,10 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
                         if (error) setError('');
                       }}
                       placeholder="name@gmail.com"
-                      className={`w-full bg-white text-[#1C1C1E] font-bold text-base tracking-wide placeholder:font-normal placeholder:text-[#8E8E93] placeholder:tracking-normal rounded-xl py-2 pl-10 pr-3 border transition-all duration-200 focus:outline-none ${
+                      className={`w-full bg-white text-gray-900 font-bold text-base tracking-wide placeholder:font-normal placeholder:text-gray-400 placeholder:tracking-normal rounded-xl py-2 pl-10 pr-3 border transition-all duration-200 focus:outline-none ${
                         error
-                          ? 'border-[#FF3B30] focus:ring-2 focus:ring-[#FF3B30]/20'
-                          : 'border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20'
+                          ? 'border-red-500 focus:ring-2 focus:ring-red-500/20'
+                          : 'border-gray-200 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20'
                       }`}
                     />
                   </>
@@ -402,30 +402,30 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
                 className="text-black transition-colors"
               >
                 {agreeTerms ? (
-                  <CheckSquare className="w-4 h-4 text-black fill-[#FFC000]" />
+                  <CheckSquare className="w-4 h-4 text-black fill-yellow-400" />
                 ) : (
-                  <Square className="w-4 h-4 text-[#8E8E93]" />
+                  <Square className="w-4 h-4 text-gray-400" />
                 )}
               </button>
-              <label className="text-[11px] text-[#636366] leading-tight select-none">
+              <label className="text-xs text-gray-500 leading-tight select-none">
                 I agree to the{' '}
-                <a href="#terms" className="text-[#1C1C1E] font-bold underline">
+                <a href="#terms" className="text-gray-900 font-bold underline">
                   Terms of Service
                 </a>{' '}
                 and{' '}
-                <a href="#privacy" className="text-[#1C1C1E] font-bold underline">
+                <a href="#privacy" className="text-gray-900 font-bold underline">
                   Privacy Policy
                 </a>
               </label>
             </div>
 
-            {error && <p className="text-xs text-[#FF3B30] font-medium">{error}</p>}
+            {error && <p className="text-xs text-red-500 font-medium">{error}</p>}
 
             {/* Submit button */}
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3.5 px-4 bg-gradient-to-r from-[#FFC000] to-[#FF9F0A] hover:from-[#e6ad00] hover:to-[#e68f00] active:scale-[0.99] text-black font-extrabold text-sm rounded-xl shadow-lg shadow-[#FFC000]/30 transition-all duration-200 disabled:opacity-50 flex items-center justify-center gap-2 group"
+              className="w-full py-3.5 px-4 bg-gradient-to-r from-yellow-400 to-orange-500 hover:from-yellow-500 hover:to-orange-600 active:scale-95 text-black font-extrabold text-sm rounded-xl shadow-lg shadow-yellow-400/30 transition-all duration-200 disabled:opacity-50 flex items-center justify-center gap-2 group"
             >
               {isLoading ? (
                 <>
@@ -442,12 +442,12 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
           </form>
 
           {/* Switch to Login */}
-          <p className="text-center text-xs text-[#636366] pt-1">
+          <p className="text-center text-xs text-gray-500 pt-1">
             Already have an account?{' '}
             <button
               type="button"
               onClick={onSwitchToLogin}
-              className="text-[#1C1C1E] font-bold hover:underline transition-colors"
+              className="text-gray-900 font-bold hover:underline transition-colors"
             >
               Sign in instead
             </button>

@@ -319,12 +319,12 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
   }, [mapLoaded, pickup, destination, pickupCoords, destCoords, selectedRide]);
 
   return (
-    <div className="w-full h-full min-h-[440px] bg-white border border-[#E5E5EA] rounded-3xl overflow-hidden shadow-xl relative flex flex-col">
+    <div className="w-full h-full min-h-[440px] bg-white border border-gray-200 rounded-3xl overflow-hidden shadow-xl relative flex flex-col">
       {/* Map Header Status & Mode Indicator */}
       <div className="absolute top-4 left-4 right-4 z-[400] flex items-center justify-between pointer-events-none gap-2">
-        <div className="bg-white/90 backdrop-blur-md px-3.5 py-2 rounded-2xl border border-[#E5E5EA] shadow-lg flex items-center gap-2 pointer-events-auto">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#007AFF] animate-ping"></span>
-          <span className="text-xs font-extrabold text-[#1C1C1E] capitalize flex items-center gap-1.5">
+        <div className="bg-white/90 backdrop-blur-md px-3.5 py-2 rounded-2xl border border-gray-200 shadow-lg flex items-center gap-2 pointer-events-auto">
+          <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-ping"></span>
+          <span className="text-xs font-extrabold text-gray-900 capitalize flex items-center gap-1.5">
             {selectedRide === 'bike' ? '🏍️ Bike Routes' : selectedRide === 'auto' ? '🛺 Auto Routes' : '🚗 Cab Routes'}
             {isRouting && ' (Calculating All Routes...)'}
           </span>
@@ -343,21 +343,21 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
               });
             }
           }}
-          className="bg-white hover:bg-[#F8F9FA] text-[#1C1C1E] p-2.5 rounded-2xl border border-[#E5E5EA] shadow-xl pointer-events-auto transition-all active:scale-95 cursor-pointer flex items-center gap-1 font-bold text-xs"
+          className="bg-white hover:bg-gray-50 text-gray-900 p-2.5 rounded-2xl border border-gray-200 shadow-xl pointer-events-auto transition-all active:scale-95 cursor-pointer flex items-center gap-1 font-bold text-xs"
           title="Recenter Map to Current GPS Location"
         >
-          <LocateFixed className="w-4 h-4 text-[#007AFF] animate-pulse" />
+          <LocateFixed className="w-4 h-4 text-blue-500 animate-pulse" />
         </button>
       </div>
 
       {/* Floating Center Location Pin Overlay */}
       {(!destCoords?.lat || !destCoords?.lng) && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-full z-[300] pointer-events-none flex flex-col items-center">
-          <div className="bg-[#1C1C1E] text-white text-[10px] font-black px-2.5 py-1 rounded-full shadow-xl mb-1 border border-white/20 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#34C759] animate-pulse"></span>
+          <div className="bg-gray-900 text-white text-xs font-black px-2.5 py-1 rounded-full shadow-xl mb-1 border border-white/20 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
             <span>Pickup Point</span>
           </div>
-          <div className="w-9 h-9 bg-[#34C759] text-white rounded-full border-2 border-white shadow-2xl flex items-center justify-center font-bold text-base">
+          <div className="w-9 h-9 bg-green-500 text-white rounded-full border-2 border-white shadow-2xl flex items-center justify-center font-bold text-base">
             📍
           </div>
           <div className="w-3.5 h-1 bg-black/40 rounded-full blur-[1px] mt-0.5"></div>
@@ -369,11 +369,11 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
 
       {/* Display ALL Routes Simultaneously in Bottom Summary Panel */}
       {destination && routes.length > 0 && (
-        <div className="absolute bottom-4 left-4 right-4 z-[400] bg-white/95 backdrop-blur-md p-4 rounded-3xl border border-[#E5E5EA] shadow-2xl space-y-3 max-h-72 overflow-y-auto animate-fade-in pointer-events-auto">
+        <div className="absolute bottom-4 left-4 right-4 z-[400] bg-white/95 backdrop-blur-md p-4 rounded-3xl border border-gray-200 shadow-2xl space-y-3 max-h-72 overflow-y-auto animate-fade-in pointer-events-auto">
           {/* Header */}
           <div className="flex items-center justify-between">
-            <h4 className="text-xs font-extrabold text-[#1C1C1E] flex items-center gap-1.5">
-              <Route className="w-4 h-4 text-[#007AFF]" />
+            <h4 className="text-xs font-extrabold text-gray-900 flex items-center gap-1.5">
+              <Route className="w-4 h-4 text-blue-500" />
               <span>All Available Driving Routes ({routes.length})</span>
             </h4>
 
@@ -381,7 +381,7 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
             <button
               type="button"
               onClick={() => setShowSteps(!showSteps)}
-              className="text-[11px] font-extrabold text-[#007AFF] bg-[#007AFF]/10 hover:bg-[#007AFF]/20 px-3 py-1 rounded-xl flex items-center gap-1 transition-colors"
+              className="text-xs font-extrabold text-blue-500 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-1 rounded-xl flex items-center gap-1 transition-colors"
             >
               <Milestone className="w-3.5 h-3.5" />
               <span>{showSteps ? 'Hide Directions' : 'Turn-by-Turn'}</span>
@@ -394,7 +394,7 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
             {routes.map((rt, idx) => (
               <div
                 key={idx}
-                className="p-3 rounded-2xl border bg-[#F8F9FA] flex items-center justify-between transition-all"
+                className="p-3 rounded-2xl border bg-gray-50 flex items-center justify-between transition-all"
                 style={{ borderColor: rt.color }}
               >
                 <div className="flex items-center gap-2.5">
@@ -403,18 +403,18 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
                     style={{ backgroundColor: rt.color }}
                   ></div>
                   <div>
-                    <span className="text-xs font-extrabold text-[#1C1C1E] block leading-tight">
+                    <span className="text-xs font-extrabold text-gray-900 block leading-tight">
                       {rt.name} ({rt.summary})
                     </span>
-                    <span className="text-[10px] text-[#636366] font-semibold block mt-0.5">
+                    <span className="text-xs text-gray-500 font-semibold block mt-0.5">
                       {selectedRide.toUpperCase()} Speed
                     </span>
                   </div>
                 </div>
 
                 <div className="text-right shrink-0">
-                  <span className="text-xs font-extrabold text-[#1C1C1E] block">{rt.distanceKm} km</span>
-                  <span className="text-[11px] font-extrabold text-[#34C759]">{rt.durationMins} mins</span>
+                  <span className="text-xs font-extrabold text-gray-900 block">{rt.distanceKm} km</span>
+                  <span className="text-xs font-extrabold text-green-500">{rt.durationMins} mins</span>
                 </div>
               </div>
             ))}
@@ -422,20 +422,20 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
 
           {/* Turn-by-Turn Steps Accordion for Main Route */}
           {showSteps && routes[0]?.steps && (
-            <div className="pt-2 border-t border-[#E5E5EA] space-y-2 max-h-40 overflow-y-auto">
-              <h5 className="text-[11px] font-extrabold text-[#3A3A3C] uppercase tracking-wider">
+            <div className="pt-2 border-t border-gray-200 space-y-2 max-h-40 overflow-y-auto">
+              <h5 className="text-xs font-extrabold text-gray-700 uppercase tracking-wider">
                 Turn-by-Turn Directions ({routes[0].steps.length} steps)
               </h5>
-              <div className="divide-y divide-[#F8F9FA]">
+              <div className="divide-y divide-gray-50">
                 {routes[0].steps.map((step, sIdx) => (
                   <div key={sIdx} className="py-1.5 flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-[#F8F9FA] text-[#636366] text-[10px] font-extrabold flex items-center justify-center border border-[#E5E5EA]">
+                      <span className="w-5 h-5 rounded-full bg-gray-50 text-gray-500 text-xs font-extrabold flex items-center justify-center border border-gray-200">
                         {sIdx + 1}
                       </span>
-                      <span className="font-bold text-[#1C1C1E]">{step.instruction}</span>
+                      <span className="font-bold text-gray-900">{step.instruction}</span>
                     </div>
-                    <span className="text-[10px] font-semibold text-[#636366] shrink-0 ml-2">{step.distance}</span>
+                    <span className="text-xs font-semibold text-gray-500 shrink-0 ml-2">{step.distance}</span>
                   </div>
                 ))}
               </div>

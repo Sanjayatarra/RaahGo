@@ -173,27 +173,50 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if not lat or not lon:
             return Response({'error': 'lat and lon are required'}, status=status.HTTP_400_BAD_REQUEST)
 
+        headers = {'User-Agent': 'RaahGo-Location-Service/1.0 (India)'}
+        formatted_address = None
+
+        # 1. Try Photon API for Reverse Geocoding (Higher Rate Limits)
         try:
-            url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&addressdetails=1&countrycodes=in"
-            headers = {'User-Agent': 'RaahGo-Location-Service/1.0 (India)'}
+            url = f"https://photon.komoot.io/reverse?lon={lon}&lat={lat}"
             resp = requests.get(url, headers=headers, timeout=5)
 
             if resp.status_code == 200:
                 data = resp.json()
-                addr = data.get('address', {})
-                road = addr.get('road') or addr.get('suburb') or addr.get('neighbourhood') or addr.get('residential') or ''
-                city = addr.get('city') or addr.get('town') or addr.get('suburb') or addr.get('state_district') or addr.get('state') or ''
-                
-                parts = [road, city, 'India']
-                formatted = ', '.join([p for p in parts if p])
-                
-                return Response({
-                    'address': formatted or data.get('display_name') or f"GPS ({lat}, {lon})",
-                    'lat': lat,
-                    'lon': lon
-                }, status=status.HTTP_200_OK)
+                features = data.get('features', [])
+                if features:
+                    props = features[0].get('properties', {})
+                    road = props.get('name') or props.get('street') or props.get('district') or ''
+                    city = props.get('city') or props.get('state') or props.get('county') or ''
+                    
+                    parts = [road, city, 'India']
+                    formatted_address = ', '.join([p for p in parts if p])
         except Exception as e:
-            print(f"[Backend Reverse Geocode Error]: {e}")
+            print(f"[Backend Reverse Geocode Photon Error]: {e}")
+
+        # 2. Fallback to Nominatim if Photon fails or returns nothing
+        if not formatted_address:
+            try:
+                url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&addressdetails=1&countrycodes=in"
+                resp = requests.get(url, headers=headers, timeout=5)
+
+                if resp.status_code == 200:
+                    data = resp.json()
+                    addr = data.get('address', {})
+                    road = addr.get('road') or addr.get('suburb') or addr.get('neighbourhood') or addr.get('residential') or ''
+                    city = addr.get('city') or addr.get('town') or addr.get('suburb') or addr.get('state_district') or addr.get('state') or ''
+                    
+                    parts = [road, city, 'India']
+                    formatted_address = ', '.join([p for p in parts if p]) or data.get('display_name')
+            except Exception as e:
+                print(f"[Backend Reverse Geocode Nominatim Error]: {e}")
+
+        if formatted_address:
+            return Response({
+                'address': formatted_address,
+                'lat': lat,
+                'lon': lon
+            }, status=status.HTTP_200_OK)
 
         return Response({'address': f"Current GPS ({lat}, {lon})", 'lat': lat, 'lon': lon}, status=status.HTTP_200_OK)
 

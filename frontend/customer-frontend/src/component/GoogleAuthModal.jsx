@@ -14,7 +14,7 @@ export default function GoogleAuthModal({ isOpen, onClose, onSelectAccount }) {
       name: 'Sanjay Soni',
       email: 'sanjay.s@multitvsolution.com',
       avatar: 'S',
-      color: 'bg-[#7C5295]'
+      color: 'bg-purple-600'
     }
   ];
 
@@ -38,7 +38,7 @@ export default function GoogleAuthModal({ isOpen, onClose, onSelectAccount }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-fade-in">
       {/* Google Sign In Modal Box */}
-      <div className="bg-[#1F1F1F] text-[#E3E2E6] rounded-2xl w-full max-w-[420px] shadow-2xl border border-[#303134] overflow-hidden flex flex-col justify-between min-h-[480px]">
+      <div className="bg-neutral-900 text-neutral-200 rounded-2xl w-full max-w-md shadow-2xl border border-neutral-800 overflow-hidden flex flex-col justify-between min-h-[480px]">
         {/* Top bar with Google Branding & Close */}
         <div className="p-5 pb-0 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -60,12 +60,12 @@ export default function GoogleAuthModal({ isOpen, onClose, onSelectAccount }) {
                 d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.4-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z"
               />
             </svg>
-            <span className="text-sm font-medium text-[#E3E2E6]">Sign in with Google</span>
+            <span className="text-sm font-medium text-neutral-200">Sign in with Google</span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-full text-[#8E918F] hover:text-white hover:bg-[#2D2E31] transition-colors"
+            className="p-1 rounded-full text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -73,9 +73,9 @@ export default function GoogleAuthModal({ isOpen, onClose, onSelectAccount }) {
 
         {/* Main Accounts Chooser Body */}
         <div className="p-6 flex-1 flex flex-col justify-start">
-          <h2 className="text-2xl font-normal text-[#E3E2E6] mb-1 tracking-tight">Choose an account</h2>
-          <p className="text-sm font-medium text-[#E3E2E6] mb-6">
-            to continue to <span className="text-[#A8C7FA] font-semibold">raahgo.com</span>
+          <h2 className="text-2xl font-normal text-neutral-200 mb-1 tracking-tight">Choose an account</h2>
+          <p className="text-sm font-medium text-neutral-200 mb-6">
+            to continue to <span className="text-blue-300 font-semibold">raahgo.com</span>
           </p>
 
           {!showCustomInput ? (
@@ -86,7 +86,7 @@ export default function GoogleAuthModal({ isOpen, onClose, onSelectAccount }) {
                   key={idx}
                   type="button"
                   onClick={() => handleSelect(acc)}
-                  className="w-full py-3 px-2 rounded-xl hover:bg-[#2D2E31] transition-colors flex items-center gap-3.5 text-left group border-b border-[#36373A] last:border-b-0"
+                  className="w-full py-3 px-2 rounded-xl hover:bg-neutral-800 transition-colors flex items-center gap-3.5 text-left group border-b border-neutral-700 last:border-b-0"
                 >
                   <div
                     className={`w-9 h-9 rounded-full ${acc.color} text-white font-medium text-base flex items-center justify-center shrink-0`}
@@ -94,24 +94,24 @@ export default function GoogleAuthModal({ isOpen, onClose, onSelectAccount }) {
                     {acc.avatar}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-medium text-[#E3E2E6] truncate group-hover:text-white">
+                    <h3 className="text-sm font-medium text-neutral-200 truncate group-hover:text-white">
                       {acc.name}
                     </h3>
-                    <p className="text-xs text-[#C4C6C5] truncate">{acc.email}</p>
+                    <p className="text-xs text-neutral-300 truncate">{acc.email}</p>
                   </div>
                 </button>
               ))}
 
-              <div className="border-t border-[#36373A] pt-2 mt-2">
+              <div className="border-t border-neutral-700 pt-2 mt-2">
                 <button
                   type="button"
                   onClick={() => setShowCustomInput(true)}
-                  className="w-full py-3 px-2 rounded-xl hover:bg-[#2D2E31] transition-colors flex items-center gap-3.5 text-left group"
+                  className="w-full py-3 px-2 rounded-xl hover:bg-neutral-800 transition-colors flex items-center gap-3.5 text-left group"
                 >
-                  <div className="w-9 h-9 rounded-full border border-[#8E918F] flex items-center justify-center shrink-0 text-[#C4C6C5] group-hover:border-white group-hover:text-white">
+                  <div className="w-9 h-9 rounded-full border border-neutral-400 flex items-center justify-center shrink-0 text-neutral-300 group-hover:border-white group-hover:text-white">
                     <User className="w-5 h-5" />
                   </div>
-                  <span className="text-sm font-medium text-[#E3E2E6] group-hover:text-white">
+                  <span className="text-sm font-medium text-neutral-200 group-hover:text-white">
                     Use another account
                   </span>
                 </button>
@@ -121,13 +121,13 @@ export default function GoogleAuthModal({ isOpen, onClose, onSelectAccount }) {
             /* Enter Another Account Form */
             <form onSubmit={handleCustomSubmit} className="space-y-4 pt-2 animate-fade-in">
               <div className="flex items-center justify-between">
-                <label className="block text-xs font-medium text-[#C4C6C5]">
+                <label className="block text-xs font-medium text-neutral-300">
                   Enter your email or phone
                 </label>
                 <button
                   type="button"
                   onClick={() => setShowCustomInput(false)}
-                  className="text-xs font-semibold text-[#A8C7FA] hover:underline"
+                  className="text-xs font-semibold text-blue-300 hover:underline"
                 >
                   Back
                 </button>
@@ -140,12 +140,12 @@ export default function GoogleAuthModal({ isOpen, onClose, onSelectAccount }) {
                   if (error) setError('');
                 }}
                 placeholder="sanjay.s@multitvsolution.com"
-                className="w-full bg-[#131314] text-[#E3E2E6] text-sm rounded-lg py-3 px-3.5 border border-[#8E918F] focus:border-[#A8C7FA] focus:outline-none"
+                className="w-full bg-neutral-950 text-neutral-200 text-sm rounded-lg py-3 px-3.5 border border-neutral-400 focus:border-blue-300 focus:outline-none"
               />
-              {error && <p className="text-xs text-[#F2B8B5] font-medium">{error}</p>}
+              {error && <p className="text-xs text-red-300 font-medium">{error}</p>}
               <button
                 type="submit"
-                className="w-full py-2.5 bg-[#A8C7FA] hover:bg-[#82b1ff] text-[#003062] font-semibold text-xs rounded-full transition-colors"
+                className="w-full py-2.5 bg-blue-300 hover:bg-blue-400 text-blue-900 font-semibold text-xs rounded-full transition-colors"
               >
                 Next
               </button>
@@ -154,19 +154,19 @@ export default function GoogleAuthModal({ isOpen, onClose, onSelectAccount }) {
         </div>
 
         {/* Footer Bar matching Google Sign In */}
-        <div className="p-4 px-6 border-t border-[#303134] flex items-center justify-between text-xs text-[#8E918F]">
-          <div className="flex items-center gap-1 cursor-pointer hover:text-[#C4C6C5]">
+        <div className="p-4 px-6 border-t border-neutral-800 flex items-center justify-between text-xs text-neutral-400">
+          <div className="flex items-center gap-1 cursor-pointer hover:text-neutral-300">
             <span>English (United States)</span>
-            <span className="text-[10px]">▼</span>
+            <span className="text-xs">▼</span>
           </div>
           <div className="flex items-center gap-4">
-            <a href="#help" className="hover:text-[#C4C6C5] transition-colors">
+            <a href="#help" className="hover:text-neutral-300 transition-colors">
               Help
             </a>
-            <a href="#privacy" className="hover:text-[#C4C6C5] transition-colors">
+            <a href="#privacy" className="hover:text-neutral-300 transition-colors">
               Privacy
             </a>
-            <a href="#terms" className="hover:text-[#C4C6C5] transition-colors">
+            <a href="#terms" className="hover:text-neutral-300 transition-colors">
               Terms
             </a>
           </div>

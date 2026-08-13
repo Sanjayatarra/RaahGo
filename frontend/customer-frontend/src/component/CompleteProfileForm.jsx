@@ -263,14 +263,14 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
   };
 
   return (
-    <div className="w-full max-w-md bg-white border border-[#E5E5EA] rounded-3xl p-6 sm:p-8 shadow-xl space-y-5 animate-fade-in">
+    <div className="w-full max-w-md bg-white border border-gray-200 rounded-3xl p-6 sm:p-8 shadow-xl space-y-5 animate-fade-in">
       {/* Header Banner */}
       <div className="text-center">
-        <div className="w-12 h-12 bg-[#FFC000]/20 text-[#8A6500] rounded-2xl flex items-center justify-center mx-auto mb-2 border border-[#FFC000]/40">
+        <div className="w-12 h-12 bg-yellow-400/20 text-yellow-800 rounded-2xl flex items-center justify-center mx-auto mb-2 border border-yellow-400/40">
           <ShieldCheck className="w-6 h-6 text-black" />
         </div>
-        <h2 className="text-2xl font-extrabold text-[#1C1C1E] tracking-tight">Complete Your Profile</h2>
-        <p className="text-xs text-[#636366] mt-1">
+        <h2 className="text-2xl font-extrabold text-gray-900 tracking-tight">Complete Your Profile</h2>
+        <p className="text-xs text-gray-500 mt-1">
           Set up your profile & 4-digit Ride Security PIN for Captain Verification
         </p>
       </div>
@@ -278,11 +278,11 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Username Field */}
         <div>
-          <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+          <label className="block text-xs font-bold text-gray-700 mb-1">
             Username
           </label>
           <div className="relative">
-            <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#636366]" />
+            <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
             <input
               type="text"
               value={username}
@@ -291,7 +291,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                 if (error) setError('');
               }}
               placeholder="sanjay_kumar"
-              className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 pl-10 pr-4 border border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20 focus:outline-none"
+              className="w-full bg-white text-gray-900 font-bold text-sm rounded-xl py-2.5 pl-10 pr-4 border border-gray-200 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 focus:outline-none"
             />
           </div>
         </div>
@@ -299,7 +299,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
         {/* First & Last Name */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+            <label className="block text-xs font-bold text-gray-700 mb-1">
               First Name
             </label>
             <input
@@ -311,11 +311,11 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                 if (error) setError('');
               }}
               placeholder="Sanjay"
-              className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20 focus:outline-none"
+              className="w-full bg-white text-gray-900 font-bold text-sm rounded-xl py-2.5 px-3 border border-gray-200 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 focus:outline-none"
             />
           </div>
           <div>
-            <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+            <label className="block text-xs font-bold text-gray-700 mb-1">
               Last Name
             </label>
             <input
@@ -323,7 +323,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
               placeholder="Kumar"
-              className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20 focus:outline-none"
+              className="w-full bg-white text-gray-900 font-bold text-sm rounded-xl py-2.5 px-3 border border-gray-200 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 focus:outline-none"
             />
           </div>
         </div>
@@ -331,13 +331,13 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
         {/* 4-Digit Ride Security PIN Field */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="block text-xs font-bold text-[#3A3A3C]">
+            <label className="block text-xs font-bold text-gray-700">
               4-Digit Ride Security PIN (for Captain)
             </label>
-            <span className="text-[10px] font-extrabold text-[#007AFF]">Required for Rides</span>
+            <span className="text-xs font-extrabold text-blue-500">Required for Rides</span>
           </div>
           <div className="relative">
-            <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#FFC000]" />
+            <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-yellow-400" />
             <input
               type="text"
               maxLength={4}
@@ -348,10 +348,10 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                 if (error) setError('');
               }}
               placeholder="4829"
-              className="w-full bg-[#FFF9E6] text-[#1C1C1E] font-extrabold tracking-widest text-base rounded-xl py-2.5 pl-10 pr-4 border border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/30 focus:outline-none"
+              className="w-full bg-yellow-50 text-gray-900 font-extrabold tracking-widest text-base rounded-xl py-2.5 pl-10 pr-4 border border-yellow-400 focus:ring-2 focus:ring-yellow-400/30 focus:outline-none"
             />
           </div>
-          <p className="text-[10px] text-[#636366] mt-1 font-medium">
+          <p className="text-xs text-gray-500 mt-1 font-medium">
             🔒 Share this 4-digit PIN with your Captain when entering the cab to verify your ride.
           </p>
         </div>
@@ -359,31 +359,31 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
         {/* Primary Identifier Display */}
         {isEmailAuth ? (
           <div>
-            <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+            <label className="block text-xs font-bold text-gray-700 mb-1">
               Registered Email (Verified)
             </label>
             <div className="relative">
-              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#34C759]" />
+              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-green-500" />
               <input
                 type="email"
                 disabled
                 value={initialData?.identifier || email}
-                className="w-full bg-[#F8F9FA] text-[#636366] font-bold text-sm rounded-xl py-2.5 pl-10 pr-4 border border-[#E5E5EA] cursor-not-allowed"
+                className="w-full bg-gray-50 text-gray-500 font-bold text-sm rounded-xl py-2.5 pl-10 pr-4 border border-gray-200 cursor-not-allowed"
               />
             </div>
           </div>
         ) : (
           <div>
-            <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+            <label className="block text-xs font-bold text-gray-700 mb-1">
               Registered Phone Number (Verified)
             </label>
             <div className="relative">
-              <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#34C759]" />
+              <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-green-500" />
               <input
                 type="text"
                 disabled
                 value={formatPhone(initialData?.identifier || phone)}
-                className="w-full bg-[#F8F9FA] text-[#636366] font-bold text-sm rounded-xl py-2.5 pl-10 pr-4 border border-[#E5E5EA] cursor-not-allowed"
+                className="w-full bg-gray-50 text-gray-500 font-bold text-sm rounded-xl py-2.5 pl-10 pr-4 border border-gray-200 cursor-not-allowed"
               />
             </div>
           </div>
@@ -391,16 +391,16 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
 
         {/* Secondary Contact Field with OTP Verification */}
         <div>
-          <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+          <label className="block text-xs font-bold text-gray-700 mb-1">
             {isEmailAuth ? 'Mobile Number (Required)' : 'Gmail / Email Address (Required)'}
           </label>
 
           <div className="flex gap-2">
             <div className="relative flex-1">
               {isEmailAuth ? (
-                <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#636366]" />
+                <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
               ) : (
-                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#636366]" />
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
               )}
               <input
                 type={isEmailAuth ? 'tel' : 'email'}
@@ -415,10 +415,10 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                   if (error) setError('');
                 }}
                 placeholder={isEmailAuth ? '98765 43210' : 'customer@gmail.com'}
-                className={`w-full text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 pl-10 pr-4 border focus:outline-none ${
+                className={`w-full text-gray-900 font-bold text-sm rounded-xl py-2.5 pl-10 pr-4 border focus:outline-none ${
                   secondaryVerified
-                    ? 'bg-[#34C759]/10 border-[#34C759] text-[#34C759]'
-                    : 'bg-white border-[#E5E5EA] focus:border-[#FFC000]'
+                    ? 'bg-green-500/10 border-green-500 text-green-500'
+                    : 'bg-white border-gray-200 focus:border-yellow-400'
                 }`}
               />
             </div>
@@ -428,12 +428,12 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                 type="button"
                 onClick={handleSendSecondaryOtp}
                 disabled={isOtpSending}
-                className="py-2.5 px-4 bg-[#FFC000] hover:bg-[#e6ad00] text-black font-extrabold text-xs rounded-xl shadow-xs transition-colors shrink-0 flex items-center justify-center min-w-[90px]"
+                className="py-2.5 px-4 bg-yellow-400 hover:bg-yellow-500 text-black font-extrabold text-xs rounded-xl shadow-xs transition-colors shrink-0 flex items-center justify-center min-w-[90px]"
               >
                 {isOtpSending ? 'Sending...' : 'Verify OTP'}
               </button>
             ) : (
-              <span className="py-2.5 px-3 bg-[#34C759]/10 border border-[#34C759] text-[#34C759] font-extrabold text-xs rounded-xl flex items-center gap-1 shrink-0">
+              <span className="py-2.5 px-3 bg-green-500/10 border border-green-500 text-green-500 font-extrabold text-xs rounded-xl flex items-center gap-1 shrink-0">
                 <CheckCircle2 className="w-3.5 h-3.5" /> Verified
               </span>
             )}
@@ -442,15 +442,15 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
 
         {/* Secondary Contact Backend OTP Input Box */}
         {showSecondaryOtpBox && !secondaryVerified && (
-          <div className="bg-[#FFF9E6] border border-[#FFC000] rounded-2xl p-4 space-y-3 animate-fade-in">
+          <div className="bg-yellow-50 border border-yellow-400 rounded-2xl p-4 space-y-3 animate-fade-in">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-[#8A6500] flex items-center gap-1">
+              <span className="text-xs font-bold text-yellow-800 flex items-center gap-1">
                 <KeyRound className="w-3.5 h-3.5" /> Enter 4-Digit OTP Sent via Backend
               </span>
               <button
                 type="button"
                 onClick={handleSendSecondaryOtp}
-                className="text-[10px] text-[#007AFF] font-bold underline"
+                className="text-xs text-blue-500 font-bold underline"
               >
                 Resend
               </button>
@@ -466,13 +466,13 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                   value={digit}
                   onChange={(e) => handleOtpKey(idx, e.target.value)}
                   onKeyDown={(e) => handleOtpKeyDown(idx, e)}
-                  className="w-11 h-11 text-center font-extrabold text-lg bg-white border border-[#FFC000] rounded-xl text-[#1C1C1E] focus:outline-none focus:ring-2 focus:ring-[#FFC000]"
+                  className="w-11 h-11 text-center font-extrabold text-lg bg-white border border-yellow-400 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-yellow-400"
                 />
               ))}
             </div>
 
             {otpError && (
-              <p className="text-[11px] font-bold text-[#FF3B30] text-center">
+              <p className="text-xs font-bold text-red-500 text-center">
                 {otpError}
               </p>
             )}
@@ -481,7 +481,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
               type="button"
               onClick={handleVerifySecondaryOtp}
               disabled={isOtpVerifying}
-              className="w-full py-2 bg-[#FFC000] hover:bg-[#e6ad00] text-black font-extrabold text-xs rounded-xl transition-colors"
+              className="w-full py-2 bg-yellow-400 hover:bg-yellow-500 text-black font-extrabold text-xs rounded-xl transition-colors"
             >
               {isOtpVerifying ? 'Verifying OTP...' : 'Confirm OTP Code'}
             </button>
@@ -491,13 +491,13 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
         {/* Gender & DOB */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+            <label className="block text-xs font-bold text-gray-700 mb-1">
               Gender
             </label>
             <select
               value={gender}
               onChange={(e) => setGender(e.target.value)}
-              className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20 focus:outline-none"
+              className="w-full bg-white text-gray-900 font-bold text-sm rounded-xl py-2.5 px-3 border border-gray-200 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 focus:outline-none"
             >
               <option value="Male">Male</option>
               <option value="Female">Female</option>
@@ -505,20 +505,20 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+            <label className="block text-xs font-bold text-gray-700 mb-1">
               Date of Birth
             </label>
             <input
               type="date"
               value={dob}
               onChange={(e) => setDob(e.target.value)}
-              className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20 focus:outline-none"
+              className="w-full bg-white text-gray-900 font-bold text-sm rounded-xl py-2.5 px-3 border border-gray-200 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 focus:outline-none"
             />
           </div>
         </div>
 
         {error && (
-          <p className="text-xs font-bold text-[#FF3B30] text-center bg-[#FF3B30]/10 p-2.5 rounded-xl border border-[#FF3B30]/20">
+          <p className="text-xs font-bold text-red-500 text-center bg-red-500/10 p-2.5 rounded-xl border border-red-500/20">
             {error}
           </p>
         )}
@@ -527,7 +527,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full py-3.5 px-4 bg-gradient-to-r from-[#FFC000] to-[#FF9F0A] hover:from-[#e6ad00] hover:to-[#e68f00] text-black font-extrabold text-sm rounded-xl shadow-md transition-all duration-200 flex items-center justify-center gap-2 mt-2"
+          className="w-full py-3.5 px-4 bg-gradient-to-r from-yellow-400 to-orange-500 hover:from-yellow-500 hover:to-orange-600 text-black font-extrabold text-sm rounded-xl shadow-md transition-all duration-200 flex items-center justify-center gap-2 mt-2"
         >
           {isLoading ? (
             <span>Saving Profile & PIN...</span>

@@ -103,15 +103,15 @@ export default function OtpInput({ identifier, type, onVerify, onBack, onResend,
       <button
         onClick={onBack}
         type="button"
-        className="inline-flex items-center text-xs font-semibold text-[#636366] hover:text-[#1C1C1E] transition-colors gap-1.5"
+        className="inline-flex items-center text-xs font-semibold text-gray-500 hover:text-gray-900 transition-colors gap-1.5"
       >
         <ArrowLeft className="w-3.5 h-3.5" /> Change {type === 'email' ? 'Email' : 'Mobile Number'}
       </button>
 
       <div className="text-center">
-        <h3 className="text-xl font-bold text-[#1C1C1E] mb-1">Enter Verification Code</h3>
-        <p className="text-xs text-[#636366]">
-          We sent a 4-digit OTP to <span className="font-bold text-[#1C1C1E]">{identifier}</span>
+        <h3 className="text-xl font-bold text-gray-900 mb-1">Enter Verification Code</h3>
+        <p className="text-xs text-gray-500">
+          We sent a 4-digit OTP to <span className="font-bold text-gray-900">{identifier}</span>
         </p>
       </div>
 
@@ -129,23 +129,23 @@ export default function OtpInput({ identifier, type, onVerify, onBack, onResend,
               onKeyDown={(e) => handleKeyDown(index, e)}
               className={`w-12 h-14 text-center text-xl font-bold rounded-xl bg-white border transition-all duration-200 focus:outline-none ${
                 error
-                  ? 'border-[#FF3B30] text-[#FF3B30] focus:ring-2 focus:ring-[#FF3B30]/20'
+                  ? 'border-red-500 text-red-500 focus:ring-2 focus:ring-red-500/20'
                   : digit
-                  ? 'border-[#FFC000] text-[#1C1C1E] shadow-sm ring-2 ring-[#FFC000]/30'
-                  : 'border-[#E5E5EA] text-[#1C1C1E] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20'
+                  ? 'border-yellow-400 text-gray-900 shadow-sm ring-2 ring-yellow-400/30'
+                  : 'border-gray-200 text-gray-900 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20'
               }`}
             />
           ))}
         </div>
 
         {error && (
-          <p className="text-xs text-[#FF3B30] text-center font-medium bg-[#FF3B30]/10 py-2 px-3 rounded-lg border border-[#FF3B30]/20">
+          <p className="text-xs text-red-500 text-center font-medium bg-red-500/10 py-2 px-3 rounded-lg border border-red-500/20">
             {error}
           </p>
         )}
 
         {isSuccess && !error && (
-          <div className="flex items-center justify-center gap-2 text-xs font-bold text-black bg-[#FFC000] py-2.5 px-3 rounded-xl shadow-md shadow-[#FFC000]/20">
+          <div className="flex items-center justify-center gap-2 text-xs font-bold text-black bg-yellow-400 py-2.5 px-3 rounded-xl shadow-md shadow-yellow-400/20">
             <CheckCircle className="w-4 h-4 text-black animate-bounce" /> OTP Verified Successfully!
           </div>
         )}
@@ -153,7 +153,7 @@ export default function OtpInput({ identifier, type, onVerify, onBack, onResend,
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full py-3.5 px-4 bg-[#FFC000] hover:bg-[#e6ad00] active:scale-[0.99] text-black font-bold text-sm rounded-xl shadow-lg shadow-[#FFC000]/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="w-full py-3.5 px-4 bg-yellow-400 hover:bg-yellow-500 active:scale-95 text-black font-bold text-sm rounded-xl shadow-lg shadow-yellow-400/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {isLoading ? (
             <>
@@ -170,14 +170,14 @@ export default function OtpInput({ identifier, type, onVerify, onBack, onResend,
             <button
               type="button"
               onClick={handleResendOtp}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1C1C1E] hover:underline transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-900 hover:underline transition-colors"
             >
-              <RefreshCw className="w-3.5 h-3.5 text-[#FFC000]" /> Resend OTP Code
+              <RefreshCw className="w-3.5 h-3.5 text-yellow-400" /> Resend OTP Code
             </button>
           ) : (
-            <p className="text-xs text-[#636366]">
+            <p className="text-xs text-gray-500">
               Didn't receive the code? Resend in{' '}
-              <span className="font-bold text-[#1C1C1E]">{timer}s</span>
+              <span className="font-bold text-gray-900">{timer}s</span>
             </p>
           )}
         </div>

@@ -221,7 +221,7 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
     <div className="w-full relative">
       {/* Floating Z-Index Alert */}
       {notExistAlert && (
-        <div className="absolute top-[-1%] left-1/2 -translate-x-1/2 z-50 bg-[#FF3B30] text-white text-xs font-extrabold px-4 py-2 rounded-xl shadow-xl border border-red-600 flex items-center gap-2 whitespace-nowrap animate-bounce">
+        <div className="absolute -top-1 left-1/2 -translate-x-1/2 z-50 bg-red-500 text-white text-xs font-extrabold px-4 py-2 rounded-xl shadow-xl border border-red-600 flex items-center gap-2 whitespace-nowrap animate-bounce">
           <AlertCircle className="w-4 h-4 text-white" />
           <span>User Account Not Found!</span>
         </div>
@@ -231,12 +231,12 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
         <div className="space-y-5 animate-fade-in">
           {/* Header text */}
           <div className="text-center">
-            <h2 className="text-2xl font-extrabold text-[#1C1C1E] tracking-tight">Welcome Back</h2>
-            <p className="text-xs text-[#636366] mt-1">Sign in with your phone number or Gmail</p>
+            <h2 className="text-2xl font-extrabold text-gray-900 tracking-tight">Welcome Back</h2>
+            <p className="text-xs text-gray-500 mt-1">Sign in with your phone number or Gmail</p>
           </div>
 
           {/* Toggle between Mobile & Email */}
-          <div className="flex bg-[#F8F9FA] p-1 rounded-xl border border-[#E5E5EA]">
+          <div className="flex bg-gray-50 p-1 rounded-xl border border-gray-200">
             <button
               type="button"
               onClick={() => {
@@ -246,8 +246,8 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
               }}
               className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${
                 authMethod === 'mobile'
-                  ? 'bg-[#FFC000] text-black shadow-sm'
-                  : 'text-[#636366] hover:text-[#1C1C1E]'
+                  ? 'bg-yellow-400 text-black shadow-sm'
+                  : 'text-gray-500 hover:text-gray-900'
               }`}
             >
               <Phone className="w-3.5 h-3.5" /> Mobile Number
@@ -261,8 +261,8 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
               }}
               className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${
                 authMethod === 'email'
-                  ? 'bg-[#FFC000] text-black shadow-sm'
-                  : 'text-[#636366] hover:text-[#1C1C1E]'
+                  ? 'bg-yellow-400 text-black shadow-sm'
+                  : 'text-gray-500 hover:text-gray-900'
               }`}
             >
               <Mail className="w-3.5 h-3.5" /> Gmail / Email
@@ -272,13 +272,13 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
           {/* Input form */}
           <form onSubmit={handleSendOtp} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-[#3A3A3C] mb-1.5">
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">
                 {authMethod === 'mobile' ? 'Phone Number' : 'Gmail / Email Address'}
               </label>
               <div className="relative">
                 {authMethod === 'mobile' ? (
                   <>
-                    <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center text-[#3A3A3C] font-bold text-base border-r border-[#E5E5EA] pr-2.5 h-6">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center text-gray-700 font-bold text-base border-r border-gray-200 pr-2.5 h-6">
                       <span>+91</span>
                     </div>
                     <input
@@ -292,16 +292,16 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
                         if (notExistAlert) setNotExistAlert(false);
                       }}
                       placeholder="98765 43210"
-                      className={`w-full bg-white text-[#1C1C1E] font-extrabold text-base sm:text-lg tracking-wide placeholder:font-normal placeholder:text-[#8E8E93] placeholder:tracking-normal rounded-xl py-2 pl-14 pr-3 border transition-all duration-200 focus:outline-none ${
+                      className={`w-full bg-white text-gray-900 font-extrabold text-base sm:text-lg tracking-wide placeholder:font-normal placeholder:text-gray-400 placeholder:tracking-normal rounded-xl py-2 pl-14 pr-3 border transition-all duration-200 focus:outline-none ${
                         notExistAlert || error
-                          ? 'border-[#FF3B30] focus:ring-2 focus:ring-[#FF3B30]/20'
-                          : 'border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20'
+                          ? 'border-red-500 focus:ring-2 focus:ring-red-500/20'
+                          : 'border-gray-200 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20'
                       }`}
                     />
                   </>
                 ) : (
                   <>
-                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-5 text-[#636366]" />
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-5 text-gray-500" />
                     <input
                       type="email"
                       value={emailAddress}
@@ -311,17 +311,17 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
                         if (notExistAlert) setNotExistAlert(false);
                       }}
                       placeholder="name@gmail.com"
-                      className={`w-full bg-white text-[#1C1C1E] font-bold text-base tracking-wide placeholder:font-normal placeholder:text-[#8E8E93] placeholder:tracking-normal rounded-xl py-2 pl-10 pr-3 border transition-all duration-200 focus:outline-none ${
+                      className={`w-full bg-white text-gray-900 font-bold text-base tracking-wide placeholder:font-normal placeholder:text-gray-400 placeholder:tracking-normal rounded-xl py-2 pl-10 pr-3 border transition-all duration-200 focus:outline-none ${
                         notExistAlert || error
-                          ? 'border-[#FF3B30] focus:ring-2 focus:ring-[#FF3B30]/20'
-                          : 'border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20'
+                          ? 'border-red-500 focus:ring-2 focus:ring-red-500/20'
+                          : 'border-gray-200 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20'
                       }`}
                     />
                   </>
                 )}
               </div>
               {error && !notExistAlert && (
-                <p className="text-xs text-[#FF3B30] mt-1.5 font-medium">{error}</p>
+                <p className="text-xs text-red-500 mt-1.5 font-medium">{error}</p>
               )}
             </div>
 
@@ -329,7 +329,7 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3.5 px-4 bg-gradient-to-r from-[#FFC000] to-[#FF9F0A] hover:from-[#e6ad00] hover:to-[#e68f00] active:scale-[0.99] text-black font-extrabold text-sm rounded-xl shadow-lg shadow-[#FFC000]/30 transition-all duration-200 disabled:opacity-50 flex items-center justify-center gap-2 group"
+              className="w-full py-3.5 px-4 bg-gradient-to-r from-yellow-400 to-orange-500 hover:from-yellow-500 hover:to-orange-600 active:scale-95 text-black font-extrabold text-sm rounded-xl shadow-lg shadow-yellow-400/30 transition-all duration-200 disabled:opacity-50 flex items-center justify-center gap-2 group"
             >
               {isLoading ? (
                 <>
@@ -347,8 +347,8 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
 
           {/* Divider */}
           <div className="relative flex items-center justify-center my-4">
-            <div className="border-t border-[#E5E5EA] w-full"></div>
-            <span className="bg-white px-3 text-[11px] font-bold text-[#8E8E93] uppercase tracking-wider absolute">
+            <div className="border-t border-gray-200 w-full"></div>
+            <span className="bg-white px-3 text-xs font-bold text-gray-400 uppercase tracking-wider absolute">
               OR CONTINUE WITH
             </span>
           </div>
@@ -358,7 +358,7 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
             type="button"
             onClick={handleGoogleAuthClick}
             disabled={googleLoading}
-            className="w-full py-3 px-4 bg-white hover:bg-[#F8F9FA] border border-[#E5E5EA] rounded-xl text-[#1C1C1E] text-xs font-bold transition-all duration-200 flex items-center justify-center gap-3 hover:border-[#C7C7CC] active:scale-[0.99]"
+            className="w-full py-3 px-4 bg-white hover:bg-gray-50 border border-gray-200 rounded-xl text-gray-900 text-xs font-bold transition-all duration-200 flex items-center justify-center gap-3 hover:border-gray-300 active:scale-95"
           >
             {googleLoading ? (
               <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
@@ -386,12 +386,12 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
           </button>
 
           {/* Bottom Switcher */}
-          <p className="text-center text-xs text-[#636366] pt-2">
+          <p className="text-center text-xs text-gray-500 pt-2">
             Don't have an account?{' '}
             <button
               type="button"
               onClick={onSwitchToSignup}
-              className="text-[#1C1C1E] font-bold hover:underline transition-colors"
+              className="text-gray-900 font-bold hover:underline transition-colors"
             >
               Sign up now
             </button>

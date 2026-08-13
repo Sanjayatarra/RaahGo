@@ -2,7 +2,7 @@
 
 @layer base {
   body {
-    @apply bg-[#F8F9FA] text-[#1C1C1E] font-sans antialiased min-h-screen selection:bg-[#FFC000] selection:text-black;
+    @apply bg-gray-50 text-gray-900 font-sans antialiased min-h-screen selection:bg-yellow-400 selection:text-black;
   }
 
   input, button, select, textarea {
@@ -15,12 +15,12 @@
   width: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #F8F9FA;
+  background: theme('colors.gray.50');
 }
 ::-webkit-scrollbar-thumb {
-  background: #E5E5EA;
+  background: theme('colors.gray.200');
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #C7C7CC;
+  background: theme('colors.gray.300');
 }

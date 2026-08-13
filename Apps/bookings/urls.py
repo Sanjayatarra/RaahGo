@@ -1,10 +1,12 @@
+from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     BookingViewSet,
     RideDetailViewSet,
     ParcelDetailViewSet,
     MovingDetailViewSet,
-    BookingTrackingViewSet
+    BookingTrackingViewSet,
+    LocationSuggestionView
 )
 
 router = DefaultRouter()
@@ -14,4 +16,7 @@ router.register(r'parcel-details', ParcelDetailViewSet, basename='parcel-detail'
 router.register(r'moving-details', MovingDetailViewSet, basename='moving-detail')
 router.register(r'trackings', BookingTrackingViewSet, basename='booking-tracking')
 
-urlpatterns = router.urls
+urlpatterns = [
+    path('location-suggestions/', LocationSuggestionView.as_view(), name='location-suggestions'),
+    path('', include(router.urls)),
+]

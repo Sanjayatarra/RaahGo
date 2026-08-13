@@ -80,18 +80,18 @@ export default function Auth() {
   const activeUser = user || pendingAuthData;
 
   return (
-    <div className="min-h-screen w-full bg-[#F8F9FA] text-[#1C1C1E] flex flex-col justify-between relative font-sans">
+    <div className="min-h-screen w-full bg-gray-50 text-gray-900 flex flex-col justify-between relative font-sans">
       {/* Header with #FFC000 Amber Accent */}
-      <header className="w-full max-w-7xl mx-auto px-6 py-6 flex items-center justify-between z-10 border-b border-[#E5E5EA] bg-white">
+      <header className="w-full max-w-7xl mx-auto px-6 py-6 flex items-center justify-between z-10 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate('/')}>
-          <div className="w-10 h-10 rounded-xl bg-[#FFC000] text-black flex items-center justify-center shadow-md shadow-[#FFC000]/25">
+          <div className="w-10 h-10 rounded-xl bg-yellow-400 text-black flex items-center justify-center shadow-md shadow-yellow-400/25">
             <Car className="w-6 h-6 text-black" />
           </div>
           <div>
-            <span className="text-xl font-extrabold tracking-wider text-[#1C1C1E]">
+            <span className="text-xl font-extrabold tracking-wider text-gray-900">
               RaahGo
             </span>
-            <span className="text-[10px] block font-semibold uppercase tracking-widest text-[#636366]">
+            <span className="text-xs block font-semibold uppercase tracking-widest text-gray-500">
               Customer Portal
             </span>
           </div>
@@ -100,17 +100,17 @@ export default function Auth() {
         {/* Right Header Navigation */}
         <div className="flex items-center gap-4 text-xs">
           {activeUser ? (
-            <div className="flex items-center gap-3 bg-[#F8F9FA] border border-[#E5E5EA] px-3.5 py-1.5 rounded-full">
-              <div className="w-7 h-7 rounded-full bg-[#FFC000] text-black font-extrabold flex items-center justify-center text-xs shadow-sm">
+            <div className="flex items-center gap-3 bg-gray-50 border border-gray-200 px-3.5 py-1.5 rounded-full">
+              <div className="w-7 h-7 rounded-full bg-yellow-400 text-black font-extrabold flex items-center justify-center text-xs shadow-sm">
                 {activeUser.name ? activeUser.name.charAt(0).toUpperCase() : 'U'}
               </div>
-              <span className="font-extrabold text-[#1C1C1E] hidden sm:inline">
+              <span className="font-extrabold text-gray-900 hidden sm:inline">
                 {activeUser.name}
               </span>
               <button
                 type="button"
                 onClick={handleLogout}
-                className="text-[#636366] hover:text-[#FF3B30] font-bold transition-colors ml-1"
+                className="text-gray-500 hover:text-red-500 font-bold transition-colors ml-1"
                 title="Log Out"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -123,8 +123,8 @@ export default function Auth() {
                 onClick={() => navigate('/login')}
                 className={`px-4 py-2 rounded-xl font-bold transition-all text-xs ${
                   pathView === 'login'
-                    ? 'bg-[#FFC000] text-black shadow-xs'
-                    : 'bg-[#F8F9FA] text-[#3A3A3C] hover:bg-[#E5E5EA]'
+                    ? 'bg-yellow-400 text-black shadow-xs'
+                    : 'bg-gray-50 text-gray-700 hover:bg-gray-200'
                 }`}
               >
                 Log In
@@ -134,8 +134,8 @@ export default function Auth() {
                 onClick={() => navigate('/signup')}
                 className={`px-4 py-2 rounded-xl font-bold transition-all text-xs ${
                   pathView === 'signup'
-                    ? 'bg-[#FFC000] text-black shadow-xs'
-                    : 'bg-[#F8F9FA] text-[#3A3A3C] hover:bg-[#E5E5EA]'
+                    ? 'bg-yellow-400 text-black shadow-xs'
+                    : 'bg-gray-50 text-gray-700 hover:bg-gray-200'
                 }`}
               >
                 Sign Up
@@ -154,7 +154,7 @@ export default function Auth() {
           />
         ) : (
           <div className="w-full max-w-md">
-            <div className="bg-white border border-[#E5E5EA] rounded-3xl p-6 sm:p-8 shadow-xl relative">
+            <div className="bg-white border border-gray-200 rounded-3xl p-6 sm:p-8 shadow-xl relative">
               {pathView === 'signup' ? (
                 <SignupForm
                   onSuccess={handleAuthSuccess}
@@ -168,8 +168,8 @@ export default function Auth() {
               )}
             </div>
 
-            <p className="text-center text-[11px] text-[#636366] mt-4 flex items-center justify-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-[#FFC000]" />
+            <p className="text-center text-xs text-gray-500 mt-4 flex items-center justify-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
               <span>Instant OTP authentication powered by RaahGo Security</span>
             </p>
           </div>
@@ -177,7 +177,7 @@ export default function Auth() {
       </main>
 
       {/* Footer */}
-      <footer className="w-full text-center py-4 border-t border-[#E5E5EA] text-[11px] text-[#636366] bg-white z-10">
+      <footer className="w-full text-center py-4 border-t border-gray-200 text-xs text-gray-500 bg-white z-10">
         &copy; {new Date().getFullYear()} RaahGo Customer Portal. All rights reserved.
       </footer>
     </div>

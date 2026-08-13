@@ -8,7 +8,8 @@ import {
 import { fetchLocationSuggestions, getDeviceGpsLocation } from '../common/locationService';
 import { fetchWithAuth } from '../common/apiClient';
 import RealtimeMap from './RealtimeMap';
-
+import Navbar from './Navbar';
+import Footer from './Footer';
 // Vehicle fare rates dynamically from .env
 const VEHICLE_RATES = {
   bike: {
@@ -48,8 +49,8 @@ export default function BookRidePage({ user, onLogout }) {
   // Selected ride passed via state or default
   const initialRide = location.state?.selectedRide || 'bike';
 
-  const [pickup, setPickup] = useState('');
-  const [destination, setDestination] = useState('');
+  const [pickup, setPickup] = useState(location.state?.prefillPickup || '');
+  const [destination, setDestination] = useState(location.state?.prefillDrop || '');
   const [pickupError, setPickupError] = useState('');
   const [destError, setDestError] = useState('');
   const [selectedRide, setSelectedRide] = useState(initialRide);
@@ -63,8 +64,8 @@ export default function BookRidePage({ user, onLogout }) {
   const [tripCompletedModal, setTripCompletedModal] = useState(false);
   const [selectedRating, setSelectedRating] = useState(5);
 
-  const [pickupCoords, setPickupCoords] = useState(null);
-  const [destCoords, setDestCoords] = useState(null);
+  const [pickupCoords, setPickupCoords] = useState(location.state?.pickupCoords || null);
+  const [destCoords, setDestCoords] = useState(location.state?.dropCoords || null);
   const [calculatedRouteInfo, setCalculatedRouteInfo] = useState(null);
   const [notes, setNotes] = useState('');
 
@@ -120,7 +121,9 @@ export default function BookRidePage({ user, onLogout }) {
 
   // Auto-detect GPS Location and restore active booking state on mount
   useEffect(() => {
-    handleDetectGpsLocation();
+    if (!location.state?.prefillPickup) {
+      handleDetectGpsLocation();
+    }
 
     const restoreActiveBookingOnMount = async () => {
       if (!user) return;
@@ -324,7 +327,7 @@ export default function BookRidePage({ user, onLogout }) {
 
     try {
       const loc = await getDeviceGpsLocation();
-      setPickup(loc.address);
+      // Only set coordinates to show marker, do not auto-fill text input
       setPickupCoords({ lat: loc.lat, lng: loc.lon });
       setPickupError('');
       setGpsVerified(true);
@@ -359,7 +362,7 @@ export default function BookRidePage({ user, onLogout }) {
       setPickupSuggestions(results);
       setShowPickupDropdown(true);
       setIsSearchingPickup(false);
-    }, 150);
+    }, 600);
   };
 
   const handleDestChange = (e) => {
@@ -382,7 +385,7 @@ export default function BookRidePage({ user, onLogout }) {
       setDestSuggestions(results);
       setShowDestDropdown(results.length > 0);
       setIsSearchingDest(false);
-    }, 250);
+    }, 600);
   };
 
   const selectPickupSuggestion = (loc) => {
@@ -589,25 +592,34 @@ export default function BookRidePage({ user, onLogout }) {
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#1C1C1E] flex justify-center font-sans relative overflow-x-hidden p-0 sm:p-4">
-      {/* Centered Mobile Device Mockup Container */}
-      <div className="w-full max-w-md bg-[#F8F9FA] min-h-screen sm:min-h-[850px] sm:max-h-[900px] sm:my-auto sm:rounded-[40px] sm:border-[8px] sm:border-[#2C2C2E] shadow-2xl flex flex-col relative overflow-y-auto overflow-x-hidden scrollbar-none">
+    <div className="min-h-screen w-full bg-gray-50 flex flex-col font-sans relative overflow-x-hidden">
+      
+      {/* Desktop Header */}
+      <div className="hidden lg:block shrink-0">
+        <Navbar user={user} onLogout={onLogout} />
+      </div>
+
+      {/* Main Container */}
+      <div className="flex-1 w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-0 lg:gap-6 p-0 lg:p-6 relative">
+      
+        {/* Left Sidebar (Mobile Layout) */}
+        <div className="w-full lg:w-[450px] bg-white min-h-screen lg:min-h-0 lg:h-[calc(100vh-140px)] lg:rounded-3xl lg:shadow-xl lg:border lg:border-gray-200 flex flex-col relative overflow-y-auto overflow-x-hidden scrollbar-none shrink-0 z-10 lg:mt-0">
 
         {/* Floating Notification */}
         {rideNotification && (
-          <div className={`absolute top-4 left-4 right-4 z-[9999] p-3 rounded-2xl shadow-xl border transition-all transform animate-bounce-short bg-white ${rideNotification.type === 'accepted' ? 'border-[#34C759] text-black' : 'border-[#FF3B30] text-black'
+          <div className={`absolute top-4 left-4 right-4 z-50 p-3 rounded-2xl shadow-xl border transition-all transform animate-bounce-short bg-white ${rideNotification.type === 'accepted' ? 'border-green-500 text-black' : 'border-red-500 text-black'
             }`}>
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${rideNotification.type === 'accepted' ? 'bg-[#34C759]' : 'bg-[#FF3B30]'}`} />
+                <span className={`w-2 h-2 rounded-full ${rideNotification.type === 'accepted' ? 'bg-green-500' : 'bg-red-500'}`} />
                 <div>
-                  <h4 className="text-xs font-black text-[#1C1C1E]">{rideNotification.title}</h4>
-                  <p className="text-[11px] font-semibold text-[#636366] mt-0.5">{rideNotification.message}</p>
+                  <h4 className="text-xs font-black text-gray-900">{rideNotification.title}</h4>
+                  <p className="text-xs font-semibold text-gray-500 mt-0.5">{rideNotification.message}</p>
                 </div>
               </div>
               <button
                 onClick={() => setRideNotification(null)}
-                className="text-[#8E8E93] hover:text-black font-bold p-1 bg-transparent border-none cursor-pointer"
+                className="text-gray-400 hover:text-black font-bold p-1 bg-transparent border-none cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -617,11 +629,11 @@ export default function BookRidePage({ user, onLogout }) {
 
         {/* Searching for Captain Animated Fullscreen Modal */}
         {isSearchingDriver && (
-          <div className="absolute inset-0 bg-[#1C1C1E]/95 backdrop-blur-md z-[99999] flex flex-col justify-between p-6 text-white animate-fade-in">
+          <div className="absolute inset-0 bg-gray-900/95 backdrop-blur-md z-50 flex flex-col justify-between p-6 text-white animate-fade-in">
             <div className="pt-8 text-center space-y-3">
-              <div className="w-20 h-20 rounded-full bg-[#FFC000]/20 text-[#FFC000] mx-auto flex items-center justify-center relative">
-                <div className="absolute inset-0 rounded-full border-2 border-[#FFC000] animate-ping opacity-75"></div>
-                <Car className="w-10 h-10 text-[#FFC000] animate-bounce" />
+              <div className="w-20 h-20 rounded-full bg-yellow-400/20 text-yellow-400 mx-auto flex items-center justify-center relative">
+                <div className="absolute inset-0 rounded-full border-2 border-yellow-400 animate-ping opacity-75"></div>
+                <Car className="w-10 h-10 text-yellow-400 animate-bounce" />
               </div>
               <h2 className="text-2xl font-black tracking-tight">Finding Nearby Captain...</h2>
               <p className="text-xs font-semibold text-gray-300 max-w-xs mx-auto">
@@ -630,7 +642,7 @@ export default function BookRidePage({ user, onLogout }) {
 
               <div className="w-full bg-white/10 h-2.5 rounded-full overflow-hidden mt-6">
                 <div
-                  className="bg-[#FFC000] h-full transition-all duration-300 rounded-full"
+                  className="bg-yellow-400 h-full transition-all duration-300 rounded-full"
                   style={{ width: `${searchProgress}%` }}
                 ></div>
               </div>
@@ -639,7 +651,7 @@ export default function BookRidePage({ user, onLogout }) {
             <div className="bg-white/10 rounded-3xl p-5 border border-white/10 space-y-3 backdrop-blur-sm">
               <div className="flex items-center justify-between text-xs border-b border-white/10 pb-2">
                 <span className="text-gray-400 font-bold">Vehicle Type</span>
-                <span className="font-black uppercase text-[#FFC000]">{selectedRide}</span>
+                <span className="font-black uppercase text-yellow-400">{selectedRide}</span>
               </div>
               <div className="flex items-center justify-between text-xs border-b border-white/10 pb-2">
                 <span className="text-gray-400 font-bold">Est. Total Fare</span>
@@ -647,13 +659,13 @@ export default function BookRidePage({ user, onLogout }) {
               </div>
               <div className="flex items-center justify-between text-xs">
                 <span className="text-gray-400 font-bold">Pickup</span>
-                <span className="font-black text-gray-200 truncate max-w-[180px]">{pickup || 'Current Location'}</span>
+                <span className="font-black text-gray-200 truncate max-w-44">{pickup || 'Current Location'}</span>
               </div>
             </div>
 
             <button
               onClick={handleCancelBooking}
-              className="w-full py-4 bg-[#FF3B30] hover:bg-[#d73027] text-white font-extrabold text-sm rounded-2xl shadow-xl transition-all border-none cursor-pointer mb-4"
+              className="w-full py-4 bg-red-500 hover:bg-red-600 text-white font-extrabold text-sm rounded-2xl shadow-xl transition-all border-none cursor-pointer mb-4"
             >
               Cancel Request
             </button>
@@ -661,17 +673,17 @@ export default function BookRidePage({ user, onLogout }) {
         )}
 
         {/* Header Bar */}
-        <div className="flex items-center justify-between px-5 pt-6 pb-4 border-b border-[#E5E5EA] bg-white shrink-0 z-30">
+        <div className="flex items-center justify-between px-5 pt-6 pb-4 border-b border-gray-200 bg-white shrink-0 z-30">
           <button
             type="button"
             onClick={() => navigate('/home')}
-            className="w-9 h-9 rounded-full bg-[#F2F2F7] hover:bg-[#E5E5EA] text-[#1C1C1E] flex items-center justify-center transition-colors cursor-pointer border-none"
+            className="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-900 flex items-center justify-center transition-colors cursor-pointer border-none"
           >
-            <ArrowLeft className="w-5 h-5 text-[#1C1C1E]" />
+            <ArrowLeft className="w-5 h-5 text-gray-900" />
           </button>
           <div className="text-center">
-            <h1 className="text-base font-black text-[#1C1C1E]">Book Ride</h1>
-            <span className="text-[10px] text-[#8E8E93] font-bold block">RaahGo Express</span>
+            <h1 className="text-base font-black text-gray-900">Book Ride</h1>
+            <span className="text-xs text-gray-400 font-bold block">RaahGo Express</span>
           </div>
           <div className="w-9"></div>
         </div>
@@ -679,8 +691,8 @@ export default function BookRidePage({ user, onLogout }) {
         {/* Scrollable Content Area */}
         <div className={`flex-1 overflow-y-auto px-4 pt-4 pb-6 space-y-4 scrollbar-none ${showFares ? 'pb-6' : 'pb-6'}`}>
           <div className="space-y-4">
-            {/* Map View at Top */}
-            <div className="h-44 rounded-[24px] overflow-hidden border border-[#E5E5EA] relative z-10 shrink-0 shadow-sm">
+            {/* Map View at Top (Mobile Only) */}
+            <div className="block lg:hidden h-44 rounded-[24px] overflow-hidden border border-gray-200 relative z-10 shrink-0 shadow-sm">
               <RealtimeMap
                 pickup={pickup}
                 destination={destination}
@@ -695,20 +707,19 @@ export default function BookRidePage({ user, onLogout }) {
 
             {/* GPS Status / Error Alert Banner */}
             {locationStatus && (locationStatus.includes('Unable') || locationStatus.includes('unavailable') || locationStatus.includes('denied') || locationStatus.includes('Please enable')) && (
-              <div className="p-3 bg-[#FF3B30]/10 border border-[#FF3B30]/30 rounded-2xl flex items-center gap-2.5 text-xs text-[#FF3B30] font-bold animate-fade-in">
-                <AlertCircle className="w-4 h-4 shrink-0 text-[#FF3B30]" />
+              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center gap-2.5 text-xs text-red-500 font-bold animate-fade-in">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
                 <span className="flex-1">{locationStatus}</span>
               </div>
             )}
 
             {/* Inputs Group Card */}
-            <div className="bg-[#F4F4F6] rounded-[24px] p-4 space-y-3 relative">
+            <div className="bg-gray-100 rounded-[24px] p-4 space-y-3 relative">
               {/* Pickup Location Row */}
               <div className="relative" ref={pickupContainerRef}>
-                <div className={`flex items-center gap-3 bg-white p-2.5 rounded-2xl border transition-all ${
-                  pickupError ? 'border-[#FF3B30] bg-[#FF3B30]/5 ring-1 ring-[#FF3B30]' : 'border-[#E5E5EA]'
-                }`}>
-                  <span className="text-[#34C759] text-base shrink-0">🟢</span>
+                <div className={`flex items-center gap-3 bg-white p-2.5 rounded-2xl border transition-all ${pickupError ? 'border-red-500 bg-red-500/5 ring-1 ring-red-500' : 'border-gray-200'
+                  }`}>
+                  <span className="text-green-500 text-base shrink-0">🟢</span>
                   <div className="flex-1">
                     <input
                       type="text"
@@ -719,7 +730,7 @@ export default function BookRidePage({ user, onLogout }) {
                         setPickupError('');
                       }}
                       placeholder="Pickup location"
-                      className="w-full bg-transparent text-sm font-bold text-[#1C1C1E] focus:outline-none border-none p-0"
+                      className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
                     />
                   </div>
                   <button
@@ -729,13 +740,13 @@ export default function BookRidePage({ user, onLogout }) {
                       handleDetectGpsLocation();
                     }}
                     disabled={isLocating}
-                    className="px-2.5 py-1 bg-[#007AFF]/10 hover:bg-[#007AFF]/20 text-[#007AFF] rounded-xl text-[11px] font-black flex items-center gap-1 transition-colors border-none cursor-pointer"
+                    className="px-2.5 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 rounded-xl text-xs font-black flex items-center gap-1 transition-colors border-none cursor-pointer"
                     title="Get current GPS location"
                   >
                     {isLocating ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#007AFF]" />
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
                     ) : (
-                      <LocateFixed className="w-3.5 h-3.5 text-[#007AFF]" />
+                      <LocateFixed className="w-3.5 h-3.5 text-blue-500" />
                     )}
                     <span>{isLocating ? 'Locating...' : 'GPS'}</span>
                   </button>
@@ -743,25 +754,25 @@ export default function BookRidePage({ user, onLogout }) {
 
                 {/* Inline Error Message */}
                 {pickupError && (
-                  <p className="text-[11px] font-extrabold text-[#FF3B30] mt-1.5 flex items-center gap-1.5 animate-fade-in pl-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#FF3B30] shrink-0"></span>
+                  <p className="text-xs font-extrabold text-red-500 mt-1.5 flex items-center gap-1.5 animate-fade-in pl-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
                     <span>{pickupError}</span>
                   </p>
                 )}
 
                 {showPickupDropdown && (
-                  <div className="absolute left-0 right-0 bg-white border border-[#E5E5EA] mt-2 rounded-2xl shadow-2xl z-[999] max-h-56 overflow-y-auto text-left p-1 divide-y divide-[#F8F9FA]">
+                  <div className="absolute left-0 right-0 bg-white border border-gray-200 mt-2 rounded-2xl shadow-2xl z-50 max-h-56 overflow-y-auto text-left p-1 divide-y divide-gray-50">
                     {/* 1-Tap Current Location Shortcut */}
                     <div
                       onClick={handleDetectGpsLocation}
-                      className="p-2.5 hover:bg-[#E8F2FF] cursor-pointer rounded-xl flex items-center gap-3 transition-colors text-xs font-bold text-[#007AFF] bg-[#F4F8FF] mb-1"
+                      className="p-2.5 hover:bg-blue-50 cursor-pointer rounded-xl flex items-center gap-3 transition-colors text-xs font-bold text-blue-500 bg-blue-50 mb-1"
                     >
-                      <div className="w-7 h-7 rounded-full bg-[#007AFF]/15 flex items-center justify-center shrink-0">
-                        <LocateFixed className="w-4 h-4 text-[#007AFF] animate-pulse" />
+                      <div className="w-7 h-7 rounded-full bg-blue-500/15 flex items-center justify-center shrink-0">
+                        <LocateFixed className="w-4 h-4 text-blue-500 animate-pulse" />
                       </div>
                       <div className="flex-1">
-                        <p className="font-extrabold text-[#007AFF] text-xs">Use Current GPS Location</p>
-                        <p className="text-[10px] text-[#636366] font-medium">Detect address via live device GPS</p>
+                        <p className="font-extrabold text-blue-500 text-xs">Use Current GPS Location</p>
+                        <p className="text-xs text-gray-500 font-medium">Detect address via live device GPS</p>
                       </div>
                     </div>
 
@@ -770,17 +781,17 @@ export default function BookRidePage({ user, onLogout }) {
                       <div
                         key={idx}
                         onClick={() => selectPickupSuggestion(loc)}
-                        className="p-2.5 hover:bg-[#F2F2F7] cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
+                        className="p-2.5 hover:bg-gray-100 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
                       >
                         <span className="text-base shrink-0">{loc.icon || '📍'}</span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between">
-                            <p className="text-[#1C1C1E] font-extrabold truncate">{loc.title}</p>
+                            <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
                             {loc.distanceKm < 999 && (
-                              <span className="text-[10px] text-[#636366] font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
+                              <span className="text-xs text-gray-500 font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
                             )}
                           </div>
-                          <p className="text-[10px] text-[#636366] truncate mt-0.5 font-medium">{loc.subtitle}</p>
+                          <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
                         </div>
                       </div>
                     ))}
@@ -789,14 +800,13 @@ export default function BookRidePage({ user, onLogout }) {
               </div>
 
               {/* Divider line */}
-              <div className="border-t border-[#E5E5EA]"></div>
+              <div className="border-t border-gray-200"></div>
 
               {/* Destination Row */}
               <div className="relative" ref={destContainerRef}>
-                <div className={`flex items-center gap-3 bg-white p-2.5 rounded-2xl border transition-all ${
-                  destError ? 'border-[#FF3B30] bg-[#FF3B30]/5 ring-1 ring-[#FF3B30]' : 'border-[#E5E5EA]'
-                }`}>
-                  <span className="text-[#FF3B30] text-base shrink-0">📍</span>
+                <div className={`flex items-center gap-3 bg-white p-2.5 rounded-2xl border transition-all ${destError ? 'border-red-500 bg-red-500/5 ring-1 ring-red-500' : 'border-gray-200'
+                  }`}>
+                  <span className="text-red-500 text-base shrink-0">📍</span>
                   <div className="flex-1">
                     <input
                       type="text"
@@ -807,36 +817,36 @@ export default function BookRidePage({ user, onLogout }) {
                         setDestError('');
                       }}
                       placeholder="Drop location"
-                      className="w-full bg-transparent text-sm font-bold text-[#1C1C1E] focus:outline-none border-none p-0"
+                      className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
                     />
                   </div>
                 </div>
 
                 {/* Inline Error Message */}
                 {destError && (
-                  <p className="text-[11px] font-extrabold text-[#FF3B30] mt-1.5 flex items-center gap-1.5 animate-fade-in pl-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#FF3B30] shrink-0"></span>
+                  <p className="text-xs font-extrabold text-red-500 mt-1.5 flex items-center gap-1.5 animate-fade-in pl-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
                     <span>{destError}</span>
                   </p>
                 )}
 
                 {showDestDropdown && destSuggestions.length > 0 && (
-                  <div className="absolute left-0 right-0 bg-white border border-[#E5E5EA] mt-2 rounded-2xl shadow-2xl z-[999] max-h-56 overflow-y-auto text-left p-1 divide-y divide-[#F8F9FA]">
+                  <div className="absolute left-0 right-0 bg-white border border-gray-200 mt-2 rounded-2xl shadow-2xl z-50 max-h-56 overflow-y-auto text-left p-1 divide-y divide-gray-50">
                     {destSuggestions.map((loc, idx) => (
                       <div
                         key={idx}
                         onClick={() => selectDestSuggestion(loc)}
-                        className="p-2.5 hover:bg-[#F2F2F7] cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
+                        className="p-2.5 hover:bg-gray-100 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
                       >
                         <span className="text-base shrink-0">{loc.icon || '📍'}</span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between">
-                            <p className="text-[#1C1C1E] font-extrabold truncate">{loc.title}</p>
+                            <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
                             {loc.distanceKm < 999 && (
-                              <span className="text-[10px] text-[#636366] font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
+                              <span className="text-xs text-gray-500 font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
                             )}
                           </div>
-                          <p className="text-[10px] text-[#636366] truncate mt-0.5 font-medium">{loc.subtitle}</p>
+                          <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
                         </div>
                       </div>
                     ))}
@@ -851,7 +861,7 @@ export default function BookRidePage({ user, onLogout }) {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Note to driver (optional)"
-                className="w-full bg-white border border-[#E5E5EA] rounded-[16px] p-3.5 text-xs text-[#1C1C1E] font-medium focus:border-[#FFC000] focus:ring-0 focus:outline-none resize-none h-16 shadow-2xs"
+                className="w-full bg-white border border-gray-200 rounded-[16px] p-3.5 text-xs text-gray-900 font-medium focus:border-yellow-400 focus:ring-0 focus:outline-none resize-none h-16 shadow-2xs"
               />
             </div>
 
@@ -879,7 +889,7 @@ export default function BookRidePage({ user, onLogout }) {
 
                 setShowFares(true);
               }}
-              className="w-full py-3.5 bg-[#FFC000] hover:bg-[#e6ad00] text-black font-extrabold text-sm rounded-[16px] shadow-md transition-all text-center cursor-pointer border-none"
+              className="w-full py-3.5 bg-yellow-400 hover:bg-yellow-500 text-black font-extrabold text-sm rounded-[16px] shadow-md transition-all text-center cursor-pointer border-none"
             >
               Show Fare Estimates
             </button>
@@ -895,24 +905,22 @@ export default function BookRidePage({ user, onLogout }) {
                       <div
                         key={ride.id}
                         onClick={() => setSelectedRide(ride.id)}
-                        className={`p-3.5 rounded-[20px] border flex items-center justify-between transition-all bg-white cursor-pointer ${
-                          isSelected ? 'border-[#FFC000] bg-[#FFF9E6] shadow-xs' : 'border-[#E5E5EA] hover:border-[#C7C7CC]'
-                        }`}
+                        className={`p-3.5 rounded-[20px] border flex items-center justify-between transition-all bg-white cursor-pointer ${isSelected ? 'border-yellow-400 bg-yellow-50 shadow-xs' : 'border-gray-200 hover:border-gray-300'
+                          }`}
                       >
                         <div className="flex items-center gap-4">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                            isSelected ? 'bg-[#FFC000] text-black' : 'bg-gray-100 text-gray-500'
-                          }`}>
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${isSelected ? 'bg-yellow-400 text-black' : 'bg-gray-100 text-gray-500'
+                            }`}>
                             <span className="text-lg">{ride.icon}</span>
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
                               <h4 className="font-extrabold text-sm text-black">{ride.name}</h4>
-                              <span className="text-[10px] bg-gray-100 font-bold text-gray-600 px-1.5 py-0.5 rounded">
+                              <span className="text-xs bg-gray-100 font-bold text-gray-600 px-1.5 py-0.5 rounded">
                                 {ride.capacity}
                               </span>
                             </div>
-                            <p className="text-[11px] text-gray-500 font-medium">{ride.eta} away · {ride.desc}</p>
+                            <p className="text-xs text-gray-500 font-medium">{ride.eta} away · {ride.desc}</p>
                           </div>
                         </div>
                         <div className="text-right">
@@ -928,7 +936,7 @@ export default function BookRidePage({ user, onLogout }) {
                   type="button"
                   onClick={handleBookRide}
                   disabled={isBooking}
-                  className="w-full py-4 bg-[#FFC000] hover:bg-[#e6ad00] text-black font-black text-base rounded-[20px] shadow-lg hover:shadow-xl transition-all cursor-pointer border-none flex items-center justify-center gap-2 mt-4"
+                  className="w-full py-4 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-base rounded-[20px] shadow-lg hover:shadow-xl transition-all cursor-pointer border-none flex items-center justify-center gap-2 mt-4"
                 >
                   {isBooking ? (
                     <>
@@ -946,7 +954,29 @@ export default function BookRidePage({ user, onLogout }) {
             )}
           </div>
         </div>
+      </div> {/* End of Left Sidebar */}
+
+      {/* Right Area (Desktop Map) */}
+      <div className="hidden lg:block flex-1 rounded-3xl overflow-hidden shadow-xl border border-gray-200 relative h-[calc(100vh-140px)] lg:mt-0 shrink-0 z-10">
+        <RealtimeMap
+          pickup={pickup}
+          destination={destination}
+          pickupCoords={pickupCoords}
+          destCoords={destCoords}
+          mode="booking"
+          selectedRide={selectedRide}
+          onRouteCalculated={(info) => setCalculatedRouteInfo(info)}
+          onLocateMe={handleDetectGpsLocation}
+        />
       </div>
+      
+      </div> {/* End of Main Container */}
+
+      {/* Desktop Footer */}
+      <div className="hidden lg:block shrink-0 w-full mt-auto">
+        <Footer />
+      </div>
+
     </div>
   );
 }

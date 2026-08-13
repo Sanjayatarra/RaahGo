@@ -3,10 +3,13 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MapPin, Navigation, Car, ShieldCheck, Clock, Search, ArrowRight, ArrowLeft, Star,
   CreditCard, Tag, CheckCircle2, ChevronRight, LogOut, User, RefreshCw, Zap,
-  LocateFixed, Loader2, KeyRound, Lock, Unlock, AlertCircle, X
+  LocateFixed, Loader2, KeyRound, Lock, Unlock, AlertCircle, X, Menu, Ticket, Package,
+  Apple, Play
 } from 'lucide-react';
 import { getDeviceGpsLocation } from '../common/locationService';
 import { fetchWithAuth } from '../common/apiClient';
+import Navbar from './Navbar';
+import Footer from './Footer';
 
 export default function HomePage({ user, onLogout }) {
   const navigate = useNavigate();
@@ -15,14 +18,25 @@ export default function HomePage({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('home');
   const [pickup, setPickup] = useState('');
   const [pickupCoords, setPickupCoords] = useState(null);
+  const [currentGpsName, setCurrentGpsName] = useState('');
+  const [drop, setDrop] = useState('');
+  const [dropCoords, setDropCoords] = useState(null);
   const [rideHistory, setRideHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  
+  const [pickupSuggestions, setPickupSuggestions] = useState([]);
+  const [dropSuggestions, setDropSuggestions] = useState([]);
+  const [isSearchingPickup, setIsSearchingPickup] = useState(false);
+  const [isSearchingDrop, setIsSearchingDrop] = useState(false);
+
+  const pickupTimeoutRef = useRef(null);
+  const dropTimeoutRef = useRef(null);
 
   const miniMapRef = useRef(null);
   const miniMapInstance = useRef(null);
   const [miniMapLoaded, setMiniMapLoaded] = useState(false);
 
-  // Load Leaflet dynamically for Mini Map preview card
+  // Load Leaflet dynamically for Mini Map preview
   useEffect(() => {
     if (window.L) {
       setMiniMapLoaded(true);
@@ -48,7 +62,7 @@ export default function HomePage({ user, onLogout }) {
     const detectGps = async () => {
       try {
         const loc = await getDeviceGpsLocation();
-        setPickup(loc.address);
+        setCurrentGpsName(loc.address);
         setPickupCoords({ lat: loc.lat, lng: loc.lon });
       } catch (err) {
         console.log('GPS home notice:', err);
@@ -57,7 +71,7 @@ export default function HomePage({ user, onLogout }) {
     detectGps();
   }, []);
 
-  // Instantiate Mini Map Preview
+  // Instantiate Map for Mobile Background
   useEffect(() => {
     if (!miniMapLoaded || !miniMapRef.current || miniMapInstance.current) return;
     const L = window.L;
@@ -71,11 +85,11 @@ export default function HomePage({ user, onLogout }) {
       zoom: 15,
       zoomControl: false,
       attributionControl: false,
-      dragging: false,
-      scrollWheelZoom: false,
-      doubleClickZoom: false,
-      boxZoom: false,
-      touchZoom: false
+      dragging: true,
+      scrollWheelZoom: true,
+      doubleClickZoom: true,
+      boxZoom: true,
+      touchZoom: true
     });
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -84,9 +98,9 @@ export default function HomePage({ user, onLogout }) {
 
     const amberIcon = L.divIcon({
       html: `
-        <div style="position: relative; width: 32px; height: 32px; display: flex; items-center; justify-content: center;">
-          <div style="position: absolute; width: 30px; height: 30px; background: rgba(255, 192, 0, 0.4); border-radius: 50%; animation: ping 1.5s infinite;"></div>
-          <div style="background-color: #FFC000; color: black; width: 26px; height: 26px; border-radius: 50%; border: 2px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.3); display: flex; items-center; justify-content: center; font-size: 13px; font-weight: bold; z-index: 5;">📍</div>
+        <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
+          <div style="position: absolute; width: 30px; height: 30px; background: rgba(34, 197, 94, 0.2); border-radius: 50%; animation: ping 1.5s infinite;"></div>
+          <div style="background-color: #22C55E; color: white; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); z-index: 5;"></div>
         </div>
       `,
       className: 'custom-div-icon',
@@ -111,7 +125,7 @@ export default function HomePage({ user, onLogout }) {
     };
   }, [miniMapLoaded]);
 
-  // Update Mini Map position when pickupCoords or activeTab changes
+  // Update Map position when pickupCoords changes
   useEffect(() => {
     if (miniMapInstance.current) {
       const L = window.L;
@@ -131,9 +145,9 @@ export default function HomePage({ user, onLogout }) {
 
       const amberIcon = L.divIcon({
         html: `
-          <div style="position: relative; width: 32px; height: 32px; display: flex; items-center; justify-content: center;">
-            <div style="position: absolute; width: 30px; height: 30px; background: rgba(255, 192, 0, 0.4); border-radius: 50%; animation: ping 1.5s infinite;"></div>
-            <div style="background-color: #FFC000; color: black; width: 26px; height: 26px; border-radius: 50%; border: 2px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.3); display: flex; items-center; justify-content: center; font-size: 13px; font-weight: bold; z-index: 5;">📍</div>
+          <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
+            <div style="position: absolute; width: 30px; height: 30px; background: rgba(34, 197, 94, 0.2); border-radius: 50%; animation: ping 1.5s infinite;"></div>
+            <div style="background-color: #22C55E; color: white; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); z-index: 5;"></div>
           </div>
         `,
         className: 'custom-div-icon',
@@ -143,7 +157,7 @@ export default function HomePage({ user, onLogout }) {
 
       L.marker([pLat, pLng], { icon: amberIcon }).addTo(miniMapInstance.current);
     }
-  }, [pickupCoords, activeTab]);
+  }, [pickupCoords]);
 
   // Fetch history when tab is switched to activity
   useEffect(() => {
@@ -168,293 +182,571 @@ export default function HomePage({ user, onLogout }) {
     }
   };
 
-  const handleQuickBook = (rideType) => {
-    navigate('/book-ride', { state: { selectedRide: rideType } });
+  const fetchSuggestions = async (query, type) => {
+    if (!query || query.length < 3) {
+      if (type === 'pickup') setPickupSuggestions([]);
+      else setDropSuggestions([]);
+      return;
+    }
+    
+    if (type === 'pickup') setIsSearchingPickup(true);
+    else setIsSearchingDrop(true);
+
+    try {
+      let url = `/api/v1/bookings/location-suggestions/?q=${encodeURIComponent(query)}`;
+      if (pickupCoords) {
+        url += `&lat=${pickupCoords.lat}&lon=${pickupCoords.lng}`;
+      }
+      const res = await fetchWithAuth(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (type === 'pickup') setPickupSuggestions(data.suggestions || []);
+        else setDropSuggestions(data.suggestions || []);
+      }
+    } catch (e) {
+      console.log('Error fetching suggestions', e);
+    } finally {
+      if (type === 'pickup') setIsSearchingPickup(false);
+      else setIsSearchingDrop(false);
+    }
+  };
+
+  const handlePickupChange = (e) => {
+    const val = e.target.value;
+    setPickup(val);
+    
+    if (pickupTimeoutRef.current) clearTimeout(pickupTimeoutRef.current);
+    pickupTimeoutRef.current = setTimeout(() => {
+      fetchSuggestions(val, 'pickup');
+    }, 600);
+  };
+
+  const handleDropChange = (e) => {
+    const val = e.target.value;
+    setDrop(val);
+    
+    if (dropTimeoutRef.current) clearTimeout(dropTimeoutRef.current);
+    dropTimeoutRef.current = setTimeout(() => {
+      fetchSuggestions(val, 'drop');
+    }, 600);
+  };
+
+  const handleSelectPickup = (item) => {
+    setPickup(item.display_name);
+    setPickupCoords({ lat: item.lat, lng: item.lon });
+    setPickupSuggestions([]);
+  };
+
+  const handleSelectDrop = (item) => {
+    setDrop(item.display_name);
+    setDropCoords({ lat: item.lat, lng: item.lon });
+    setDropSuggestions([]);
+  };
+
+  const handleDesktopBookRide = (e) => {
+    e.preventDefault();
+    navigate('/book-ride', { 
+      state: { 
+        prefillPickup: pickup, 
+        prefillDrop: drop,
+        pickupCoords: pickupCoords,
+        dropCoords: dropCoords
+      } 
+    });
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#1C1C1E] flex justify-center font-sans relative overflow-x-hidden p-0 sm:p-4">
-      {/* Centered Mobile Device Mockup Container */}
-      <div className="w-full max-w-md bg-[#F8F9FA] min-h-screen sm:min-h-[850px] sm:max-h-[900px] sm:my-auto sm:rounded-[40px] sm:border-[8px] sm:border-[#2C2C2E] shadow-2xl flex flex-col relative overflow-y-auto overflow-x-hidden scrollbar-none">
+    <div className="w-full bg-white font-sans text-gray-900 overflow-x-hidden min-h-screen">
+      
+      {/* 
+        ============================================================
+        MOBILE / TABLET LAYOUT (Hidden on Desktop)
+        ============================================================
+      */}
+      <div className="block lg:hidden relative h-screen w-full bg-gray-100 overflow-hidden">
+        
+        {/* Fullscreen Map Background */}
+        <div ref={miniMapRef} className="absolute inset-0 w-full h-[55%] z-0"></div>
 
-        {/* Home View */}
-        {activeTab === 'home' && (
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            {/* Header (Fixed Top) */}
-            <div className="flex items-center justify-between px-5 pt-6 pb-4 shrink-0">
-              <div>
-                <span className="text-xs text-[#8E8E93] font-bold">Hi, {user?.name || 'Guest'} 👋</span>
-                <h2 className="text-2xl font-black text-[#1C1C1E] tracking-tight">Where to today?</h2>
-              </div>
-              <button
-                onClick={() => setActiveTab('profile')}
-                className="w-10 h-10 rounded-full bg-[#FFC000] text-black font-extrabold flex items-center justify-center shadow-md cursor-pointer border-none"
-              >
-                <User className="w-5 h-5 text-black" />
-              </button>
-            </div>
-
-            {/* Overflow Scrollable Section */}
-            <div className="flex-1 overflow-y-auto pb-24 scrollbar-none">
-              {/* Search Bar Shortcut */}
-              <div className="px-5 mb-5">
-                <div
-                  onClick={() => navigate('/book-ride')}
-                  className="flex items-center gap-3 bg-[#F2F2F7] border border-[#E5E5EA] px-4 py-3.5 rounded-2xl cursor-pointer hover:border-[#C7C7CC] transition-all"
-                >
-                  <Search className="w-5 h-5 text-[#8E8E93]" />
-                  <span className="text-[#8E8E93] font-bold text-sm">Enter destination</span>
-                </div>
-              </div>
-
-              {/* Map Preview card */}
-              <div className="px-5 mb-6">
-                <div
-                  onClick={() => navigate('/book-ride')}
-                  className="relative h-36 rounded-3xl overflow-hidden border border-[#E5E5EA] shadow-md bg-[#E5E5EA] cursor-pointer group"
-                >
-                  <div ref={miniMapRef} className="absolute inset-0 w-full h-full z-0"></div>
-                  <div className="absolute inset-0 bg-transparent z-10"></div>
-                </div>
-              </div>
-
-              {/* Services Section */}
-              <div className="px-5 mb-6">
-                <h3 className="text-base font-black text-[#1C1C1E] mb-3">Services</h3>
-                <div className="space-y-3">
-                  {/* Book Ride */}
-                  <div
-                    onClick={() => navigate('/book-ride')}
-                    className="bg-[#FFF9E6] border border-[#FFC000]/40 rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:border-[#FFC000] transition-all"
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-[#FFC000]/20 flex items-center justify-center shrink-0">
-                        <Car className="w-6 h-6 text-[#8A6500]" />
-                      </div>
-                      <div>
-                        <h4 className="font-extrabold text-sm text-[#1C1C1E]">Book Ride</h4>
-                        <p className="text-[11px] text-[#8A6500] font-semibold mt-0.5">Bike, Auto, Car, Taxi, E-Rickshaw</p>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-[#8A6500]" />
-                  </div>
-
-                  {/* Porter */}
-                  <div
-                    onClick={() => alert('Porter delivery is coming soon!')}
-                    className="bg-[#E8F8EE] border border-[#34C759]/20 rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:border-[#34C759]/40 transition-all opacity-95"
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-[#34C759]/15 flex items-center justify-center shrink-0">
-                        <Navigation className="w-6 h-6 text-[#248A3D]" />
-                      </div>
-                      <div>
-                        <h4 className="font-extrabold text-sm text-[#1C1C1E]">Porter</h4>
-                        <p className="text-[11px] text-[#248A3D] font-semibold mt-0.5">Move goods, mini-truck</p>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-[#248A3D]" />
-                  </div>
-
-                  {/* Parcel */}
-                  <div
-                    onClick={() => alert('Parcel dispatch is coming soon!')}
-                    className="bg-[#E8F2FF] border border-[#007AFF]/20 rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:border-[#007AFF]/40 transition-all opacity-95"
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-[#007AFF]/10 flex items-center justify-center shrink-0">
-                        <ShieldCheck className="w-6 h-6 text-[#0056b3]" />
-                      </div>
-                      <div>
-                        <h4 className="font-extrabold text-sm text-[#1C1C1E]">Parcel</h4>
-                        <p className="text-[11px] text-[#0056b3] font-semibold mt-0.5">Send packages across city</p>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-[#007AFF]" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Quick book */}
-              <div className="px-5 mb-6">
-                <h3 className="text-base font-black text-[#1C1C1E] mb-3">Quick book</h3>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleQuickBook('bike')}
-                    className="flex-1 py-2.5 px-4 bg-white border border-[#E5E5EA] rounded-full text-xs font-extrabold text-[#1C1C1E] hover:border-[#C7C7CC] flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
-                  >
-                    <span>🏍️</span> Bike
-                  </button>
-                  <button
-                    onClick={() => handleQuickBook('auto')}
-                    className="flex-1 py-2.5 px-4 bg-white border border-[#E5E5EA] rounded-full text-xs font-extrabold text-[#1C1C1E] hover:border-[#C7C7CC] flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
-                  >
-                    <span>🛺</span> Auto
-                  </button>
-                  <button
-                    onClick={() => handleQuickBook('car')}
-                    className="flex-1 py-2.5 px-4 bg-white border border-[#E5E5EA] rounded-full text-xs font-extrabold text-[#1C1C1E] hover:border-[#C7C7CC] flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
-                  >
-                    <span>🚗</span> Car
-                  </button>
-                </div>
-              </div>
-
-              {/* Promo card */}
-              <div className="px-5 mb-10">
-                <div className="bg-[#FFC000] rounded-2xl p-4 flex items-center justify-between text-black shadow-md shadow-[#FFC000]/25 relative overflow-hidden">
-                  <div className="absolute right-0 top-0 translate-x-4 -translate-y-4 w-20 h-20 bg-white/20 rounded-full blur-xl pointer-events-none"></div>
-                  <div className="space-y-1 z-10">
-                    <h4 className="text-base font-black">50% OFF first ride</h4>
-                    <p className="text-xs font-bold text-black/80">Use code: <span className="bg-white/40 px-2 py-0.5 rounded border border-black/10">WELCOME50</span></p>
-                  </div>
-                  <Tag className="w-8 h-8 text-black/80 shrink-0" />
-                </div>
-              </div>
-            </div>
+        {/* Top Header Over Map */}
+        <div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-start pointer-events-none">
+          <div className="bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm pointer-events-auto flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+            <span className="text-xs font-bold text-gray-800 truncate max-w-[200px]">
+              {currentGpsName || 'Locating...'}
+            </span>
           </div>
-        )}
-
-        {/* Activity Tab View */}
-        {activeTab === 'activity' && (
-          <div className="p-5 space-y-4 flex-1 overflow-y-auto pb-24 scrollbar-none">
-            <h3 className="text-xl font-black text-[#1C1C1E]">My Activity</h3>
-            {!user ? (
-              <div className="text-center py-12 bg-white rounded-3xl border border-[#E5E5EA] shadow-xs space-y-4 p-6">
-                <Clock className="w-12 h-12 text-gray-300 mx-auto" />
-                <div>
-                  <h3 className="text-sm font-black text-[#1C1C1E]">Not Logged In</h3>
-                  <p className="text-xs text-[#8E8E93] font-bold mt-1">Please log in to view your ride history.</p>
-                </div>
-              </div>
-            ) : isLoadingHistory ? (
-              <div className="text-center py-12 space-y-3">
-                <Loader2 className="w-8 h-8 text-[#FFC000] animate-spin mx-auto" />
-                <p className="text-xs font-extrabold text-[#8E8E93]">Fetching your ride history...</p>
-              </div>
-            ) : rideHistory.length === 0 ? (
-              <div className="text-center py-12 bg-white rounded-3xl border border-[#E5E5EA] shadow-xs space-y-3 p-6">
-                <Clock className="w-10 h-10 text-gray-300 mx-auto" />
-                <p className="text-xs text-[#8E8E93] font-bold">No ride activity found yet.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {rideHistory.map((ride) => (
-                  <div key={ride.id} className="bg-white rounded-2xl p-4 border border-[#E5E5EA] shadow-2xs space-y-2">
-                    <div className="flex items-center justify-between border-b border-[#F2F2F7] pb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs uppercase font-black text-white bg-[#1C1C1E] px-2 py-0.5 rounded">
-                          {ride.booking_number || 'Ride'}
-                        </span>
-                        <span className={`text-[10px] uppercase font-black px-2 py-0.5 rounded ${ride.status === 'Completed' ? 'bg-[#34C759]/10 text-[#34C759]' :
-                            ride.status === 'Cancelled' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' :
-                              'bg-[#FFC000]/10 text-[#FF9F0A]'
-                          }`}>
-                          {ride.status}
-                        </span>
-                      </div>
-                      <span className="font-extrabold text-sm text-[#1C1C1E]">₹{ride.total_fare}</span>
-                    </div>
-
-                    <div className="space-y-1 pt-1 text-xs">
-                      <p className="text-[#1C1C1E] font-extrabold truncate">🟢 {ride.pickup_address}</p>
-                      <p className="text-[#636366] font-bold truncate">📍 {ride.dropoff_address}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Profile Tab View */}
-        {activeTab === 'profile' && (
-          <div className="p-5 space-y-5 flex-1 overflow-y-auto pb-24 scrollbar-none">
-            <h3 className="text-xl font-black text-[#1C1C1E]">Customer Profile</h3>
-
-            {user ? (
-              <div className="space-y-4">
-                <div className="bg-white rounded-3xl p-5 border border-[#E5E5EA] shadow-xs flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-[#FFC000] text-black font-black text-xl flex items-center justify-center shadow-md">
-                    {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
-                  </div>
-                  <div>
-                    <h4 className="text-base font-extrabold text-[#1C1C1E]">{user.name}</h4>
-                    <p className="text-xs text-[#8E8E93] font-bold mt-0.5">{user.identifier || user.email || user.phone_number}</p>
-                    <span className="inline-block text-[10px] font-black uppercase tracking-wider text-[#34C759] bg-[#34C759]/10 px-2 py-0.5 rounded-full mt-1">
-                      Verified Customer
-                    </span>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-3xl p-4 border border-[#E5E5EA] shadow-xs space-y-2 text-xs">
-                  <div className="flex items-center justify-between py-2 border-b border-[#F2F2F7]">
-                    <span className="font-bold text-[#8E8E93]">Role</span>
-                    <span className="font-extrabold text-[#1C1C1E]">Customer</span>
-                  </div>
-                  <div className="flex items-center justify-between py-2 border-b border-[#F2F2F7]">
-                    <span className="font-bold text-[#8E8E93]">Session Logged In</span>
-                    <span className="font-extrabold text-[#1C1C1E]">{user.loggedInAt || 'Active'}</span>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={onLogout}
-                  className="w-full py-3.5 bg-[#FF3B30]/10 hover:bg-[#FF3B30]/20 text-[#FF3B30] font-black text-xs rounded-2xl border border-[#FF3B30]/20 transition-all cursor-pointer shadow-none flex items-center justify-center gap-2"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>Log Out of RaahGo Account</span>
-                </button>
-              </div>
-            ) : (
-              <div className="bg-white rounded-3xl p-6 border border-[#E5E5EA] text-center space-y-4">
-                <User className="w-12 h-12 text-gray-300 mx-auto" />
-                <h4 className="text-sm font-black text-[#1C1C1E]">You are browsing as Guest</h4>
-                <p className="text-xs text-[#8E8E93] font-bold">Log in to manage your profile, saved places, and trip receipts.</p>
-                <button
-                  onClick={() => navigate('/login')}
-                  className="w-full py-3 bg-[#FFC000] text-black font-extrabold text-xs rounded-2xl shadow-xs border-none cursor-pointer"
-                >
-                  Log In / Register Now
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Bottom Tab Bar Navigation */}
-        <div className="absolute bottom-0 left-0 right-0 h-16 bg-white/95 backdrop-blur-md border-t border-[#E5E5EA] flex items-center justify-around z-40">
-          <button
-            onClick={() => setActiveTab('home')}
-            className={`flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none ${
-              activeTab === 'home' ? 'text-[#FFC000] scale-105' : 'text-[#8E8E93]'
-            }`}
-          >
-            <Car className="w-5 h-5" />
-            <span className="text-[10px] font-bold">Home</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('activity')}
-            className={`flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none ${
-              activeTab === 'activity' ? 'text-[#FFC000] scale-105' : 'text-[#8E8E93]'
-            }`}
-          >
-            <Clock className="w-5 h-5" />
-            <span className="text-[10px] font-bold">Activity</span>
-          </button>
-
-          <button
+          <button 
             onClick={() => setActiveTab('profile')}
-            className={`flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none ${
-              activeTab === 'profile' ? 'text-[#FFC000] scale-105' : 'text-[#8E8E93]'
-            }`}
+            className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-md pointer-events-auto text-gray-700"
           >
             <User className="w-5 h-5" />
-            <span className="text-[10px] font-bold">Profile</span>
           </button>
         </div>
+
+        {/* Scrollable Bottom Sheet Content */}
+        <div className="absolute bottom-0 left-0 right-0 h-[60%] bg-white rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-20 flex flex-col transition-all duration-300">
+          
+          {/* Drag handle */}
+          <div className="w-full flex justify-center pt-3 pb-1 shrink-0">
+            <div className="w-12 h-1.5 bg-gray-300 rounded-full"></div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 pb-24 scrollbar-none">
+            
+            {activeTab === 'home' && (
+              <div className="space-y-6 animate-fade-in pt-2">
+                {/* Search Bar */}
+                <div 
+                  onClick={() => navigate('/book-ride')}
+                  className="w-full bg-white border-2 border-gray-100 shadow-sm rounded-full px-5 py-4 flex items-center gap-3 cursor-pointer"
+                >
+                  <Search className="w-5 h-5 text-gray-400" />
+                  <span className="text-lg font-bold text-gray-800">Where do you want to go?</span>
+                </div>
+
+                {/* Recent Locations (Mock) */}
+                <div className="space-y-4 px-2">
+                  <div className="flex items-center gap-4 cursor-pointer">
+                    <Clock className="w-5 h-5 text-gray-400 shrink-0" />
+                    <div className="flex-1 border-b border-gray-100 pb-3">
+                      <p className="font-bold text-gray-900 text-sm">City Center Mall</p>
+                      <p className="text-xs text-gray-500 font-medium truncate">MG Road, Sector 28</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 cursor-pointer">
+                    <Clock className="w-5 h-5 text-gray-400 shrink-0" />
+                    <div className="flex-1 border-b border-gray-100 pb-3">
+                      <p className="font-bold text-gray-900 text-sm">Tech Park DLF</p>
+                      <p className="text-xs text-gray-500 font-medium truncate">Cyber City, Phase 2</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Services Section */}
+                <div className="pt-2">
+                  <h3 className="text-sm font-black text-gray-500 mb-3 uppercase tracking-wider">Everything In Minutes</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Parcel */}
+                    <div 
+                      onClick={() => alert('Parcel dispatch is coming soon!')}
+                      className="bg-gray-50 rounded-2xl p-4 flex flex-col justify-between h-32 border border-gray-100 relative overflow-hidden"
+                    >
+                      <div>
+                        <p className="text-sm text-gray-600 font-semibold">Send anything</p>
+                        <h4 className="text-lg font-black text-gray-900">Parcel</h4>
+                      </div>
+                      <Package className="w-12 h-12 text-yellow-600 absolute bottom-2 right-2 opacity-80" />
+                    </div>
+
+                    {/* Metro Tickets */}
+                    <div 
+                      onClick={() => alert('Metro Tickets coming soon!')}
+                      className="bg-gray-50 rounded-2xl p-4 flex flex-col justify-between h-32 border border-gray-100 relative overflow-hidden"
+                    >
+                      <div>
+                        <span className="inline-block px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-black uppercase rounded-md mb-1">Offers</span>
+                        <h4 className="text-lg font-black text-gray-900 leading-tight">Metro tickets</h4>
+                      </div>
+                      <Ticket className="w-10 h-10 text-gray-400 absolute bottom-3 right-3 opacity-80" />
+                    </div>
+
+                    {/* Auto/Rickshaw */}
+                    <div 
+                      onClick={() => navigate('/book-ride', { state: { selectedRide: 'auto' } })}
+                      className="bg-gray-50 rounded-2xl p-4 flex flex-col justify-between h-32 border border-gray-100 relative overflow-hidden"
+                    >
+                      <div>
+                        <p className="text-sm text-gray-600 font-semibold">Private</p>
+                        <h4 className="text-lg font-black text-gray-900 leading-tight">Auto &<br/>Rickshaw</h4>
+                      </div>
+                      <div className="absolute bottom-2 right-2 text-4xl">🛺</div>
+                    </div>
+
+                    {/* All Services */}
+                    <div 
+                      onClick={() => navigate('/book-ride')}
+                      className="bg-gray-50 rounded-2xl p-4 flex flex-col justify-between h-32 border border-gray-100 relative overflow-hidden"
+                    >
+                      <div>
+                        <h4 className="text-lg font-black text-gray-900 leading-tight mt-2">All<br/>Services</h4>
+                      </div>
+                      <div className="absolute bottom-4 right-4 grid grid-cols-2 gap-1">
+                        <div className="w-3 h-3 bg-gray-300 rounded-sm"></div>
+                        <div className="w-3 h-3 bg-yellow-400 rounded-sm"></div>
+                        <div className="w-3 h-3 bg-gray-300 rounded-sm"></div>
+                        <div className="w-3 h-3 bg-gray-300 rounded-sm"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Promo Banner */}
+                <div className="bg-blue-900 rounded-2xl p-4 flex items-center justify-between mt-2">
+                  <h4 className="text-white font-black text-lg">Someone misses you</h4>
+                  <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center">
+                    <MapPin className="w-5 h-5 text-white" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Profile Tab Mobile */}
+            {activeTab === 'profile' && (
+              <div className="space-y-5 animate-fade-in pt-4">
+                <h3 className="text-2xl font-black text-gray-900">Profile</h3>
+                {user ? (
+                  <div className="space-y-4">
+                    <div className="bg-gray-50 rounded-3xl p-5 flex items-center gap-4">
+                      <div className="w-16 h-16 rounded-full bg-yellow-400 text-black font-black text-2xl flex items-center justify-center shadow-sm">
+                        {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+                      </div>
+                      <div>
+                        <h4 className="text-xl font-black text-gray-900">{user.name}</h4>
+                        <p className="text-sm text-gray-500 font-bold">{user.identifier || user.email || user.phone_number}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onLogout}
+                      className="w-full py-4 bg-red-50 text-red-600 font-black text-sm rounded-2xl transition-all cursor-pointer shadow-none flex items-center justify-center gap-2"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      <span>Log Out</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-gray-50 rounded-3xl p-6 text-center space-y-4">
+                    <User className="w-12 h-12 text-gray-300 mx-auto" />
+                    <h4 className="text-base font-black text-gray-900">Guest User</h4>
+                    <p className="text-sm text-gray-500 font-medium">Log in to manage your rides.</p>
+                    <button
+                      onClick={() => navigate('/login')}
+                      className="w-full py-3.5 bg-yellow-400 text-black font-black text-sm rounded-2xl cursor-pointer"
+                    >
+                      Log In
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Activity Tab Mobile */}
+            {activeTab === 'activity' && (
+               <div className="space-y-5 animate-fade-in pt-4">
+               <h3 className="text-2xl font-black text-gray-900">My Rides</h3>
+               {!user ? (
+                 <div className="text-center py-12 bg-gray-50 rounded-3xl space-y-4 p-6">
+                   <Clock className="w-12 h-12 text-gray-300 mx-auto" />
+                   <p className="text-sm text-gray-500 font-bold">Please log in to view your ride history.</p>
+                 </div>
+               ) : isLoadingHistory ? (
+                 <div className="text-center py-12 space-y-3">
+                   <Loader2 className="w-8 h-8 text-yellow-400 animate-spin mx-auto" />
+                 </div>
+               ) : rideHistory.length === 0 ? (
+                 <div className="text-center py-12 bg-gray-50 rounded-3xl space-y-3 p-6">
+                   <Clock className="w-10 h-10 text-gray-300 mx-auto" />
+                   <p className="text-sm text-gray-500 font-bold">No ride activity found yet.</p>
+                 </div>
+               ) : (
+                 <div className="space-y-4">
+                   {rideHistory.map((ride) => (
+                     <div key={ride.id} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-3">
+                       <div className="flex items-center justify-between border-b border-gray-50 pb-2">
+                         <span className="text-xs uppercase font-black bg-gray-100 px-2 py-1 rounded">
+                           {ride.booking_number || 'Ride'}
+                         </span>
+                         <span className="font-extrabold text-sm text-gray-900">₹{ride.total_fare}</span>
+                       </div>
+                       <div className="space-y-2 text-sm">
+                         <p className="text-gray-900 font-extrabold truncate flex gap-2 items-center"><span className="w-2 h-2 rounded-full bg-green-500"></span> {ride.pickup_address}</p>
+                         <p className="text-gray-500 font-bold truncate flex gap-2 items-center"><span className="w-2 h-2 rounded-full bg-red-500"></span> {ride.dropoff_address}</p>
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+               )}
+             </div>
+            )}
+          </div>
+        </div>
+
+        {/* Mobile Bottom Tab Bar */}
+        <div className="absolute bottom-0 left-0 right-0 h-[72px] bg-white border-t border-gray-100 flex items-center justify-around z-40 pb-2 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
+          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none w-16 ${activeTab === 'home' ? 'text-gray-900' : 'text-gray-400'}`}>
+            <Car className={`w-6 h-6 ${activeTab === 'home' ? 'fill-gray-900' : ''}`} />
+            <span className="text-[10px] font-black">Ride</span>
+          </button>
+          <button onClick={() => alert('Metro coming soon')} className="flex flex-col items-center gap-1 cursor-pointer bg-transparent border-none text-gray-400 w-16">
+            <Ticket className="w-6 h-6" />
+            <span className="text-[10px] font-bold">Metro</span>
+          </button>
+          <button onClick={() => alert('Parcel coming soon')} className="flex flex-col items-center gap-1 cursor-pointer bg-transparent border-none text-gray-400 w-16">
+            <Package className="w-6 h-6" />
+            <span className="text-[10px] font-bold">Parcel</span>
+          </button>
+          <button onClick={() => setActiveTab('profile')} className={`flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none w-16 ${activeTab === 'profile' ? 'text-gray-900' : 'text-gray-400'}`}>
+            <User className={`w-6 h-6 ${activeTab === 'profile' ? 'fill-gray-900' : ''}`} />
+            <span className="text-[10px] font-black">Profile</span>
+          </button>
+        </div>
+      </div>
+
+
+      {/* 
+        ============================================================
+        DESKTOP / WEB LAYOUT (Hidden on Mobile)
+        ============================================================
+      */}
+      <div className="hidden lg:block w-full min-h-screen relative">
+        
+        {/* Top Navbar */}
+        <Navbar user={user} onLogout={onLogout} />
+
+        {/* Hero Section */}
+        <section className="w-full bg-gradient-to-b from-gray-50 to-white pt-16 pb-24">
+          <div className="max-w-7xl mx-auto px-6 flex items-center justify-between gap-12">
+            
+            {/* Left Column: Heading & Form */}
+            <div className="w-1/2 space-y-8">
+              <div className="space-y-4">
+                <h1 className="text-6xl font-black text-gray-900 leading-tight">
+                  India's #1<br/>Ride-hailing App
+                </h1>
+                <p className="text-xl text-gray-600 font-medium">Quick, Affordable rides at your doorstep</p>
+              </div>
+
+              {/* Desktop Booking Form */}
+              <form onSubmit={handleDesktopBookRide} className="bg-white rounded-3xl p-6 shadow-[0_10px_40px_rgba(0,0,0,0.08)] border border-gray-100 space-y-4 max-w-md relative z-10">
+                <div className="relative">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-gray-900 rounded-full"></div>
+                  <input 
+                    type="text" 
+                    placeholder="Enter Pickup Location" 
+                    value={pickup}
+                    onChange={handlePickupChange}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-4 pl-12 pr-4 text-gray-900 font-bold focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-all"
+                  />
+                  {isSearchingPickup && <div className="absolute right-4 top-1/2 -translate-y-1/2"><Loader2 className="w-5 h-5 text-gray-400 animate-spin" /></div>}
+                  
+                  {pickupSuggestions.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden z-50">
+                      {pickupSuggestions.map((item, idx) => (
+                        <div 
+                          key={idx} 
+                          onClick={() => handleSelectPickup(item)}
+                          className="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 flex items-center gap-3"
+                        >
+                          <MapPin className="w-4 h-4 text-gray-400 shrink-0" />
+                          <div className="truncate">
+                            <p className="text-sm font-bold text-gray-900 truncate">{item.display_name.split(',')[0]}</p>
+                            <p className="text-xs text-gray-500 truncate">{item.display_name}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="relative">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 w-2.5 h-2.5 border-2 border-gray-900 bg-white rounded-full"></div>
+                  <input 
+                    type="text" 
+                    placeholder="Enter Drop Location" 
+                    value={drop}
+                    onChange={handleDropChange}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-4 pl-12 pr-4 text-gray-900 font-bold focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-all"
+                  />
+                  {isSearchingDrop && <div className="absolute right-4 top-1/2 -translate-y-1/2"><Loader2 className="w-5 h-5 text-gray-400 animate-spin" /></div>}
+                  
+                  {dropSuggestions.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden z-50">
+                      {dropSuggestions.map((item, idx) => (
+                        <div 
+                          key={idx} 
+                          onClick={() => handleSelectDrop(item)}
+                          className="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 flex items-center gap-3"
+                        >
+                          <MapPin className="w-4 h-4 text-gray-400 shrink-0" />
+                          <div className="truncate">
+                            <p className="text-sm font-bold text-gray-900 truncate">{item.display_name.split(',')[0]}</p>
+                            <p className="text-xs text-gray-500 truncate">{item.display_name}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button 
+                  type="submit"
+                  className="w-full py-4 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-lg rounded-xl transition-colors mt-2"
+                >
+                  Book Ride
+                </button>
+              </form>
+            </div>
+
+            {/* Right Column: Hero Graphic */}
+            <div className="w-1/2 relative h-[500px]">
+              <div className="absolute inset-0 bg-blue-50/50 rounded-[40px] overflow-hidden flex items-end justify-center p-8 border border-gray-100 shadow-2xl">
+                {/* Decorative Elements */}
+                <div className="absolute top-10 right-10 w-32 h-32 bg-yellow-400/20 rounded-full blur-3xl"></div>
+                <div className="absolute bottom-10 left-10 w-40 h-40 bg-blue-400/20 rounded-full blur-3xl"></div>
+                
+                {/* Placeholder for Auto/Car Graphic */}
+                <div className="relative z-10 w-full h-full flex flex-col items-center justify-center space-y-6">
+                  <div className="flex items-center gap-6">
+                    <div className="w-32 h-32 bg-white rounded-2xl shadow-lg border border-gray-100 flex flex-col items-center justify-center transform -rotate-6">
+                      <span className="text-5xl">🏍️</span>
+                      <span className="font-black text-gray-900 mt-2">Bike</span>
+                    </div>
+                    <div className="w-40 h-40 bg-yellow-400 rounded-2xl shadow-xl flex flex-col items-center justify-center transform scale-110 z-10">
+                      <span className="text-6xl">🛺</span>
+                      <span className="font-black text-gray-900 mt-2 text-xl">Auto</span>
+                    </div>
+                    <div className="w-32 h-32 bg-white rounded-2xl shadow-lg border border-gray-100 flex flex-col items-center justify-center transform rotate-6">
+                      <span className="text-5xl">🚕</span>
+                      <span className="font-black text-gray-900 mt-2">Cab</span>
+                    </div>
+                  </div>
+                  <div className="bg-gray-900/5 backdrop-blur-sm px-6 py-3 rounded-full text-gray-600 font-bold">
+                    Join 10+ Million Happy Customers
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        {/* Services Grid Section */}
+        <section className="w-full bg-white py-24 border-t border-gray-100">
+          <div className="max-w-7xl mx-auto px-6">
+            <h2 className="text-4xl font-black text-gray-900 mb-12">
+              Our Services
+              <div className="w-16 h-1 bg-yellow-400 mt-4 rounded-full"></div>
+            </h2>
+
+            <div className="grid grid-cols-3 gap-8">
+              {/* Bike Taxi */}
+              <div className="bg-gray-50 hover:bg-white hover:shadow-xl hover:-translate-y-1 border border-gray-100 rounded-3xl p-8 transition-all duration-300 flex items-center justify-between group cursor-pointer">
+                <div>
+                  <h3 className="text-2xl font-black text-gray-900 mb-2">Bike-Taxi</h3>
+                  <p className="text-gray-500 font-medium">Beat traffic, ride quicker</p>
+                </div>
+                <div className="text-6xl group-hover:scale-110 transition-transform">🏍️</div>
+              </div>
+
+              {/* Auto */}
+              <div className="bg-gray-50 hover:bg-white hover:shadow-xl hover:-translate-y-1 border border-gray-100 rounded-3xl p-8 transition-all duration-300 flex items-center justify-between group cursor-pointer">
+                <div>
+                  <h3 className="text-2xl font-black text-gray-900 mb-2">Auto</h3>
+                  <p className="text-gray-500 font-medium">Everyday autos, made easy</p>
+                </div>
+                <div className="text-6xl group-hover:scale-110 transition-transform">🛺</div>
+              </div>
+
+              {/* Cab */}
+              <div className="bg-gray-50 hover:bg-white hover:shadow-xl hover:-translate-y-1 border border-gray-100 rounded-3xl p-8 transition-all duration-300 flex items-center justify-between group cursor-pointer">
+                <div>
+                  <h3 className="text-2xl font-black text-gray-900 mb-2">Cab</h3>
+                  <p className="text-gray-500 font-medium">Comfort for every journey</p>
+                </div>
+                <div className="text-6xl group-hover:scale-110 transition-transform">🚗</div>
+              </div>
+
+              {/* Parcel */}
+              <div className="bg-gray-50 hover:bg-white hover:shadow-xl hover:-translate-y-1 border border-gray-100 rounded-3xl p-8 transition-all duration-300 flex items-center justify-between group cursor-pointer">
+                <div>
+                  <h3 className="text-2xl font-black text-gray-900 mb-2">Parcel</h3>
+                  <p className="text-gray-500 font-medium">Quick & insured deliveries</p>
+                </div>
+                <div className="text-6xl group-hover:scale-110 transition-transform">📦</div>
+              </div>
+
+              {/* Travel */}
+              <div className="bg-gray-50 hover:bg-white hover:shadow-xl hover:-translate-y-1 border border-gray-100 rounded-3xl p-8 transition-all duration-300 flex items-center justify-between group cursor-pointer">
+                <div>
+                  <h3 className="text-2xl font-black text-gray-900 mb-2">Travel & Stay</h3>
+                  <p className="text-gray-500 font-medium">One app, entire journey</p>
+                </div>
+                <div className="text-6xl group-hover:scale-110 transition-transform">🌴</div>
+              </div>
+
+              {/* Metro */}
+              <div className="bg-gray-50 hover:bg-white hover:shadow-xl hover:-translate-y-1 border border-gray-100 rounded-3xl p-8 transition-all duration-300 flex items-center justify-between group cursor-pointer">
+                <div>
+                  <h3 className="text-2xl font-black text-gray-900 mb-2">Metro Ticket</h3>
+                  <p className="text-gray-500 font-medium">Rides to and from metro</p>
+                </div>
+                <div className="text-6xl group-hover:scale-110 transition-transform">🚇</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Footer CTA Section */}
+        <section className="w-full bg-[#1A365D] py-20 text-white">
+          <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
+            <div className="w-1/2 space-y-6">
+              <h2 className="text-5xl font-black mb-2">
+                Earn with RaahGo
+                <div className="w-20 h-1.5 bg-yellow-400 mt-4 rounded-full"></div>
+              </h2>
+              <p className="text-xl text-blue-100 leading-relaxed font-medium">
+                Become a RaahGo Captain. Ride when you want, work how you want, and earn on your own terms.
+              </p>
+              <button className="px-8 py-4 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-lg rounded-xl transition-colors mt-4">
+                Sign Up as Captain
+              </button>
+            </div>
+            <div className="w-5/12 h-[300px] bg-blue-800/50 rounded-3xl border border-blue-400/20 overflow-hidden relative flex flex-col items-center justify-center">
+               <div className="absolute inset-0 flex items-center justify-center opacity-20">
+                 <div className="w-64 h-64 border-4 border-yellow-400 rounded-full animate-ping"></div>
+               </div>
+               <span className="text-7xl z-10">🤑</span>
+               <span className="text-xl font-bold mt-4 z-10 text-blue-100">Zero Commission First Month</span>
+            </div>
+          </div>
+        </section>
+
+        {/* Download Now Section */}
+        <section className="w-full bg-gray-50 py-24">
+          <div className="max-w-7xl mx-auto px-6 text-center">
+            <h2 className="text-4xl font-black text-gray-900 inline-block relative mb-16">
+              Download Now
+              <div className="absolute -bottom-4 left-0 right-0 h-1 bg-yellow-400"></div>
+            </h2>
+
+            <div className="flex items-center justify-center gap-8 max-w-4xl mx-auto">
+              {/* Customer App Card */}
+              <div className="flex-1 bg-white rounded-[32px] p-8 shadow-xl flex items-center gap-6 border border-gray-100 cursor-pointer hover:-translate-y-1 transition-transform">
+                <div className="w-32 h-16 bg-yellow-400 rounded-full flex items-center justify-center shadow-inner relative overflow-hidden">
+                   <span className="font-black text-xl text-black relative z-10 tracking-tight">RaahGo</span>
+                </div>
+                <div className="text-left">
+                  <h3 className="text-xl font-bold text-gray-900 leading-tight">Bike-Taxi,<br/>Auto & Cabs</h3>
+                </div>
+              </div>
+
+              {/* Captain App Card */}
+              <div className="flex-1 bg-white rounded-[32px] p-8 shadow-xl flex items-center gap-6 border border-gray-100 cursor-pointer hover:-translate-y-1 transition-transform">
+                <div className="w-32 h-16 bg-yellow-400 rounded-full flex flex-col items-center justify-center shadow-inner relative overflow-hidden">
+                   <span className="font-black text-xl text-black relative z-10 tracking-tight leading-none">RaahGo</span>
+                   <span className="text-[10px] font-bold text-black relative z-10 uppercase tracking-widest mt-0.5">Captain</span>
+                </div>
+                <div className="text-left">
+                  <h3 className="text-xl font-bold text-gray-900 leading-tight">Drive &<br/>Earn</h3>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <Footer />
+
       </div>
     </div>
   );

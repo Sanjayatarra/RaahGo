@@ -338,3 +338,60 @@ class MovingDetailViewSet(viewsets.ModelViewSet):
 class BookingTrackingViewSet(viewsets.ModelViewSet):
     queryset = BookingTracking.objects.all()
     serializer_class = BookingTrackingSerializer
+
+
+from rest_framework.views import APIView
+import urllib.request
+import urllib.parse
+import json
+
+class LocationSuggestionView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        query = request.query_params.get('q', '').strip()
+        lat = request.query_params.get('lat')
+        lon = request.query_params.get('lon')
+        
+        if not query:
+            return Response({'suggestions': []}, status=status.HTTP_200_OK)
+        
+        # OpenStreetMap Photon API for fetching real locations (Higher rate limits)
+        url = f"https://photon.komoot.io/api/?q={urllib.parse.quote(query)}&limit=6"
+        if lat and lon:
+            url += f"&lat={lat}&lon={lon}"
+            
+        req = urllib.request.Request(url, headers={'User-Agent': 'RaahGoApp/1.0'})
+        
+        try:
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                
+                # Simplify response structure for frontend
+                suggestions = []
+                for item in data.get('features', []):
+                    props = item.get('properties', {})
+                    
+                    # Extract name/address parts
+                    name = props.get('name') or props.get('street') or props.get('district') or ''
+                    city = props.get('city') or props.get('state') or props.get('county') or ''
+                    
+                    parts = [name, city, props.get('country', '')]
+                    # Filter out empty strings and duplicates while preserving order
+                    seen = set()
+                    filtered_parts = [p for p in parts if p and not (p in seen or seen.add(p))]
+                    display_name = ', '.join(filtered_parts)
+                    
+                    coords = item.get('geometry', {}).get('coordinates', [])
+                    
+                    if len(coords) == 2:
+                        suggestions.append({
+                            'display_name': display_name,
+                            'lat': coords[1], # Photon returns [lon, lat]
+                            'lon': coords[0],
+                            'type': props.get('osm_value', 'location')
+                        })
+                return Response({'suggestions': suggestions}, status=status.HTTP_200_OK)
+        except Exception as e:
+            print('Location autocomplete error:', e)
+            return Response({'suggestions': []}, status=status.HTTP_200_OK)
