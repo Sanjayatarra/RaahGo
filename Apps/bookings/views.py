@@ -1,3 +1,4 @@
+import os
 import math
 import random
 from decimal import Decimal
@@ -385,11 +386,29 @@ class LocationSuggestionView(APIView):
                     coords = item.get('geometry', {}).get('coordinates', [])
                     
                     if len(coords) == 2:
+                        dist_km = 0.0
+                        if lat and lon:
+                            try:
+                                dist_km = calculate_haversine_distance(float(lat), float(lon), coords[1], coords[0])
+                            except Exception:
+                                pass
+                                
+                        # max_radius km restriction
+                        radius_str = os.getenv('LOCATION_SUGGESTION_RADIUS_KM', '50')
+                        try:
+                            max_radius = float(radius_str)
+                        except ValueError:
+                            max_radius = 50.0
+
+                        if lat and lon and dist_km > max_radius:
+                            continue
+
                         suggestions.append({
                             'display_name': display_name,
                             'lat': coords[1], # Photon returns [lon, lat]
                             'lon': coords[0],
-                            'type': props.get('osm_value', 'location')
+                            'type': props.get('osm_value', 'location'),
+                            'distanceKm': dist_km
                         })
                 return Response({'suggestions': suggestions}, status=status.HTTP_200_OK)
         except Exception as e:

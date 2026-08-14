@@ -47,15 +47,26 @@ export default function Auth() {
 
     setUser(authData);
     localStorage.setItem('raahgo_user', JSON.stringify(authData));
-    
-    // Immediate navigation to /home to book a ride
-    navigate('/home');
+
+    // Check if there is a pending booking to resume
+    const pendingBooking = localStorage.getItem('pending_booking');
+    if (pendingBooking) {
+      navigate('/book-ride');
+    } else {
+      // Immediate navigation to /home to book a ride
+      navigate('/home');
+    }
   };
 
   const handleProfileComplete = (completedData) => {
     setUser(completedData);
     localStorage.setItem('raahgo_user', JSON.stringify(completedData));
-    navigate('/home');
+    const pendingBooking = localStorage.getItem('pending_booking');
+    if (pendingBooking) {
+      navigate('/book-ride');
+    } else {
+      navigate('/home');
+    }
   };
 
   const handleLogout = () => {
@@ -121,22 +132,20 @@ export default function Auth() {
               <button
                 type="button"
                 onClick={() => navigate('/login')}
-                className={`px-4 py-2 rounded-xl font-bold transition-all text-xs ${
-                  pathView === 'login'
+                className={`px-4 py-2 rounded-xl font-bold transition-all text-xs ${pathView === 'login'
                     ? 'bg-yellow-400 text-black shadow-xs'
                     : 'bg-gray-50 text-gray-700 hover:bg-gray-200'
-                }`}
+                  }`}
               >
                 Log In
               </button>
               <button
                 type="button"
                 onClick={() => navigate('/signup')}
-                className={`px-4 py-2 rounded-xl font-bold transition-all text-xs ${
-                  pathView === 'signup'
+                className={`px-4 py-2 rounded-xl font-bold transition-all text-xs ${pathView === 'signup'
                     ? 'bg-yellow-400 text-black shadow-xs'
                     : 'bg-gray-50 text-gray-700 hover:bg-gray-200'
-                }`}
+                  }`}
               >
                 Sign Up
               </button>

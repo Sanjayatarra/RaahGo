@@ -328,7 +328,7 @@ export default function BookRidePage({ user, onLogout }) {
     try {
       const loc = await getDeviceGpsLocation();
       // Only set coordinates to show marker, do not auto-fill text input
-      setPickupCoords({ lat: loc.lat, lng: loc.lon });
+      setPickupCoords(prev => prev ? prev : { lat: loc.lat, lng: loc.lon });
       setPickupError('');
       setGpsVerified(true);
       setLocationStatus(loc.displayStatus);
@@ -692,7 +692,7 @@ export default function BookRidePage({ user, onLogout }) {
         <div className={`flex-1 overflow-y-auto px-4 pt-4 pb-6 space-y-4 scrollbar-none ${showFares ? 'pb-6' : 'pb-6'}`}>
           <div className="space-y-4">
             {/* Map View at Top (Mobile Only) */}
-            <div className="block lg:hidden h-44 rounded-[24px] overflow-hidden border border-gray-200 relative z-10 shrink-0 shadow-sm">
+            <div className="block lg:hidden h-56 sm:h-64 rounded-[24px] overflow-hidden border border-gray-200 relative z-10 shrink-0 shadow-sm">
               <RealtimeMap
                 pickup={pickup}
                 destination={destination}
@@ -733,23 +733,22 @@ export default function BookRidePage({ user, onLogout }) {
                       className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
                     />
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPickupError('');
-                      handleDetectGpsLocation();
-                    }}
-                    disabled={isLocating}
-                    className="px-2.5 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 rounded-xl text-xs font-black flex items-center gap-1 transition-colors border-none cursor-pointer"
-                    title="Get current GPS location"
-                  >
-                    {isLocating ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
-                    ) : (
-                      <LocateFixed className="w-3.5 h-3.5 text-blue-500" />
-                    )}
-                    <span>{isLocating ? 'Locating...' : 'GPS'}</span>
-                  </button>
+                  {pickup && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPickup('');
+                        setPickupCoords(null);
+                        setPickupSuggestions([]);
+                        setCalculatedRouteInfo(null);
+                      }}
+                      className="w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center shrink-0"
+                      title="Clear pickup location"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                  
                 </div>
 
                 {/* Inline Error Message */}
@@ -820,6 +819,21 @@ export default function BookRidePage({ user, onLogout }) {
                       className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
                     />
                   </div>
+                  {destination && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDestination('');
+                        setDestCoords(null);
+                        setDestSuggestions([]);
+                        setCalculatedRouteInfo(null);
+                      }}
+                      className="w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center shrink-0"
+                      title="Clear drop location"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
 
                 {/* Inline Error Message */}

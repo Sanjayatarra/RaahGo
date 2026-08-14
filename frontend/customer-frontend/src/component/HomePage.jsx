@@ -6,7 +6,7 @@ import {
   LocateFixed, Loader2, KeyRound, Lock, Unlock, AlertCircle, X, Menu, Ticket, Package,
   Apple, Play
 } from 'lucide-react';
-import { getDeviceGpsLocation } from '../common/locationService';
+import { getDeviceGpsLocation, reverseGeocodeGps } from '../common/locationService';
 import { fetchWithAuth } from '../common/apiClient';
 import Navbar from './Navbar';
 import Footer from './Footer';
@@ -19,6 +19,8 @@ export default function HomePage({ user, onLogout }) {
   const [pickup, setPickup] = useState('');
   const [pickupCoords, setPickupCoords] = useState(null);
   const [currentGpsName, setCurrentGpsName] = useState('');
+  const [isLocatingGps, setIsLocatingGps] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
   const [drop, setDrop] = useState('');
   const [dropCoords, setDropCoords] = useState(null);
   const [rideHistory, setRideHistory] = useState([]);
@@ -35,6 +37,35 @@ export default function HomePage({ user, onLogout }) {
   const miniMapRef = useRef(null);
   const miniMapInstance = useRef(null);
   const [miniMapLoaded, setMiniMapLoaded] = useState(false);
+
+  const [sheetHeight, setSheetHeight] = useState(60);
+  const [isDraggingSheet, setIsDraggingSheet] = useState(false);
+  const dragStartY = useRef(0);
+  const dragStartHeight = useRef(60);
+
+  const handleTouchStart = (e) => {
+    setIsDraggingSheet(true);
+    dragStartY.current = e.touches[0].clientY;
+    dragStartHeight.current = sheetHeight;
+  };
+
+  const handleTouchMove = (e) => {
+    if (!isDraggingSheet) return;
+    const deltaY = dragStartY.current - e.touches[0].clientY;
+    const windowHeight = window.innerHeight;
+    const deltaPercent = (deltaY / windowHeight) * 100;
+    const newHeight = Math.min(80, Math.max(60, dragStartHeight.current + deltaPercent));
+    setSheetHeight(newHeight);
+  };
+
+  const handleTouchEnd = () => {
+    setIsDraggingSheet(false);
+    setSheetHeight(prev => (prev > 70 ? 80 : 60));
+  };
+
+  const toggleSheetHeight = () => {
+    setSheetHeight(prev => (prev >= 70 ? 60 : 80));
+  };
 
   // Load Leaflet dynamically for Mini Map preview
   useEffect(() => {
@@ -60,16 +91,111 @@ export default function HomePage({ user, onLogout }) {
   // Auto-detect GPS location on home mount
   useEffect(() => {
     const detectGps = async () => {
+      setIsLocatingGps(true);
       try {
         const loc = await getDeviceGpsLocation();
         setCurrentGpsName(loc.address);
         setPickupCoords({ lat: loc.lat, lng: loc.lon });
+        setPickup(loc.address);
+        if (miniMapInstance.current) {
+          adjustMapView({ lat: loc.lat, lng: loc.lon }, sheetHeight);
+        }
       } catch (err) {
         console.log('GPS home notice:', err);
+      } finally {
+        setIsLocatingGps(false);
       }
     };
     detectGps();
   }, []);
+
+  const handleReLocateGps = async () => {
+    setIsLocatingGps(true);
+    setCurrentGpsName('Locating GPS...');
+    try {
+      const loc = await getDeviceGpsLocation();
+      setCurrentGpsName(loc.address);
+      setPickupCoords({ lat: loc.lat, lng: loc.lon });
+      setPickup(loc.address);
+      if (miniMapInstance.current) {
+        adjustMapView({ lat: loc.lat, lng: loc.lon }, sheetHeight);
+      }
+    } catch (err) {
+      console.log('GPS relocate error:', err);
+    } finally {
+      setIsLocatingGps(false);
+    }
+  };
+
+  // Helper to adjust map view so user marker stays centered in the visible top section above the bottom sheet
+  const adjustMapView = (coords, heightPercent) => {
+    if (!miniMapInstance.current || !window.L) return;
+    const map = miniMapInstance.current;
+    const L = window.L;
+    const pLat = coords?.lat || pickupCoords?.lat || 28.440886;
+    const pLng = coords?.lng || pickupCoords?.lng || 77.038938;
+    const hPercent = heightPercent !== undefined ? heightPercent : sheetHeight;
+
+    const windowH = window.innerHeight || 700;
+    const visibleH = windowH * ((100 - hPercent) / 100);
+    // Position the marker vertically centered in visible area, keeping pin + badge fully above bottom sheet div
+    const targetPixelY = Math.max(70, visibleH / 2 - 12);
+    const pixelOffsetY = (windowH / 2) - targetPixelY;
+
+    const zoom = map.getZoom() || 15;
+    const targetPoint = map.project(L.latLng(pLat, pLng), zoom);
+    const targetCenterPoint = L.point(targetPoint.x, targetPoint.y + pixelOffsetY);
+    const targetCenterLatLng = map.unproject(targetCenterPoint, zoom);
+
+    map.setView(targetCenterLatLng, zoom, { animate: true });
+  };
+
+  const createPinIcon = () => {
+    const L = window.L;
+    if (!L) return null;
+    return L.divIcon({
+      html: `
+        <div style="position: relative; display: flex; flex-direction: column; align-items: center; cursor: grab;" title="Drag to adjust pickup location">
+          <div style="background-color: #22C55E; color: white; width: 38px; height: 38px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center; border: 3px solid white; box-shadow: 0 6px 16px rgba(0,0,0,0.35); z-index: 10;">
+            <span style="transform: rotate(45deg); font-size: 16px; font-weight: bold;">📍</span>
+          </div>
+          <div style="width: 14px; height: 4px; background: rgba(0,0,0,0.3); border-radius: 50%; margin-top: 2px; filter: blur(1px);"></div>
+          <div style="margin-top: 4px; background: #111827; color: white; font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 9999px; display: flex; align-items: center; gap: 5px; box-shadow: 0 3px 10px rgba(0,0,0,0.35); white-space: nowrap; border: 1.5px solid rgba(255,255,255,0.2);">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background-color: #22C55E; display: inline-block;"></span>
+            <span>Pickup Point</span>
+          </div>
+        </div>
+      `,
+      className: 'custom-pickup-pin-badge',
+      iconSize: [120, 76],
+      iconAnchor: [60, 38]
+    });
+  };
+
+  const bindMarkerDrag = (marker) => {
+    marker.on('dragstart', () => {
+      setIsGeocoding(true);
+    });
+
+    marker.on('dragend', async (e) => {
+      const pos = e.target.getLatLng();
+      const lat = pos.lat;
+      const lng = pos.lng;
+      setPickupCoords({ lat, lng });
+      setCurrentGpsName('Detecting location...');
+      setIsGeocoding(true);
+      try {
+        const address = await reverseGeocodeGps(lat, lng);
+        setCurrentGpsName(address);
+        setPickup(address);
+      } catch (err) {
+        console.error('Reverse geocode error:', err);
+        setCurrentGpsName(`Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+      } finally {
+        setIsGeocoding(false);
+      }
+    });
+  };
 
   // Instantiate Map for Mobile Background
   useEffect(() => {
@@ -77,8 +203,8 @@ export default function HomePage({ user, onLogout }) {
     const L = window.L;
     if (!L) return;
 
-    const pLat = pickupCoords?.lat || 28.6139;
-    const pLng = pickupCoords?.lng || 77.2090;
+    const pLat = pickupCoords?.lat || 28.440886;
+    const pLng = pickupCoords?.lng || 77.038938;
 
     const map = L.map(miniMapRef.current, {
       center: [pLat, pLng],
@@ -96,24 +222,56 @@ export default function HomePage({ user, onLogout }) {
       maxZoom: 19
     }).addTo(map);
 
-    const amberIcon = L.divIcon({
-      html: `
-        <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
-          <div style="position: absolute; width: 30px; height: 30px; background: rgba(34, 197, 94, 0.2); border-radius: 50%; animation: ping 1.5s infinite;"></div>
-          <div style="background-color: #22C55E; color: white; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); z-index: 5;"></div>
-        </div>
-      `,
-      className: 'custom-div-icon',
-      iconSize: [32, 32],
-      iconAnchor: [16, 16]
+    const pinIcon = createPinIcon();
+    const marker = L.marker([pLat, pLng], { icon: pinIcon, draggable: true }).addTo(map);
+    bindMarkerDrag(marker);
+
+    map.on('click', async (e) => {
+      const { lat, lng } = e.latlng;
+      setPickupCoords({ lat, lng });
+      setCurrentGpsName('Detecting location...');
+      setIsGeocoding(true);
+      try {
+        const address = await reverseGeocodeGps(lat, lng);
+        setCurrentGpsName(address);
+        setPickup(address);
+      } catch (err) {
+        console.error('Reverse geocode error:', err);
+        setCurrentGpsName(`Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+      } finally {
+        setIsGeocoding(false);
+      }
     });
 
-    L.marker([pLat, pLng], { icon: amberIcon }).addTo(map);
+    map.on('dragend', async () => {
+      const windowH = window.innerHeight || 700;
+      const windowW = window.innerWidth || 360;
+      const visibleH = windowH * ((100 - sheetHeight) / 100);
+      const targetPixelY = Math.max(50, visibleH / 2 + 10);
+      const centerPoint = L.point(windowW / 2, targetPixelY);
+      const newLatLng = map.containerPointToLatLng(centerPoint);
+
+      setPickupCoords({ lat: newLatLng.lat, lng: newLatLng.lng });
+      setCurrentGpsName('Detecting location...');
+      setIsGeocoding(true);
+      try {
+        const address = await reverseGeocodeGps(newLatLng.lat, newLatLng.lng);
+        setCurrentGpsName(address);
+        setPickup(address);
+      } catch (err) {
+        console.error('Reverse geocode error:', err);
+        setCurrentGpsName(`Location (${newLatLng.lat.toFixed(4)}, ${newLatLng.lng.toFixed(4)})`);
+      } finally {
+        setIsGeocoding(false);
+      }
+    });
+
     miniMapInstance.current = map;
 
     setTimeout(() => {
       if (miniMapInstance.current) {
         miniMapInstance.current.invalidateSize();
+        adjustMapView({ lat: pLat, lng: pLng }, sheetHeight);
       }
     }, 200);
 
@@ -125,17 +283,15 @@ export default function HomePage({ user, onLogout }) {
     };
   }, [miniMapLoaded]);
 
-  // Update Map position when pickupCoords changes
+  // Update Map position when pickupCoords or sheetHeight changes
   useEffect(() => {
-    if (miniMapInstance.current) {
+    if (miniMapInstance.current && window.L) {
       const L = window.L;
-      if (!L) return;
-
-      const pLat = pickupCoords?.lat || 28.6139;
-      const pLng = pickupCoords?.lng || 77.2090;
+      const pLat = pickupCoords?.lat || 28.440886;
+      const pLng = pickupCoords?.lng || 77.038938;
 
       miniMapInstance.current.invalidateSize();
-      miniMapInstance.current.setView([pLat, pLng], 15);
+      adjustMapView(pickupCoords, sheetHeight);
 
       miniMapInstance.current.eachLayer((layer) => {
         if (layer instanceof L.Marker) {
@@ -143,21 +299,11 @@ export default function HomePage({ user, onLogout }) {
         }
       });
 
-      const amberIcon = L.divIcon({
-        html: `
-          <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
-            <div style="position: absolute; width: 30px; height: 30px; background: rgba(34, 197, 94, 0.2); border-radius: 50%; animation: ping 1.5s infinite;"></div>
-            <div style="background-color: #22C55E; color: white; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); z-index: 5;"></div>
-          </div>
-        `,
-        className: 'custom-div-icon',
-        iconSize: [32, 32],
-        iconAnchor: [16, 16]
-      });
-
-      L.marker([pLat, pLng], { icon: amberIcon }).addTo(miniMapInstance.current);
+      const pinIcon = createPinIcon();
+      const marker = L.marker([pLat, pLng], { icon: pinIcon, draggable: true }).addTo(miniMapInstance.current);
+      bindMarkerDrag(marker);
     }
-  }, [pickupCoords]);
+  }, [pickupCoords, sheetHeight]);
 
   // Fetch history when tab is switched to activity
   useEffect(() => {
@@ -245,6 +391,12 @@ export default function HomePage({ user, onLogout }) {
 
   const handleDesktopBookRide = (e) => {
     e.preventDefault();
+    
+    if (!pickup || !pickup.trim() || !drop || !drop.trim()) {
+      alert("Please enter both Pickup and Drop locations to continue.");
+      return;
+    }
+
     navigate('/book-ride', { 
       state: { 
         prefillPickup: pickup, 
@@ -266,30 +418,63 @@ export default function HomePage({ user, onLogout }) {
       <div className="block lg:hidden relative h-screen w-full bg-gray-100 overflow-hidden">
         
         {/* Fullscreen Map Background */}
-        <div ref={miniMapRef} className="absolute inset-0 w-full h-[55%] z-0"></div>
+        <div ref={miniMapRef} className="absolute inset-0 w-full h-full z-0"></div>
+
+        {/* Floating Center Pickup Pin Overlay - Always 100% visible in open map viewport */}
+        <div 
+          style={{ 
+            top: `calc(${((100 - sheetHeight) / 2)}% + 15px)` 
+          }}
+          className="absolute left-1/2 -translate-x-1/2 -translate-y-full z-10 pointer-events-none flex flex-col items-center transition-all duration-300"
+        >
+          <div className="bg-gray-900 text-white text-[11px] font-black px-2.5 py-1 rounded-full shadow-xl mb-1 border border-white/20 flex items-center gap-1.5 whitespace-nowrap">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+            <span>Pickup Point</span>
+          </div>
+          <div className="w-9 h-9 bg-green-500 text-white rounded-full border-2 border-white shadow-2xl flex items-center justify-center font-bold text-base">
+            📍
+          </div>
+          <div className="w-3.5 h-1 bg-black/40 rounded-full blur-[1px] mt-0.5"></div>
+        </div>
 
         {/* Top Header Over Map */}
-        <div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-start pointer-events-none">
-          <div className="bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm pointer-events-auto flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-            <span className="text-xs font-bold text-gray-800 truncate max-w-[200px]">
-              {currentGpsName || 'Locating...'}
+        <div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-center pointer-events-none">
+          <div className="bg-white/95 backdrop-blur-sm px-3.5 py-2 rounded-full shadow-md pointer-events-auto flex items-center gap-2 max-w-[75%] border border-gray-100">
+            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isLocatingGps || isGeocoding ? 'bg-amber-500 animate-spin' : 'bg-green-500 animate-pulse'}`}></span>
+            <span className="text-xs font-bold text-gray-800 truncate">
+              {isLocatingGps ? 'Locating GPS...' : isGeocoding ? 'Detecting place...' : (currentGpsName || 'Locating...')}
             </span>
           </div>
           <button 
-            onClick={() => setActiveTab('profile')}
-            className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-md pointer-events-auto text-gray-700"
+            onClick={handleReLocateGps}
+            disabled={isLocatingGps}
+            title="Re-center Current GPS Location"
+            className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-md pointer-events-auto text-gray-700 hover:bg-gray-50 active:scale-95 transition-all border border-gray-100"
           >
-            <User className="w-5 h-5" />
+            {isLocatingGps ? (
+              <Loader2 className="w-5 h-5 text-green-600 animate-spin" />
+            ) : (
+              <LocateFixed className="w-5 h-5 text-green-600" />
+            )}
           </button>
         </div>
 
         {/* Scrollable Bottom Sheet Content */}
-        <div className="absolute bottom-0 left-0 right-0 h-[60%] bg-white rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-20 flex flex-col transition-all duration-300">
+        <div 
+          style={{ height: `${sheetHeight}%` }}
+          className={`absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-20 flex flex-col transition-all ${isDraggingSheet ? 'duration-0' : 'duration-300'}`}
+        >
           
           {/* Drag handle */}
-          <div className="w-full flex justify-center pt-3 pb-1 shrink-0">
-            <div className="w-12 h-1.5 bg-gray-300 rounded-full"></div>
+          <div 
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onClick={toggleSheetHeight}
+            className="w-full flex flex-col items-center pt-3 pb-2 shrink-0 cursor-pointer touch-none"
+            title="Drag or tap to expand/collapse"
+          >
+            <div className="w-12 h-1.5 bg-gray-300 rounded-full hover:bg-gray-400 transition-colors"></div>
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 pb-24 scrollbar-none">
@@ -526,9 +711,24 @@ export default function HomePage({ user, onLogout }) {
                     placeholder="Enter Pickup Location" 
                     value={pickup}
                     onChange={handlePickupChange}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-4 pl-12 pr-4 text-gray-900 font-bold focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-all"
+                    required
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-4 pl-12 pr-10 text-gray-900 font-bold focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-all"
                   />
-                  {isSearchingPickup && <div className="absolute right-4 top-1/2 -translate-y-1/2"><Loader2 className="w-5 h-5 text-gray-400 animate-spin" /></div>}
+                  {pickup && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPickup('');
+                        setPickupCoords(null);
+                        setPickupSuggestions([]);
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center"
+                      title="Clear pickup"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                  {isSearchingPickup && !pickup && <div className="absolute right-4 top-1/2 -translate-y-1/2"><Loader2 className="w-5 h-5 text-gray-400 animate-spin" /></div>}
                   
                   {pickupSuggestions.length > 0 && (
                     <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden z-50">
@@ -556,9 +756,24 @@ export default function HomePage({ user, onLogout }) {
                     placeholder="Enter Drop Location" 
                     value={drop}
                     onChange={handleDropChange}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-4 pl-12 pr-4 text-gray-900 font-bold focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-all"
+                    required
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl py-4 pl-12 pr-10 text-gray-900 font-bold focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-all"
                   />
-                  {isSearchingDrop && <div className="absolute right-4 top-1/2 -translate-y-1/2"><Loader2 className="w-5 h-5 text-gray-400 animate-spin" /></div>}
+                  {drop && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDrop('');
+                        setDropCoords(null);
+                        setDropSuggestions([]);
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center"
+                      title="Clear drop"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                  {isSearchingDrop && !drop && <div className="absolute right-4 top-1/2 -translate-y-1/2"><Loader2 className="w-5 h-5 text-gray-400 animate-spin" /></div>}
                   
                   {dropSuggestions.length > 0 && (
                     <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden z-50">

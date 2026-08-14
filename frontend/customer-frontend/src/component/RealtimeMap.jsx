@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MapPin, Navigation, Car, LocateFixed, Compass, Route, ChevronDown, ChevronUp, Clock, Milestone } from 'lucide-react';
+import { LocateFixed } from 'lucide-react';
 
 export default function RealtimeMap({ pickup, destination, pickupCoords, destCoords, selectedRide, onRouteCalculated, onLocateMe }) {
   const mapRef = useRef(null);
@@ -10,7 +10,6 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
 
   const [routes, setRoutes] = useState([]);
   const [isRouting, setIsRouting] = useState(false);
-  const [showSteps, setShowSteps] = useState(false);
 
   // Colors for rendering simultaneous routes on map
   const ROUTE_COLORS = ['#007AFF', '#FF9500', '#34C759', '#AF52DE'];
@@ -55,15 +54,14 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
       center: [defaultLat, defaultLng],
       zoom: 13,
       zoomControl: false,
+      attributionControl: false,
     });
 
     // OpenStreetMap Standard Street Map tiles
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      attribution: ''
     }).addTo(map);
-
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
 
     leafletInstance.current = map;
   }, [mapLoaded]);
@@ -100,9 +98,14 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
     const pLat = pickupCoords?.lat || defaultLat;
     const pLng = pickupCoords?.lng || defaultLng;
 
-    // Smoothly fly & center map view to user's pickup location
+    // Smoothly center map view to user's pickup location (avoid flyTo if map is hidden to prevent NaN crash)
     if (pickupCoords?.lat && pickupCoords?.lng && (!destCoords?.lat || !destCoords?.lng)) {
-      map.flyTo([pickupCoords.lat, pickupCoords.lng], 16, { animate: true, duration: 0.8 });
+      const size = map.getSize();
+      if (size.x > 0 && size.y > 0) {
+        map.flyTo([pickupCoords.lat, pickupCoords.lng], 16, { animate: true, duration: 0.8 });
+      } else {
+        map.setView([pickupCoords.lat, pickupCoords.lng], 16);
+      }
     }
 
     const bounds = L.latLngBounds();
@@ -124,31 +127,33 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
     });
 
     const liveGpsMarker = L.marker([pLat, pLng], { icon: liveGpsIcon, zIndexOffset: 2000 })
-      .addTo(map)
-      .bindPopup(`<b>Your Live GPS Location</b><br/>${pickup || 'GPS Active'}`);
+      .addTo(map);
     
     markersRef.current.push(liveGpsMarker);
 
-    // 1. Pickup Location Teardrop Pin Marker with 📍 Icon
+    // 1. Pickup Location Teardrop Pin Marker with Badge
     const pickupPinHtml = `
-      <div style="position: relative; width: 44px; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;">
-        <div style="background-color: #34C759; color: white; width: 38px; height: 38px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center; border: 3px solid white; box-shadow: 0 6px 16px rgba(0,0,0,0.4); z-index: 10;">
-          <span style="transform: rotate(45deg); font-size: 16px; font-weight: bold;">📍</span>
+      <div style="position: relative; display: flex; flex-direction: column; align-items: center;">
+        <div style="background-color: #34C759; color: white; width: 34px; height: 34px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center; border: 2.5px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.35); z-index: 10;">
+          <span style="transform: rotate(45deg); font-size: 15px; font-weight: bold;">📍</span>
         </div>
-        <div style="width: 16px; height: 5px; background: rgba(0,0,0,0.3); border-radius: 50%; margin-top: 1px; filter: blur(1px);"></div>
+        <div style="width: 12px; height: 3px; background: rgba(0,0,0,0.3); border-radius: 50%; margin-top: 1px; filter: blur(1px);"></div>
+        <div style="margin-top: 3px; background: #111827; color: white; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 9999px; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); white-space: nowrap; border: 1px solid rgba(255,255,255,0.2);">
+          <span style="width: 5px; height: 5px; border-radius: 50%; background-color: #34C759; display: inline-block;"></span>
+          <span>Pickup</span>
+        </div>
       </div>
     `;
 
     const pickupIcon = L.divIcon({
       className: 'custom-pickup-pin',
       html: pickupPinHtml,
-      iconSize: [44, 54],
-      iconAnchor: [22, 54],
+      iconSize: [80, 60],
+      iconAnchor: [40, 26],
     });
 
     const pickupMarker = L.marker([pLat, pLng], { icon: pickupIcon, zIndexOffset: 3000 })
-      .addTo(map)
-      .bindPopup(`<b>Pickup Location</b><br/>${pickup || 'Your current location'}`);
+      .addTo(map);
     
     markersRef.current.push(pickupMarker);
     bounds.extend([pLat, pLng]);
@@ -170,8 +175,7 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
       });
 
       const cabMarker = L.marker([cab.lat, cab.lng], { icon: cabIcon })
-        .addTo(map)
-        .bindPopup(`<b>${cab.name}</b>`);
+        .addTo(map);
 
       markersRef.current.push(cabMarker);
     });
@@ -182,24 +186,27 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
       const dLng = destCoords.lng;
 
       const destPinHtml = `
-        <div style="position: relative; width: 44px; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;">
-          <div style="background-color: #FF3B30; color: white; width: 38px; height: 38px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center; border: 3px solid white; box-shadow: 0 6px 16px rgba(0,0,0,0.4); z-index: 10;">
-            <span style="transform: rotate(45deg); font-size: 16px; font-weight: bold;">🏁</span>
+        <div style="position: relative; display: flex; flex-direction: column; align-items: center;">
+          <div style="background-color: #FF3B30; color: white; width: 34px; height: 34px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center; border: 2.5px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.35); z-index: 10;">
+            <span style="transform: rotate(45deg); font-size: 15px; font-weight: bold;">🏁</span>
           </div>
-          <div style="width: 16px; height: 5px; background: rgba(0,0,0,0.3); border-radius: 50%; margin-top: 1px; filter: blur(1px);"></div>
+          <div style="width: 12px; height: 3px; background: rgba(0,0,0,0.3); border-radius: 50%; margin-top: 1px; filter: blur(1px);"></div>
+          <div style="margin-top: 3px; background: #111827; color: white; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 9999px; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); white-space: nowrap; border: 1px solid rgba(255,255,255,0.2);">
+            <span style="width: 5px; height: 5px; border-radius: 50%; background-color: #FF3B30; display: inline-block;"></span>
+            <span>Drop</span>
+          </div>
         </div>
       `;
 
       const destIcon = L.divIcon({
         className: 'custom-dest-pin',
         html: destPinHtml,
-        iconSize: [44, 54],
-        iconAnchor: [22, 54],
+        iconSize: [80, 60],
+        iconAnchor: [40, 26],
       });
 
       const destMarker = L.marker([dLat, dLng], { icon: destIcon, zIndexOffset: 3000 })
-        .addTo(map)
-        .bindPopup(`<b>Destination</b><br/>${destination}`);
+        .addTo(map);
 
       markersRef.current.push(destMarker);
       bounds.extend([dLat, dLng]);
@@ -212,7 +219,11 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
         [dLat, dLng]
       ]);
       map.invalidateSize();
-      map.fitBounds(routeBounds, { padding: [40, 40], maxZoom: 15 });
+      map.fitBounds(routeBounds, {
+        paddingTopLeft: [40, 70],
+        paddingBottomRight: [40, 40],
+        maxZoom: 15
+      });
 
       // Query Multi-Route Driving Engine via Django REST Framework Backend Proxy API
       const backendRouteUrl = `/api/v1/services/location/route/?pLat=${pLat}&pLng=${pLng}&dLat=${dLat}&dLng=${dLng}`;
@@ -228,34 +239,6 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
               const distanceKm = (route.distance / 1000).toFixed(1);
               const durationMins = Math.max(2, Math.round((route.duration / 60) * multiplier));
 
-              // Extract turn-by-turn steps
-              const rawSteps = route.legs?.[0]?.steps || [];
-              const steps = rawSteps.map((step) => {
-                const stepDist = step.distance < 1000 ? `${step.distance.toFixed(0)}m` : `${(step.distance / 1000).toFixed(1)}km`;
-                const name = step.name || step.ref || 'Unnamed Road';
-                const type = step.maneuver?.type || 'turn';
-                const modifier = step.maneuver?.modifier || '';
-
-                let instruction = `Continue on ${name}`;
-                if (type.includes('turn')) {
-                  instruction = `Turn ${modifier || 'onto'} ${name}`;
-                } else if (type.includes('depart')) {
-                  instruction = `Head towards ${name}`;
-                } else if (type.includes('arrive')) {
-                  instruction = `Arrive at destination`;
-                } else if (type.includes('roundabout') || type.includes('rotary')) {
-                  instruction = `Take roundabout onto ${name}`;
-                } else if (type.includes('fork') || type.includes('ramp')) {
-                  instruction = `Take ramp/fork onto ${name}`;
-                }
-
-                return {
-                  instruction,
-                  distance: stepDist,
-                  name
-                };
-              });
-
               return {
                 index: idx,
                 name: `Route ${idx + 1}`,
@@ -263,8 +246,7 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
                 distanceKm,
                 durationMins,
                 color: ROUTE_COLORS[idx % ROUTE_COLORS.length],
-                latLngs,
-                steps
+                latLngs
               };
             });
 
@@ -281,6 +263,10 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
             }
 
             // Draw ALL Polylines Simultaneously on the Map!
+            const routeBounds = L.latLngBounds();
+            routeBounds.extend([pLat, pLng]);
+            routeBounds.extend([dLat, dLng]);
+
             parsedRoutes.forEach((rt) => {
               const polyline = L.polyline(rt.latLngs, {
                 color: rt.color,
@@ -290,14 +276,25 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
                 lineJoin: 'round'
               }).addTo(map);
 
-              polyline.bindPopup(`<b>${rt.name} (${rt.summary})</b><br/>Distance: ${rt.distanceKm} km<br/>Duration: ${rt.durationMins} mins`);
-
               routePolylinesRef.current.push(polyline);
-              rt.latLngs.forEach(([lLat, lLng]) => bounds.extend([lLat, lLng]));
+              rt.latLngs.forEach(([lLat, lLng]) => routeBounds.extend([lLat, lLng]));
             });
 
             map.invalidateSize();
-            map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+            map.fitBounds(routeBounds, {
+              padding: [25, 25],
+              maxZoom: 15
+            });
+
+            setTimeout(() => {
+              if (map && routeBounds.isValid()) {
+                map.invalidateSize();
+                map.fitBounds(routeBounds, {
+                  padding: [25, 25],
+                  maxZoom: 15
+                });
+              }
+            }, 150);
           }
         })
         .catch((err) => {
@@ -305,7 +302,10 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
           if (destCoords?.lat && destCoords?.lng) {
             const fitB = L.latLngBounds([[pLat, pLng], [destCoords.lat, destCoords.lng]]);
             map.invalidateSize();
-            map.fitBounds(fitB, { padding: [40, 40], maxZoom: 15 });
+            map.fitBounds(fitB, {
+              padding: [25, 25],
+              maxZoom: 15
+            });
           }
         })
         .finally(() => {
@@ -319,14 +319,14 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
   }, [mapLoaded, pickup, destination, pickupCoords, destCoords, selectedRide]);
 
   return (
-    <div className="w-full h-full min-h-[440px] bg-white border border-gray-200 rounded-3xl overflow-hidden shadow-xl relative flex flex-col">
+    <div className="w-full h-full min-h-[220px] bg-gray-100 rounded-3xl overflow-hidden shadow-md relative">
       {/* Map Header Status & Mode Indicator */}
-      <div className="absolute top-4 left-4 right-4 z-[400] flex items-center justify-between pointer-events-none gap-2">
-        <div className="bg-white/90 backdrop-blur-md px-3.5 py-2 rounded-2xl border border-gray-200 shadow-lg flex items-center gap-2 pointer-events-auto">
-          <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-ping"></span>
+      <div className="absolute top-3 left-3 right-3 z-[400] flex items-center justify-between pointer-events-none gap-2">
+        <div className="bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-full border border-gray-200 shadow-md flex items-center gap-2 pointer-events-auto">
+          <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span>
           <span className="text-xs font-extrabold text-gray-900 capitalize flex items-center gap-1.5">
             {selectedRide === 'bike' ? '🏍️ Bike Routes' : selectedRide === 'auto' ? '🛺 Auto Routes' : '🚗 Cab Routes'}
-            {isRouting && ' (Calculating All Routes...)'}
+            {isRouting && ' (Routing...)'}
           </span>
         </div>
 
@@ -337,23 +337,21 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
               onLocateMe();
             }
             if (leafletInstance.current && pickupCoords?.lat) {
-              leafletInstance.current.flyTo([pickupCoords.lat, pickupCoords.lng], 16, {
-                animate: true,
-                duration: 1
-              });
+              leafletInstance.current.invalidateSize();
+              leafletInstance.current.setView([pickupCoords.lat, pickupCoords.lng], 15);
             }
           }}
-          className="bg-white hover:bg-gray-50 text-gray-900 p-2.5 rounded-2xl border border-gray-200 shadow-xl pointer-events-auto transition-all active:scale-95 cursor-pointer flex items-center gap-1 font-bold text-xs"
+          className="bg-white hover:bg-gray-50 text-gray-900 p-2 rounded-full border border-gray-200 shadow-md pointer-events-auto transition-all active:scale-95 cursor-pointer flex items-center gap-1 font-bold text-xs"
           title="Recenter Map to Current GPS Location"
         >
           <LocateFixed className="w-4 h-4 text-blue-500 animate-pulse" />
         </button>
       </div>
 
-      {/* Floating Center Location Pin Overlay */}
+      {/* Floating Center Location Pin Overlay (Only when no destination) */}
       {(!destCoords?.lat || !destCoords?.lng) && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-full z-[300] pointer-events-none flex flex-col items-center">
-          <div className="bg-gray-900 text-white text-xs font-black px-2.5 py-1 rounded-full shadow-xl mb-1 border border-white/20 flex items-center gap-1">
+          <div className="bg-gray-900 text-white text-[11px] font-black px-2.5 py-1 rounded-full shadow-xl mb-1 border border-white/20 flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
             <span>Pickup Point</span>
           </div>
@@ -365,84 +363,7 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
       )}
 
       {/* Leaflet Map Canvas */}
-      <div ref={mapRef} className="w-full h-full min-h-[440px] z-10"></div>
-
-      {/* Display ALL Routes Simultaneously in Bottom Summary Panel */}
-      {destination && routes.length > 0 && (
-        <div className="absolute bottom-4 left-4 right-4 z-[400] bg-white/95 backdrop-blur-md p-4 rounded-3xl border border-gray-200 shadow-2xl space-y-3 max-h-72 overflow-y-auto animate-fade-in pointer-events-auto">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <h4 className="text-xs font-extrabold text-gray-900 flex items-center gap-1.5">
-              <Route className="w-4 h-4 text-blue-500" />
-              <span>All Available Driving Routes ({routes.length})</span>
-            </h4>
-
-            {/* Collapsible Turn-by-Turn Steps Toggle */}
-            <button
-              type="button"
-              onClick={() => setShowSteps(!showSteps)}
-              className="text-xs font-extrabold text-blue-500 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-1 rounded-xl flex items-center gap-1 transition-colors"
-            >
-              <Milestone className="w-3.5 h-3.5" />
-              <span>{showSteps ? 'Hide Directions' : 'Turn-by-Turn'}</span>
-              {showSteps ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-          </div>
-
-          {/* Cards for ALL Routes displayed at the same time */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {routes.map((rt, idx) => (
-              <div
-                key={idx}
-                className="p-3 rounded-2xl border bg-gray-50 flex items-center justify-between transition-all"
-                style={{ borderColor: rt.color }}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className="w-3.5 h-3.5 rounded-full shrink-0"
-                    style={{ backgroundColor: rt.color }}
-                  ></div>
-                  <div>
-                    <span className="text-xs font-extrabold text-gray-900 block leading-tight">
-                      {rt.name} ({rt.summary})
-                    </span>
-                    <span className="text-xs text-gray-500 font-semibold block mt-0.5">
-                      {selectedRide.toUpperCase()} Speed
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-right shrink-0">
-                  <span className="text-xs font-extrabold text-gray-900 block">{rt.distanceKm} km</span>
-                  <span className="text-xs font-extrabold text-green-500">{rt.durationMins} mins</span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Turn-by-Turn Steps Accordion for Main Route */}
-          {showSteps && routes[0]?.steps && (
-            <div className="pt-2 border-t border-gray-200 space-y-2 max-h-40 overflow-y-auto">
-              <h5 className="text-xs font-extrabold text-gray-700 uppercase tracking-wider">
-                Turn-by-Turn Directions ({routes[0].steps.length} steps)
-              </h5>
-              <div className="divide-y divide-gray-50">
-                {routes[0].steps.map((step, sIdx) => (
-                  <div key={sIdx} className="py-1.5 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-gray-50 text-gray-500 text-xs font-extrabold flex items-center justify-center border border-gray-200">
-                        {sIdx + 1}
-                      </span>
-                      <span className="font-bold text-gray-900">{step.instruction}</span>
-                    </div>
-                    <span className="text-xs font-semibold text-gray-500 shrink-0 ml-2">{step.distance}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      <div ref={mapRef} className="absolute inset-0 w-full h-full z-10"></div>
     </div>
   );
 }

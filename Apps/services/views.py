@@ -1,3 +1,4 @@
+import os
 import requests
 import math
 from rest_framework import viewsets, status
@@ -53,7 +54,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
                        'india' in f.get('properties', {}).get('country', '').lower()
                 ]
 
-                list_to_map = indian_features if indian_features else features
+                list_to_map = indian_features
 
                 for f in list_to_map:
                     props = f.get('properties', {})
@@ -77,6 +78,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
                             dist_km = calculate_distance(float(user_lat), float(user_lon), coords[1], coords[0])
                         except Exception:
                             pass
+
+                    # max_radius km restriction
+                    radius_str = os.getenv('LOCATION_SUGGESTION_RADIUS_KM', '50')
+                    try:
+                        max_radius = float(radius_str)
+                    except ValueError:
+                        max_radius = 50.0
+
+                    if user_lat and user_lon and dist_km > max_radius:
+                        continue
 
                     # Determine icon & tag
                     osm_val = str(props.get('osm_value', '')).lower()
@@ -147,6 +158,16 @@ class ServiceViewSet(viewsets.ModelViewSet):
                             except Exception:
                                 pass
 
+                        # max_radius km restriction
+                        radius_str = os.getenv('LOCATION_SUGGESTION_RADIUS_KM', '50')
+                        try:
+                            max_radius = float(radius_str)
+                        except ValueError:
+                            max_radius = 50.0
+
+                        if user_lat and user_lon and dist_km > max_radius:
+                            continue
+
                         icon = '✈️' if item.get('type') == 'aeroway' else '🚆' if item.get('type') == 'railway' else '📍'
 
                         results.append({
@@ -173,43 +194,75 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if not lat or not lon:
             return Response({'error': 'lat and lon are required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        headers = {'User-Agent': 'RaahGo-Location-Service/1.0 (India)'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 RaahGo/2.0'
+        }
         formatted_address = None
 
-        # 1. Try Photon API for Reverse Geocoding (Higher Rate Limits)
+        # 1. Primary: Nominatim Reverse Geocoding
         try:
-            url = f"https://photon.komoot.io/reverse?lon={lon}&lat={lat}"
+            url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&addressdetails=1&zoom=18"
             resp = requests.get(url, headers=headers, timeout=5)
 
             if resp.status_code == 200:
                 data = resp.json()
-                features = data.get('features', [])
-                if features:
-                    props = features[0].get('properties', {})
-                    road = props.get('name') or props.get('street') or props.get('district') or ''
-                    city = props.get('city') or props.get('state') or props.get('county') or ''
-                    
-                    parts = [road, city, 'India']
-                    formatted_address = ', '.join([p for p in parts if p])
-        except Exception as e:
-            print(f"[Backend Reverse Geocode Photon Error]: {e}")
+                addr = data.get('address', {})
+                road = (addr.get('road') or addr.get('suburb') or addr.get('neighbourhood') or
+                        addr.get('residential') or addr.get('commercial') or addr.get('amenity') or '')
+                city = (addr.get('city') or addr.get('town') or addr.get('suburb') or
+                        addr.get('district') or addr.get('state_district') or addr.get('county') or '')
+                state = addr.get('state') or ''
 
-        # 2. Fallback to Nominatim if Photon fails or returns nothing
+                parts = [p for p in [road, city, state] if p]
+                if parts:
+                    # Remove consecutive duplicates
+                    clean_parts = []
+                    for p in parts:
+                        if not clean_parts or p.lower() != clean_parts[-1].lower():
+                            clean_parts.append(p)
+                    formatted_address = ', '.join(clean_parts)
+                elif data.get('display_name'):
+                    display_parts = [p.strip() for p in data.get('display_name', '').split(',')]
+                    formatted_address = ', '.join(display_parts[:3])
+        except Exception as e:
+            print(f"[Backend Reverse Geocode Nominatim Error]: {e}")
+
+        # 2. Fallback: BigDataCloud Client Reverse Geocode
         if not formatted_address:
             try:
-                url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&addressdetails=1&countrycodes=in"
+                url = f"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude={lat}&longitude={lon}&localityLanguage=en"
                 resp = requests.get(url, headers=headers, timeout=5)
-
                 if resp.status_code == 200:
                     data = resp.json()
-                    addr = data.get('address', {})
-                    road = addr.get('road') or addr.get('suburb') or addr.get('neighbourhood') or addr.get('residential') or ''
-                    city = addr.get('city') or addr.get('town') or addr.get('suburb') or addr.get('state_district') or addr.get('state') or ''
-                    
-                    parts = [road, city, 'India']
-                    formatted_address = ', '.join([p for p in parts if p]) or data.get('display_name')
+                    locality = data.get('locality') or data.get('principalSubdivision') or ''
+                    city = data.get('city') or ''
+                    state = data.get('principalSubdivision') or ''
+                    parts = [locality, city, state]
+                    clean_parts = []
+                    for p in parts:
+                        if p and (not clean_parts or p.lower() != clean_parts[-1].lower()):
+                            clean_parts.append(p)
+                    if clean_parts:
+                        formatted_address = ', '.join(clean_parts)
             except Exception as e:
-                print(f"[Backend Reverse Geocode Nominatim Error]: {e}")
+                print(f"[Backend Reverse Geocode BigDataCloud Error]: {e}")
+
+        # 3. Fallback: Photon Reverse API
+        if not formatted_address:
+            try:
+                url = f"https://photon.komoot.io/reverse?lon={lon}&lat={lat}"
+                resp = requests.get(url, headers=headers, timeout=5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    features = data.get('features', [])
+                    if features:
+                        props = features[0].get('properties', {})
+                        road = props.get('name') or props.get('street') or props.get('district') or ''
+                        city = props.get('city') or props.get('state') or props.get('county') or ''
+                        parts = [p for p in [road, city, 'India'] if p]
+                        formatted_address = ', '.join(parts)
+            except Exception as e:
+                print(f"[Backend Reverse Geocode Photon Error]: {e}")
 
         if formatted_address:
             return Response({
@@ -218,7 +271,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 'lon': lon
             }, status=status.HTTP_200_OK)
 
-        return Response({'address': f"Current GPS ({lat}, {lon})", 'lat': lat, 'lon': lon}, status=status.HTTP_200_OK)
+        return Response({'address': f"Location ({float(lat):.4f}, {float(lon):.4f})", 'lat': lat, 'lon': lon}, status=status.HTTP_200_OK)
 
     # 3. Backend Multi-Route OSRM Proxy API Endpoint
     @action(detail=False, methods=['get'], url_path='location/route', permission_classes=[AllowAny])
