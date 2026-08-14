@@ -1,6 +1,9 @@
 import os
 import requests
 import math
+import random
+from django.http import HttpResponse, Http404
+from django.views.decorators.cache import cache_page
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, permission_classes
 from rest_framework.permissions import AllowAny
@@ -9,6 +12,31 @@ from .models import Service
 from .serializers import ServiceSerializer
 
 INDIA_BBOX = '68.1,6.5,97.4,35.5'
+
+
+@cache_page(60 * 60 * 24)
+def tile_proxy_view(request, z, x, y):
+    """
+    Backend Map Tile Proxy API
+    Fetches map tiles server-side with caching and serves them to frontend.
+    URL: /api/v1/services/tiles/<z>/<x>/<y>.png
+    """
+    subdomain = random.choice(['a', 'b', 'c'])
+    osm_tile_url = f"https://{subdomain}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+    headers = {
+        'User-Agent': 'RaahGo-Map-Service/1.0 (https://raahgo.com; contact@raahgo.com)'
+    }
+    try:
+        resp = requests.get(osm_tile_url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            response = HttpResponse(resp.content, content_type=resp.headers.get('Content-Type', 'image/png'))
+            response['Cache-Control'] = 'public, max-age=86400'
+            return response
+        else:
+            return HttpResponse(status=resp.status_code)
+    except Exception as e:
+        print(f"[Tile Proxy Error]: {e}")
+        return HttpResponse(status=502)
 
 
 def calculate_distance(lat1, lon1, lat2, lon2):

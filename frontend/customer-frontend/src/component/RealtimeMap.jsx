@@ -57,8 +57,8 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
       attributionControl: false,
     });
 
-    // OpenStreetMap Standard Street Map tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // Custom Backend Map Tile API
+    L.tileLayer('/api/v1/services/tiles/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: ''
     }).addTo(map);

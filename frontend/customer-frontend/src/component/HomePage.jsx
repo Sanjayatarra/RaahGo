@@ -218,8 +218,9 @@ export default function HomePage({ user, onLogout }) {
       touchZoom: true
     });
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19
+    L.tileLayer('/api/v1/services/tiles/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: ''
     }).addTo(map);
 
     const pinIcon = createPinIcon();
