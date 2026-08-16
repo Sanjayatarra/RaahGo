@@ -4,12 +4,12 @@ from datetime import timedelta
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.models import update_last_login
 
 from .models import User, OTPVerification
 from .serializers import UserSerializer
 from .views import send_otp_email
+from .authentication import issue_tokens_for_user
 
 # Fixed role for Driver API endpoints
 DRIVER_ROLE = User.RoleChoices.DRIVER
@@ -37,19 +37,12 @@ class DriverSendOTPView(APIView):
                 role_user = User.objects.filter(email__iexact=email, role=DRIVER_ROLE).first()
 
             if not role_user:
-                # Check if user exists under a DIFFERENT role (Customer)
-                other_user = None
-                if phone_number:
-                    other_user = User.objects.filter(phone_number=phone_number).first()
-                elif email:
-                    other_user = User.objects.filter(email__iexact=email).first()
-
-                if other_user:
-                    return Response({
-                        'error': 'User is not registered as Driver.'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                else:
-                    return Response({'error': 'Driver account is not registered. Please sign up first.'}, status=status.HTTP_400_BAD_REQUEST)
+                # No Driver account found for this phone/email — regardless of whether they
+                # exist as a Customer, they need to sign up as a Driver first.
+                return Response(
+                    {'error': 'Driver account is not registered. Please sign up first.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         if purpose == 'Register':
             if phone_number and User.objects.filter(phone_number=phone_number, role=DRIVER_ROLE, is_verified=True).exists():
@@ -130,12 +123,18 @@ class DriverVerifyOTPView(APIView):
             if not role_user:
                 other_user = None
                 if email:
-                    other_user = User.objects.filter(email__iexact=email).first()
+                    other_user = User.objects.filter(email__iexact=email).exclude(role=DRIVER_ROLE).first()
                 elif phone_number:
-                    other_user = User.objects.filter(phone_number=phone_number).first()
+                    other_user = User.objects.filter(phone_number=phone_number).exclude(role=DRIVER_ROLE).first()
 
-                if other_user and other_user.role != DRIVER_ROLE:
-                    return Response({'error': 'User is not registered as Driver.'}, status=status.HTTP_400_BAD_REQUEST)
+                # For Login: block if the phone/email belongs to a non-Driver account only.
+                # For Register: allow — the DB uniqueness is now scoped per role, so a Customer
+                # can also register as a Driver with the same phone/email.
+                if other_user and otp_record.purpose == 'Login':
+                    return Response(
+                        {'error': 'User is not registered as Driver.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
                 temp_username = f"driver_{random.randint(100000, 999999)}"
                 user = User.objects.create(
@@ -155,13 +154,12 @@ class DriverVerifyOTPView(APIView):
             user.is_verified = True
             user.save()
 
-            update_last_login(None, user)
-            refresh = RefreshToken.for_user(user)
+            tokens = issue_tokens_for_user(user)
 
             return Response({
                 'status': 'OTP verified successfully',
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
+                'access': tokens['access'],
+                'refresh': tokens['refresh'],
                 'user': UserSerializer(user).data
             }, status=status.HTTP_200_OK)
 
@@ -273,13 +271,12 @@ class DriverVerifySignupOTPView(APIView):
             user.is_verified = True
             user.save()
 
-            update_last_login(None, user)
-            refresh = RefreshToken.for_user(user)
+            tokens = issue_tokens_for_user(user)
 
             return Response({
                 'status': 'Driver OTP verified successfully.',
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
+                'access': tokens['access'],
+                'refresh': tokens['refresh'],
                 'user_id': str(user.id),
                 'user': UserSerializer(user).data,
                 'next_step': 'complete_profile'
@@ -372,12 +369,95 @@ class DriverGoogleAuthView(APIView):
                 is_email_verified=True
             )
 
-        update_last_login(None, user)
-        refresh = RefreshToken.for_user(user)
+        tokens = issue_tokens_for_user(user)
 
         return Response({
             'status': 'Driver Google authentication successful',
-            'access': str(refresh.access_token),
-            'refresh': str(refresh),
+            'access': tokens['access'],
+            'refresh': tokens['refresh'],
             'user': UserSerializer(user).data
         }, status=status.HTTP_200_OK)
+
+
+class DriverResendOTPView(APIView):
+    """
+    Dedicated Driver API Endpoint: Resend OTP
+    POST /api/v1/driver/auth/resend-otp/
+
+    Body:
+        phone_number  OR  email   (required)
+        purpose                   (optional, default: 'Login')
+
+    Behaviour:
+        - Enforces a 30-second cooldown between resends.
+        - Invalidates (expires) all previous pending OTPs for the target.
+        - Generates and stores a fresh OTP valid for 10 minutes.
+        - Returns the new OTP in the response (for dev/testing; remove in production).
+    """
+
+    COOLDOWN_SECONDS = 30
+
+    def post(self, request):
+        phone_number = request.data.get('phone_number')
+        email = request.data.get('email')
+        purpose = request.data.get('purpose', 'Login')
+
+        if not phone_number and not email:
+            return Response(
+                {'error': 'Either phone_number or email is required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # ── Cooldown check ──────────────────────────────────────────────────
+        recent_query = OTPVerification.objects.filter(is_verified=False)
+        if email:
+            recent_query = recent_query.filter(email__iexact=email)
+        elif phone_number:
+            recent_query = recent_query.filter(phone_number=phone_number)
+
+        last_otp = recent_query.order_by('-created_at').first()
+        if last_otp:
+            elapsed = (timezone.now() - last_otp.created_at).total_seconds()
+            if elapsed < self.COOLDOWN_SECONDS:
+                wait = int(self.COOLDOWN_SECONDS - elapsed)
+                return Response(
+                    {'error': f'Please wait {wait} second(s) before requesting a new OTP.'},
+                    status=status.HTTP_429_TOO_MANY_REQUESTS
+                )
+
+        # ── Invalidate all previous pending OTPs for this target ────────────
+        recent_query.update(expires_at=timezone.now())
+
+        # ── Find associated driver user (if already exists) ─────────────────
+        associated_user = None
+        if phone_number:
+            associated_user = User.objects.filter(phone_number=phone_number, role=DRIVER_ROLE).first()
+        elif email:
+            associated_user = User.objects.filter(email__iexact=email, role=DRIVER_ROLE).first()
+
+        # ── Generate new OTP ────────────────────────────────────────────────
+        otp_code = f"{random.randint(1000, 9999)}"
+        expires_at = timezone.now() + timedelta(minutes=10)
+
+        otp_record = OTPVerification.objects.create(
+            phone_number=phone_number if phone_number else None,
+            email=email if email else None,
+            user=associated_user,
+            otp=otp_code,
+            purpose=purpose,
+            expires_at=expires_at,
+        )
+
+        print(f"\n[DRIVER RESEND OTP] Target: {email or phone_number} | Code: {otp_code}")
+
+        if email:
+            from .views import send_otp_email
+            send_otp_email(email, otp_code)
+
+        return Response({
+            'status': 'OTP resent successfully',
+            'otp_id': otp_record.id,
+            'target': email or phone_number,
+            'otp': otp_code,
+            'expires_in_seconds': 600,
+        }, status=status.HTTP_201_CREATED)

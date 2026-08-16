@@ -55,7 +55,10 @@ class Driver(models.Model):
 
         total_sec = self.daily_online_seconds
         if self.availability_status in [self.AvailabilityStatus.ONLINE, self.AvailabilityStatus.IN_TRIP] and self.last_online_start:
-            session_sec = int((timezone.now() - self.last_online_start).total_seconds())
+            # If last_online_start was before today, clamp to beginning of today
+            midnight_today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            effective_start = max(self.last_online_start, midnight_today)
+            session_sec = int((timezone.now() - effective_start).total_seconds())
             total_sec += max(0, session_sec)
 
         return min(total_sec, 43200) # 12 Hours Max limit (43,200 seconds)

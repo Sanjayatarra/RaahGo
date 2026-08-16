@@ -274,10 +274,11 @@ class DriverViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'])
-    @action(detail=True, methods=['post'])
     def toggle_availability(self, request, pk=None):
         driver = self.get_object()
-        new_status = request.data.get('status')
+        raw_status = request.data.get('status') or request.data.get('availability_status') or ''
+        # Standardize title-case e.g. 'online' -> 'Online'
+        new_status = raw_status.strip().title() if isinstance(raw_status, str) else raw_status
         from django.utils import timezone
         today = timezone.now().date()
 
@@ -285,17 +286,19 @@ class DriverViewSet(viewsets.ModelViewSet):
         if driver.last_duty_reset_date != today:
             driver.daily_online_seconds = 0
             driver.last_duty_reset_date = today
+            driver.last_online_start = None
+            driver.save()
 
-        current_duty_sec = driver.get_current_daily_online_seconds()
-
-        # Enforce strict 12-Hour Daily Shift Limit (43,200 seconds)
+        # Enforce strict 12-Hour Daily Shift Limit (43,200 seconds = 12h)
         if new_status == Driver.AvailabilityStatus.ONLINE:
-            if current_duty_sec >= 43200:
+            # Check accumulated duty seconds for today
+            if driver.daily_online_seconds >= 43200:
                 driver.availability_status = Driver.AvailabilityStatus.OFFLINE
+                driver.last_online_start = None
                 driver.save()
                 return Response({
                     'error': 'Daily 12-hour online shift limit reached for today. Maximum 12 hours online per day permitted. Please rest until tomorrow.',
-                    'current_daily_online_seconds': current_duty_sec,
+                    'current_daily_online_seconds': 43200,
                     'max_duty_seconds': 43200
                 }, status=status.HTTP_400_BAD_REQUEST)
 
@@ -309,9 +312,11 @@ class DriverViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_200_OK)
 
         elif new_status == Driver.AvailabilityStatus.OFFLINE:
-            if driver.last_online_start and driver.availability_status in [Driver.AvailabilityStatus.ONLINE, Driver.AvailabilityStatus.IN_TRIP]:
-                elapsed = int((timezone.now() - driver.last_online_start).total_seconds())
-                driver.daily_online_seconds += max(0, elapsed)
+            if driver.last_online_start:
+                midnight_today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                effective_start = max(driver.last_online_start, midnight_today)
+                elapsed = int((timezone.now() - effective_start).total_seconds())
+                driver.daily_online_seconds = min(43200, driver.daily_online_seconds + max(0, elapsed))
                 driver.last_online_start = None
 
             driver.availability_status = Driver.AvailabilityStatus.OFFLINE

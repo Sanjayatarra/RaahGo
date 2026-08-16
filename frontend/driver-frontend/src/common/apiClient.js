@@ -85,7 +85,7 @@ export const fetchWithAuth = async (url, options = {}) => {
         isRefreshing = true;
 
         try {
-          const refreshRes = await fetch('/api/v1/driver/token/refresh/', {
+          const refreshRes = await fetch('/api/v1/driver/auth/token/refresh/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ refresh: refreshToken })

@@ -1,10 +1,12 @@
 import os
 import math
 import random
+from datetime import timedelta
 from decimal import Decimal
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.utils import timezone
 
 from .models import Booking, RideDetail, ParcelDetail, MovingDetail, BookingTracking
 from .serializers import (
@@ -15,6 +17,9 @@ from .serializers import (
     BookingTrackingSerializer
 )
 from vehicles.models import VehicleType
+
+# Auto-cancel a Searching ride after this many minutes with no driver
+AUTO_CANCEL_SEARCHING_MINUTES = 15
 
 
 def calculate_haversine_distance(lat1, lon1, lat2, lon2):
@@ -34,7 +39,34 @@ class BookingViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
+        user = self.request.user
         qs = Booking.objects.all().order_by('-created_at')
+
+        # 1. Scope by authenticated user identity
+        if user and user.is_authenticated:
+            if hasattr(user, 'role') and user.role == 'Driver':
+                # Driver sees rides assigned to them or active rides
+                from django.db.models import Q
+                qs = qs.filter(Q(driver__user=user) | Q(status__in=[Booking.BookingStatus.SEARCHING, Booking.BookingStatus.ACCEPTED, Booking.BookingStatus.IN_TRIP]))
+            elif hasattr(user, 'role') and user.role == 'Customer':
+                # Customer only sees their own bookings
+                qs = qs.filter(customer=user)
+
+        # 2. Filter by explicit query parameters
+        customer_id = self.request.query_params.get('customer_id') or self.request.query_params.get('customer')
+        if customer_id:
+            qs = qs.filter(customer_id=customer_id)
+
+        driver_id = self.request.query_params.get('driver_id') or self.request.query_params.get('driver')
+        if driver_id:
+            qs = qs.filter(driver_id=driver_id)
+
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            statuses = [s.strip() for s in status_param.split(',') if s.strip()]
+            qs = qs.filter(status__in=statuses)
+
+        # 3. Distance filter if GPS coordinates are provided
         driver_lat = self.request.query_params.get('driver_lat') or self.request.query_params.get('lat')
         driver_lng = self.request.query_params.get('driver_lng') or self.request.query_params.get('lng')
         max_dist_param = self.request.query_params.get('max_distance', 5.0)
@@ -55,10 +87,74 @@ class BookingViewSet(viewsets.ModelViewSet):
                             filtered_ids.append(b.id)
                     else:
                         filtered_ids.append(b.id)
-                return qs.filter(id__in=filtered_ids)
+                qs = qs.filter(id__in=filtered_ids)
             except Exception as e:
                 print('Distance query filter notice:', e)
+
+        # 4. Limit to recent records by default to avoid returning stale historical dumps
+        limit = self.request.query_params.get('limit')
+        if limit:
+            try:
+                qs = qs[:int(limit)]
+            except ValueError:
+                pass
+        elif not self.request.query_params.get('all') and not self.kwargs.get('pk'):
+            qs = qs[:20]
+
         return qs
+
+    # ── Active ride endpoint ────────────────────────────────────────────────
+    @action(detail=False, methods=['get'], url_path='active')
+    def active_ride(self, request):
+        """
+        GET /api/v1/bookings/bookings/active/
+        Returns the customer's current non-terminal booking, auto-cancelling
+        any Searching ride that has been waiting longer than AUTO_CANCEL_SEARCHING_MINUTES.
+        """
+        from users.models import User
+        user = request.user
+        customer = None
+
+        if user and getattr(user, 'is_authenticated', False) and isinstance(user, User):
+            customer = user
+        else:
+            customer_id = request.query_params.get('customer_id')
+            if customer_id:
+                customer = User.objects.filter(id=customer_id, role=User.RoleChoices.CUSTOMER).first()
+
+        if not customer:
+            return Response(None, status=status.HTTP_200_OK)
+
+        active = Booking.objects.filter(
+            customer=customer,
+            status__in=[
+                Booking.BookingStatus.SEARCHING,
+                Booking.BookingStatus.ACCEPTED,
+                Booking.BookingStatus.ARRIVED,
+                Booking.BookingStatus.IN_TRIP,
+            ]
+        ).order_by('-created_at').first()
+
+        if not active:
+            return Response(None, status=status.HTTP_200_OK)
+
+        # Auto-cancel if Searching for longer than AUTO_CANCEL_SEARCHING_MINUTES
+        if active.status == Booking.BookingStatus.SEARCHING:
+            cutoff = timezone.now() - timedelta(minutes=AUTO_CANCEL_SEARCHING_MINUTES)
+            if active.created_at <= cutoff:
+                active.status = Booking.BookingStatus.CANCELLED
+                active.save()
+                BookingTracking.objects.create(
+                    booking=active,
+                    status=Booking.BookingStatus.CANCELLED,
+                    remarks=f'Auto-cancelled: no driver found within {AUTO_CANCEL_SEARCHING_MINUTES} minutes.'
+                )
+                return Response(
+                    {'auto_cancelled': True, 'booking': BookingSerializer(active).data},
+                    status=status.HTTP_200_OK
+                )
+
+        return Response(BookingSerializer(active).data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'])
     def searching_nearby(self, request):
@@ -112,6 +208,25 @@ class BookingViewSet(viewsets.ModelViewSet):
         from services.models import Service
         from vehicles.models import VehicleType
         from drivers.models import Driver
+
+        # ── Auto-cancel stale Searching rides before allowing a new booking ──
+        user = self.request.user
+        if user and getattr(user, 'is_authenticated', False) and isinstance(user, User):
+            cutoff = timezone.now() - timedelta(minutes=AUTO_CANCEL_SEARCHING_MINUTES)
+            stale = Booking.objects.filter(
+                customer=user,
+                status=Booking.BookingStatus.SEARCHING,
+                created_at__lte=cutoff
+            )
+            for b in stale:
+                b.status = Booking.BookingStatus.CANCELLED
+                b.save()
+                BookingTracking.objects.create(
+                    booking=b,
+                    status=Booking.BookingStatus.CANCELLED,
+                    remarks=f'Auto-cancelled: no driver found within {AUTO_CANCEL_SEARCHING_MINUTES} minutes.'
+                )
+        # ─────────────────────────────────────────────────────────────────────
 
         # 1. Parse Selected Ride Vehicle Type (Bike, Auto, Sedan, SUV)
         selected_ride_param = self.request.data.get('selected_ride') or self.request.data.get('ride_type') or self.request.data.get('vehicle_type_name') or 'sedan'

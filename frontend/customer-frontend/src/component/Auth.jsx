@@ -91,18 +91,19 @@ export default function Auth() {
   const activeUser = user || pendingAuthData;
 
   return (
-    <div className="min-h-screen w-full bg-gray-50 text-gray-900 flex flex-col justify-between relative font-sans">
-      {/* Header with #FFC000 Amber Accent */}
-      <header className="w-full max-w-7xl mx-auto px-6 py-6 flex items-center justify-between z-10 border-b border-gray-200 bg-white">
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate('/')}>
-          <div className="w-10 h-10 rounded-xl bg-yellow-400 text-black flex items-center justify-center shadow-md shadow-yellow-400/25">
-            <Car className="w-6 h-6 text-black" />
+    <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-emerald-50/20 to-slate-100 text-gray-900 flex flex-col justify-between relative font-sans">
+      {/* Glassmorphic Header */}
+      <header className="w-full max-w-7xl mx-auto px-6 py-5 flex items-center justify-between z-10 glass-nav border-b border-white/80 rounded-b-3xl mt-0 shadow-sm">
+        <div className="flex items-center gap-3 cursor-pointer group" onClick={() => navigate('/')}>
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-600 to-[#063B28] text-white flex items-center justify-center shadow-lg shadow-emerald-700/20 group-hover:scale-105 transition-all border border-white/20">
+            <Car className="w-6 h-6 text-white" />
           </div>
           <div>
-            <span className="text-xl font-extrabold tracking-wider text-gray-900">
+            <span className="text-xl font-black tracking-tight text-gray-900 flex items-center gap-1.5">
               RaahGo
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             </span>
-            <span className="text-xs block font-semibold uppercase tracking-widest text-gray-500">
+            <span className="text-[10px] block font-extrabold uppercase tracking-widest text-[#16A34A]">
               Customer Portal
             </span>
           </div>
@@ -111,8 +112,8 @@ export default function Auth() {
         {/* Right Header Navigation */}
         <div className="flex items-center gap-4 text-xs">
           {activeUser ? (
-            <div className="flex items-center gap-3 bg-gray-50 border border-gray-200 px-3.5 py-1.5 rounded-full">
-              <div className="w-7 h-7 rounded-full bg-yellow-400 text-black font-extrabold flex items-center justify-center text-xs shadow-sm">
+            <div className="flex items-center gap-3 glass-panel px-3.5 py-1.5 rounded-full border border-white/80">
+              <div className="w-7 h-7 rounded-full bg-[#063B28] text-white font-extrabold flex items-center justify-center text-xs shadow-sm">
                 {activeUser.name ? activeUser.name.charAt(0).toUpperCase() : 'U'}
               </div>
               <span className="font-extrabold text-gray-900 hidden sm:inline">
@@ -132,9 +133,9 @@ export default function Auth() {
               <button
                 type="button"
                 onClick={() => navigate('/login')}
-                className={`px-4 py-2 rounded-xl font-bold transition-all text-xs ${pathView === 'login'
-                    ? 'bg-yellow-400 text-black shadow-xs'
-                    : 'bg-gray-50 text-gray-700 hover:bg-gray-200'
+                className={`px-5 py-2.5 rounded-2xl font-bold transition-all text-xs cursor-pointer ${pathView === 'login'
+                    ? 'bg-[#063B28] text-white shadow-md'
+                    : 'bg-white/80 text-gray-700 hover:bg-white border border-gray-200/80'
                   }`}
               >
                 Log In
@@ -142,9 +143,9 @@ export default function Auth() {
               <button
                 type="button"
                 onClick={() => navigate('/signup')}
-                className={`px-4 py-2 rounded-xl font-bold transition-all text-xs ${pathView === 'signup'
-                    ? 'bg-yellow-400 text-black shadow-xs'
-                    : 'bg-gray-50 text-gray-700 hover:bg-gray-200'
+                className={`px-5 py-2.5 rounded-2xl font-bold transition-all text-xs cursor-pointer ${pathView === 'signup'
+                    ? 'bg-[#063B28] text-white shadow-md'
+                    : 'bg-white/80 text-gray-700 hover:bg-white border border-gray-200/80'
                   }`}
               >
                 Sign Up
@@ -163,7 +164,7 @@ export default function Auth() {
           />
         ) : (
           <div className="w-full max-w-md">
-            <div className="bg-white border border-gray-200 rounded-3xl p-6 sm:p-8 shadow-xl relative">
+            <div className="glass-panel rounded-[32px] p-6 sm:p-8 shadow-[0_20px_50px_rgba(0,0,0,0.08)] border border-white/80 relative">
               {pathView === 'signup' ? (
                 <SignupForm
                   onSuccess={handleAuthSuccess}
@@ -177,8 +178,8 @@ export default function Auth() {
               )}
             </div>
 
-            <p className="text-center text-xs text-gray-500 mt-4 flex items-center justify-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
+            <p className="text-center text-xs text-gray-500 font-medium mt-4 flex items-center justify-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
               <span>Instant OTP authentication powered by RaahGo Security</span>
             </p>
           </div>
@@ -186,7 +187,7 @@ export default function Auth() {
       </main>
 
       {/* Footer */}
-      <footer className="w-full text-center py-4 border-t border-gray-200 text-xs text-gray-500 bg-white z-10">
+      <footer className="w-full text-center py-4 text-xs text-gray-500 glass-nav border-t border-white/80 z-10">
         &copy; {new Date().getFullYear()} RaahGo Customer Portal. All rights reserved.
       </footer>
     </div>

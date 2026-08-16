@@ -41,7 +41,7 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
       setGoogleLoading(true);
       setError('');
       try {
-        const res = await fetch('/api/v1/driver/google-auth/', {
+        const res = await fetch('/api/v1/driver/auth/google-auth/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token: response.credential })
@@ -147,7 +147,7 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
       : { email: cleanTarget, purpose: 'Login', role: 'Driver' };
 
     try {
-      const response = await fetch('/api/v1/driver/send-otp/', {
+      const response = await fetch('/api/v1/driver/auth/send-otp/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -176,7 +176,7 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
       : { email: cleanTarget, otp: otpCode, role: 'Driver' };
 
     try {
-      const response = await fetch('/api/v1/driver/verify-otp/', {
+      const response = await fetch('/api/v1/driver/auth/verify-otp/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

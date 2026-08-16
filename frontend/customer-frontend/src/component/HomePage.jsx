@@ -150,53 +150,6 @@ export default function HomePage({ user, onLogout }) {
     map.setView(targetCenterLatLng, zoom, { animate: true });
   };
 
-  const createPinIcon = () => {
-    const L = window.L;
-    if (!L) return null;
-    return L.divIcon({
-      html: `
-        <div style="position: relative; display: flex; flex-direction: column; align-items: center; cursor: grab;" title="Drag to adjust pickup location">
-          <div style="background-color: #22C55E; color: white; width: 38px; height: 38px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center; border: 3px solid white; box-shadow: 0 6px 16px rgba(0,0,0,0.35); z-index: 10;">
-            <span style="transform: rotate(45deg); font-size: 16px; font-weight: bold;">📍</span>
-          </div>
-          <div style="width: 14px; height: 4px; background: rgba(0,0,0,0.3); border-radius: 50%; margin-top: 2px; filter: blur(1px);"></div>
-          <div style="margin-top: 4px; background: #111827; color: white; font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 9999px; display: flex; align-items: center; gap: 5px; box-shadow: 0 3px 10px rgba(0,0,0,0.35); white-space: nowrap; border: 1.5px solid rgba(255,255,255,0.2);">
-            <span style="width: 6px; height: 6px; border-radius: 50%; background-color: #22C55E; display: inline-block;"></span>
-            <span>Pickup Point</span>
-          </div>
-        </div>
-      `,
-      className: 'custom-pickup-pin-badge',
-      iconSize: [120, 76],
-      iconAnchor: [60, 38]
-    });
-  };
-
-  const bindMarkerDrag = (marker) => {
-    marker.on('dragstart', () => {
-      setIsGeocoding(true);
-    });
-
-    marker.on('dragend', async (e) => {
-      const pos = e.target.getLatLng();
-      const lat = pos.lat;
-      const lng = pos.lng;
-      setPickupCoords({ lat, lng });
-      setCurrentGpsName('Detecting location...');
-      setIsGeocoding(true);
-      try {
-        const address = await reverseGeocodeGps(lat, lng);
-        setCurrentGpsName(address);
-        setPickup(address);
-      } catch (err) {
-        console.error('Reverse geocode error:', err);
-        setCurrentGpsName(`Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
-      } finally {
-        setIsGeocoding(false);
-      }
-    });
-  };
-
   // Instantiate Map for Mobile Background
   useEffect(() => {
     if (!miniMapLoaded || !miniMapRef.current || miniMapInstance.current) return;
@@ -222,10 +175,6 @@ export default function HomePage({ user, onLogout }) {
       maxZoom: 19,
       attribution: ''
     }).addTo(map);
-
-    const pinIcon = createPinIcon();
-    const marker = L.marker([pLat, pLng], { icon: pinIcon, draggable: true }).addTo(map);
-    bindMarkerDrag(marker);
 
     map.on('click', async (e) => {
       const { lat, lng } = e.latlng;
@@ -287,22 +236,8 @@ export default function HomePage({ user, onLogout }) {
   // Update Map position when pickupCoords or sheetHeight changes
   useEffect(() => {
     if (miniMapInstance.current && window.L) {
-      const L = window.L;
-      const pLat = pickupCoords?.lat || 28.440886;
-      const pLng = pickupCoords?.lng || 77.038938;
-
       miniMapInstance.current.invalidateSize();
       adjustMapView(pickupCoords, sheetHeight);
-
-      miniMapInstance.current.eachLayer((layer) => {
-        if (layer instanceof L.Marker) {
-          miniMapInstance.current.removeLayer(layer);
-        }
-      });
-
-      const pinIcon = createPinIcon();
-      const marker = L.marker([pLat, pLng], { icon: pinIcon, draggable: true }).addTo(miniMapInstance.current);
-      bindMarkerDrag(marker);
     }
   }, [pickupCoords, sheetHeight]);
 
@@ -438,11 +373,14 @@ export default function HomePage({ user, onLogout }) {
           <div className="w-3.5 h-1 bg-black/40 rounded-full blur-[1px] mt-0.5"></div>
         </div>
 
-        {/* Top Header Over Map */}
-        <div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-center pointer-events-none">
-          <div className="bg-white/95 backdrop-blur-sm px-3.5 py-2 rounded-full shadow-md pointer-events-auto flex items-center gap-2 max-w-[75%] border border-gray-100">
-            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isLocatingGps || isGeocoding ? 'bg-amber-500 animate-spin' : 'bg-green-500 animate-pulse'}`}></span>
-            <span className="text-xs font-bold text-gray-800 truncate">
+        {/* Top Floating Location Search Bar */}
+        <div className="absolute top-4 left-4 right-4 z-30 flex items-center justify-between pointer-events-none gap-2">
+          <div 
+            onClick={() => navigate('/book-ride')}
+            className="flex-1 glass-panel rounded-full px-4 py-3 shadow-lg pointer-events-auto flex items-center gap-2.5 cursor-pointer hover:bg-white/95 transition-all border border-white/80"
+          >
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
+            <span className="text-xs font-bold text-gray-900 truncate">
               {isLocatingGps ? 'Locating GPS...' : isGeocoding ? 'Detecting place...' : (currentGpsName || 'Locating...')}
             </span>
           </div>
@@ -450,12 +388,12 @@ export default function HomePage({ user, onLogout }) {
             onClick={handleReLocateGps}
             disabled={isLocatingGps}
             title="Re-center Current GPS Location"
-            className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-md pointer-events-auto text-gray-700 hover:bg-gray-50 active:scale-95 transition-all border border-gray-100"
+            className="w-11 h-11 glass-panel rounded-full flex items-center justify-center shadow-lg pointer-events-auto text-[#063B28] hover:bg-white active:scale-95 transition-all border border-white/80 shrink-0"
           >
             {isLocatingGps ? (
-              <Loader2 className="w-5 h-5 text-green-600 animate-spin" />
+              <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
             ) : (
-              <LocateFixed className="w-5 h-5 text-green-600" />
+              <LocateFixed className="w-5 h-5 text-emerald-600" />
             )}
           </button>
         </div>
@@ -463,7 +401,7 @@ export default function HomePage({ user, onLogout }) {
         {/* Scrollable Bottom Sheet Content */}
         <div 
           style={{ height: `${sheetHeight}%` }}
-          className={`absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-20 flex flex-col transition-all ${isDraggingSheet ? 'duration-0' : 'duration-300'}`}
+          className={`absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-2xl rounded-t-[36px] shadow-[0_-15px_50px_rgba(0,0,0,0.12)] border-t border-white/80 z-20 flex flex-col transition-all ${isDraggingSheet ? 'duration-0' : 'duration-300'}`}
         >
           
           {/* Drag handle */}
@@ -472,10 +410,10 @@ export default function HomePage({ user, onLogout }) {
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
             onClick={toggleSheetHeight}
-            className="w-full flex flex-col items-center pt-3 pb-2 shrink-0 cursor-pointer touch-none"
+            className="w-full flex flex-col items-center pt-3.5 pb-2 shrink-0 cursor-pointer touch-none"
             title="Drag or tap to expand/collapse"
           >
-            <div className="w-12 h-1.5 bg-gray-300 rounded-full hover:bg-gray-400 transition-colors"></div>
+            <div className="w-12 h-1.5 bg-gray-300/80 rounded-full hover:bg-gray-400 transition-colors"></div>
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 pb-24 scrollbar-none">
@@ -485,24 +423,28 @@ export default function HomePage({ user, onLogout }) {
                 {/* Search Bar */}
                 <div 
                   onClick={() => navigate('/book-ride')}
-                  className="w-full bg-white border-2 border-gray-100 shadow-sm rounded-full px-5 py-4 flex items-center gap-3 cursor-pointer"
+                  className="w-full bg-white/90 border-2 border-emerald-500/20 hover:border-emerald-500/50 shadow-md shadow-emerald-500/5 rounded-full px-5 py-4 flex items-center gap-3 cursor-pointer transition-all hover:scale-[1.01]"
                 >
-                  <Search className="w-5 h-5 text-gray-400" />
-                  <span className="text-lg font-bold text-gray-800">Where do you want to go?</span>
+                  <Search className="w-5 h-5 text-emerald-600" />
+                  <span className="text-base sm:text-lg font-extrabold text-gray-900">Where do you want to go?</span>
                 </div>
 
                 {/* Recent Locations (Mock) */}
-                <div className="space-y-4 px-2">
-                  <div className="flex items-center gap-4 cursor-pointer">
-                    <Clock className="w-5 h-5 text-gray-400 shrink-0" />
-                    <div className="flex-1 border-b border-gray-100 pb-3">
+                <div className="space-y-3 px-2">
+                  <div className="flex items-center gap-4 cursor-pointer hover:bg-emerald-50/40 p-2 rounded-2xl transition-colors" onClick={() => navigate('/book-ride', { state: { prefillDest: 'City Center Mall, MG Road, Sector 28' } })}>
+                    <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
+                      <Clock className="w-4 h-4 text-gray-500" />
+                    </div>
+                    <div className="flex-1 min-w-0 border-b border-gray-100 pb-2">
                       <p className="font-bold text-gray-900 text-sm">City Center Mall</p>
                       <p className="text-xs text-gray-500 font-medium truncate">MG Road, Sector 28</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4 cursor-pointer">
-                    <Clock className="w-5 h-5 text-gray-400 shrink-0" />
-                    <div className="flex-1 border-b border-gray-100 pb-3">
+                  <div className="flex items-center gap-4 cursor-pointer hover:bg-emerald-50/40 p-2 rounded-2xl transition-colors" onClick={() => navigate('/book-ride', { state: { prefillDest: 'Tech Park DLF, Cyber City, Phase 2' } })}>
+                    <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
+                      <Clock className="w-4 h-4 text-gray-500" />
+                    </div>
+                    <div className="flex-1 min-w-0 border-b border-gray-100 pb-2">
                       <p className="font-bold text-gray-900 text-sm">Tech Park DLF</p>
                       <p className="text-xs text-gray-500 font-medium truncate">Cyber City, Phase 2</p>
                     </div>
@@ -510,68 +452,56 @@ export default function HomePage({ user, onLogout }) {
                 </div>
 
                 {/* Services Section */}
-                <div className="pt-2">
-                  <h3 className="text-sm font-black text-gray-500 mb-3 uppercase tracking-wider">Everything In Minutes</h3>
+                <div className="pt-1">
+                  <h3 className="text-xs font-black text-gray-400 mb-3 uppercase tracking-wider">Everything In Minutes</h3>
                   <div className="grid grid-cols-2 gap-3">
-                    {/* Parcel */}
+                    {/* Bike Ride */}
                     <div 
-                      onClick={() => alert('Parcel dispatch is coming soon!')}
-                      className="bg-gray-50 rounded-2xl p-4 flex flex-col justify-between h-32 border border-gray-100 relative overflow-hidden"
+                      onClick={() => navigate('/book-ride', { state: { selectedRide: 'bike' } })}
+                      className="bg-gradient-to-br from-white/95 to-emerald-50/60 rounded-3xl p-4 flex flex-col justify-between h-32 border border-emerald-100/70 shadow-sm hover:shadow-md transition-all hover:scale-[1.02] cursor-pointer relative overflow-hidden"
                     >
                       <div>
-                        <p className="text-sm text-gray-600 font-semibold">Send anything</p>
-                        <h4 className="text-lg font-black text-gray-900">Parcel</h4>
+                        <p className="text-xs text-emerald-700 font-bold uppercase tracking-wider">Fastest</p>
+                        <h4 className="text-lg font-black text-gray-900 leading-tight">Bike Taxi</h4>
                       </div>
-                      <Package className="w-12 h-12 text-yellow-600 absolute bottom-2 right-2 opacity-80" />
+                      <div className="absolute bottom-2 right-2 text-4xl">🏍️</div>
                     </div>
 
-                    {/* Metro Tickets */}
-                    <div 
-                      onClick={() => alert('Metro Tickets coming soon!')}
-                      className="bg-gray-50 rounded-2xl p-4 flex flex-col justify-between h-32 border border-gray-100 relative overflow-hidden"
-                    >
-                      <div>
-                        <span className="inline-block px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-black uppercase rounded-md mb-1">Offers</span>
-                        <h4 className="text-lg font-black text-gray-900 leading-tight">Metro tickets</h4>
-                      </div>
-                      <Ticket className="w-10 h-10 text-gray-400 absolute bottom-3 right-3 opacity-80" />
-                    </div>
-
-                    {/* Auto/Rickshaw */}
+                    {/* Auto / Rickshaw */}
                     <div 
                       onClick={() => navigate('/book-ride', { state: { selectedRide: 'auto' } })}
-                      className="bg-gray-50 rounded-2xl p-4 flex flex-col justify-between h-32 border border-gray-100 relative overflow-hidden"
+                      className="bg-gradient-to-br from-white/95 to-amber-50/60 rounded-3xl p-4 flex flex-col justify-between h-32 border border-amber-100/70 shadow-sm hover:shadow-md transition-all hover:scale-[1.02] cursor-pointer relative overflow-hidden"
                     >
                       <div>
-                        <p className="text-sm text-gray-600 font-semibold">Private</p>
+                        <p className="text-xs text-amber-700 font-bold uppercase tracking-wider">Reliable</p>
                         <h4 className="text-lg font-black text-gray-900 leading-tight">Auto &<br/>Rickshaw</h4>
                       </div>
                       <div className="absolute bottom-2 right-2 text-4xl">🛺</div>
                     </div>
 
-                    {/* All Services */}
+                    {/* Metro Tickets */}
                     <div 
-                      onClick={() => navigate('/book-ride')}
-                      className="bg-gray-50 rounded-2xl p-4 flex flex-col justify-between h-32 border border-gray-100 relative overflow-hidden"
+                      onClick={() => alert('Metro ticket booking is coming soon!')}
+                      className="bg-gradient-to-br from-white/95 to-blue-50/60 rounded-3xl p-4 flex flex-col justify-between h-32 border border-blue-100/70 shadow-sm hover:shadow-md transition-all hover:scale-[1.02] cursor-pointer relative overflow-hidden"
                     >
                       <div>
-                        <h4 className="text-lg font-black text-gray-900 leading-tight mt-2">All<br/>Services</h4>
+                        <p className="text-xs text-blue-700 font-bold uppercase tracking-wider">Transit</p>
+                        <h4 className="text-lg font-black text-gray-900 leading-tight">Metro Tickets</h4>
                       </div>
-                      <div className="absolute bottom-4 right-4 grid grid-cols-2 gap-1">
-                        <div className="w-3 h-3 bg-gray-300 rounded-sm"></div>
-                        <div className="w-3 h-3 bg-yellow-400 rounded-sm"></div>
-                        <div className="w-3 h-3 bg-gray-300 rounded-sm"></div>
-                        <div className="w-3 h-3 bg-gray-300 rounded-sm"></div>
-                      </div>
+                      <Ticket className="w-10 h-10 text-blue-500 absolute bottom-3 right-3 opacity-80" />
                     </div>
-                  </div>
-                </div>
 
-                {/* Promo Banner */}
-                <div className="bg-blue-900 rounded-2xl p-4 flex items-center justify-between mt-2">
-                  <h4 className="text-white font-black text-lg">Someone misses you</h4>
-                  <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center">
-                    <MapPin className="w-5 h-5 text-white" />
+                    {/* Parcel */}
+                    <div 
+                      onClick={() => alert('Parcel dispatch is coming soon!')}
+                      className="bg-gradient-to-br from-white/95 to-purple-50/60 rounded-3xl p-4 flex flex-col justify-between h-32 border border-purple-100/70 shadow-sm hover:shadow-md transition-all hover:scale-[1.02] cursor-pointer relative overflow-hidden"
+                    >
+                      <div>
+                        <p className="text-xs text-purple-700 font-bold uppercase tracking-wider">Delivery</p>
+                        <h4 className="text-lg font-black text-gray-900 leading-tight">Send Parcel</h4>
+                      </div>
+                      <Package className="w-10 h-10 text-purple-500 absolute bottom-3 right-3 opacity-80" />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -583,8 +513,8 @@ export default function HomePage({ user, onLogout }) {
                 <h3 className="text-2xl font-black text-gray-900">Profile</h3>
                 {user ? (
                   <div className="space-y-4">
-                    <div className="bg-gray-50 rounded-3xl p-5 flex items-center gap-4">
-                      <div className="w-16 h-16 rounded-full bg-yellow-400 text-black font-black text-2xl flex items-center justify-center shadow-sm">
+                    <div className="glass-card rounded-3xl p-5 flex items-center gap-4 border border-white/80">
+                      <div className="w-16 h-16 rounded-full bg-[#063B28] text-white font-black text-2xl flex items-center justify-center shadow-md">
                         {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
                       </div>
                       <div>
@@ -595,20 +525,20 @@ export default function HomePage({ user, onLogout }) {
                     <button
                       type="button"
                       onClick={onLogout}
-                      className="w-full py-4 bg-red-50 text-red-600 font-black text-sm rounded-2xl transition-all cursor-pointer shadow-none flex items-center justify-center gap-2"
+                      className="w-full py-4 bg-red-50 hover:bg-red-100 text-red-600 font-black text-sm rounded-2xl transition-all cursor-pointer border-none flex items-center justify-center gap-2"
                     >
                       <LogOut className="w-4 h-4" />
                       <span>Log Out</span>
                     </button>
                   </div>
                 ) : (
-                  <div className="bg-gray-50 rounded-3xl p-6 text-center space-y-4">
+                  <div className="glass-card rounded-3xl p-6 text-center space-y-4 border border-white/80">
                     <User className="w-12 h-12 text-gray-300 mx-auto" />
                     <h4 className="text-base font-black text-gray-900">Guest User</h4>
                     <p className="text-sm text-gray-500 font-medium">Log in to manage your rides.</p>
                     <button
                       onClick={() => navigate('/login')}
-                      className="w-full py-3.5 bg-yellow-400 text-black font-black text-sm rounded-2xl cursor-pointer"
+                      className="w-full py-3.5 bg-[#063B28] hover:bg-[#084A33] text-white font-black text-sm rounded-2xl cursor-pointer shadow-md"
                     >
                       Log In
                     </button>
@@ -616,64 +546,33 @@ export default function HomePage({ user, onLogout }) {
                 )}
               </div>
             )}
-            
-            {/* Activity Tab Mobile */}
-            {activeTab === 'activity' && (
-               <div className="space-y-5 animate-fade-in pt-4">
-               <h3 className="text-2xl font-black text-gray-900">My Rides</h3>
-               {!user ? (
-                 <div className="text-center py-12 bg-gray-50 rounded-3xl space-y-4 p-6">
-                   <Clock className="w-12 h-12 text-gray-300 mx-auto" />
-                   <p className="text-sm text-gray-500 font-bold">Please log in to view your ride history.</p>
-                 </div>
-               ) : isLoadingHistory ? (
-                 <div className="text-center py-12 space-y-3">
-                   <Loader2 className="w-8 h-8 text-yellow-400 animate-spin mx-auto" />
-                 </div>
-               ) : rideHistory.length === 0 ? (
-                 <div className="text-center py-12 bg-gray-50 rounded-3xl space-y-3 p-6">
-                   <Clock className="w-10 h-10 text-gray-300 mx-auto" />
-                   <p className="text-sm text-gray-500 font-bold">No ride activity found yet.</p>
-                 </div>
-               ) : (
-                 <div className="space-y-4">
-                   {rideHistory.map((ride) => (
-                     <div key={ride.id} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-3">
-                       <div className="flex items-center justify-between border-b border-gray-50 pb-2">
-                         <span className="text-xs uppercase font-black bg-gray-100 px-2 py-1 rounded">
-                           {ride.booking_number || 'Ride'}
-                         </span>
-                         <span className="font-extrabold text-sm text-gray-900">₹{ride.total_fare}</span>
-                       </div>
-                       <div className="space-y-2 text-sm">
-                         <p className="text-gray-900 font-extrabold truncate flex gap-2 items-center"><span className="w-2 h-2 rounded-full bg-green-500"></span> {ride.pickup_address}</p>
-                         <p className="text-gray-500 font-bold truncate flex gap-2 items-center"><span className="w-2 h-2 rounded-full bg-red-500"></span> {ride.dropoff_address}</p>
-                       </div>
-                     </div>
-                   ))}
-                 </div>
-               )}
-             </div>
-            )}
           </div>
         </div>
 
-        {/* Mobile Bottom Tab Bar */}
-        <div className="absolute bottom-0 left-0 right-0 h-[72px] bg-white border-t border-gray-100 flex items-center justify-around z-40 pb-2 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
-          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none w-16 ${activeTab === 'home' ? 'text-gray-900' : 'text-gray-400'}`}>
-            <Car className={`w-6 h-6 ${activeTab === 'home' ? 'fill-gray-900' : ''}`} />
+        {/* Mobile Glassmorphic Bottom Tab Bar */}
+        <div className="absolute bottom-0 left-0 right-0 h-[76px] glass-panel border-t border-white/80 flex items-center justify-around z-40 pb-2 shadow-[0_-5px_25px_rgba(0,0,0,0.06)]">
+          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none w-16 ${activeTab === 'home' ? 'text-[#063B28]' : 'text-gray-400'}`}>
+            <div className={`p-1 rounded-xl transition-all ${activeTab === 'home' ? 'bg-[#EEF8F2]' : ''}`}>
+              <Car className={`w-5 h-5 ${activeTab === 'home' ? 'text-[#063B28]' : ''}`} />
+            </div>
             <span className="text-[10px] font-black">Ride</span>
           </button>
           <button onClick={() => alert('Metro coming soon')} className="flex flex-col items-center gap-1 cursor-pointer bg-transparent border-none text-gray-400 w-16">
-            <Ticket className="w-6 h-6" />
+            <div className="p-1 rounded-xl">
+              <Ticket className="w-5 h-5" />
+            </div>
             <span className="text-[10px] font-bold">Metro</span>
           </button>
           <button onClick={() => alert('Parcel coming soon')} className="flex flex-col items-center gap-1 cursor-pointer bg-transparent border-none text-gray-400 w-16">
-            <Package className="w-6 h-6" />
+            <div className="p-1 rounded-xl">
+              <Package className="w-5 h-5" />
+            </div>
             <span className="text-[10px] font-bold">Parcel</span>
           </button>
-          <button onClick={() => setActiveTab('profile')} className={`flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none w-16 ${activeTab === 'profile' ? 'text-gray-900' : 'text-gray-400'}`}>
-            <User className={`w-6 h-6 ${activeTab === 'profile' ? 'fill-gray-900' : ''}`} />
+          <button onClick={() => setActiveTab('profile')} className={`flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none w-16 ${activeTab === 'profile' ? 'text-[#063B28]' : 'text-gray-400'}`}>
+            <div className={`p-1 rounded-xl transition-all ${activeTab === 'profile' ? 'bg-[#EEF8F2]' : ''}`}>
+              <User className={`w-5 h-5 ${activeTab === 'profile' ? 'text-[#063B28]' : ''}`} />
+            </div>
             <span className="text-[10px] font-black">Profile</span>
           </button>
         </div>

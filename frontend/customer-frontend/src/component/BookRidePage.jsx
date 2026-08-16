@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MapPin, Navigation, Car, ShieldCheck, Clock, Search, ArrowRight, ArrowLeft, Star,
-  CreditCard, Tag, CheckCircle2, ChevronRight, LogOut, User, RefreshCw, Zap,
-  LocateFixed, Loader2, KeyRound, Lock, Unlock, AlertCircle, X
+  CreditCard, Tag, CheckCircle2, ChevronRight, ChevronDown, ChevronUp, LogOut, User, RefreshCw, Zap,
+  LocateFixed, Loader2, KeyRound, Lock, Unlock, AlertCircle, X, Info
 } from 'lucide-react';
 import { fetchLocationSuggestions, getDeviceGpsLocation } from '../common/locationService';
 import { fetchWithAuth } from '../common/apiClient';
@@ -24,21 +24,13 @@ const VEHICLE_RATES = {
     rate: Number(import.meta.env.VITE_AUTO_RATE_PER_KM) || 12,
     minFare: Number(import.meta.env.VITE_AUTO_MIN_FARE) || 30
   },
-  car: {
-    rate: Number(import.meta.env.VITE_CAR_RATE_PER_KM) || 25,
-    minFare: Number(import.meta.env.VITE_CAR_MIN_FARE) || 80
-  },
-  taxi: {
-    rate: Number(import.meta.env.VITE_CAR_RATE_PER_KM) || 28,
-    minFare: Number(import.meta.env.VITE_CAR_MIN_FARE) || 90
-  },
-  sedan: {
-    rate: Number(import.meta.env.VITE_CAR_RATE_PER_KM) || 30,
-    minFare: Number(import.meta.env.VITE_CAR_MIN_FARE) || 100
+  cab: {
+    rate: Number(import.meta.env.VITE_CAB_RATE_PER_KM) || 20,
+    minFare: Number(import.meta.env.VITE_CAB_MIN_FARE) || 70
   },
   suv: {
-    rate: Number(import.meta.env.VITE_CAR_RATE_PER_KM) || 40,
-    minFare: Number(import.meta.env.VITE_CAR_MIN_FARE) || 120
+    rate: Number(import.meta.env.VITE_SUV_RATE_PER_KM) || 25,
+    minFare: Number(import.meta.env.VITE_SUV_MIN_FARE) || 100
   }
 };
 
@@ -60,9 +52,12 @@ export default function BookRidePage({ user, onLogout }) {
   const [activeBookingData, setActiveBookingData] = useState(null);
   const [isSearchingDriver, setIsSearchingDriver] = useState(false);
   const [searchProgress, setSearchProgress] = useState(0);
+  const [showTripDetailsInSearch, setShowTripDetailsInSearch] = useState(false);
   const [rideNotification, setRideNotification] = useState(null);
   const [tripCompletedModal, setTripCompletedModal] = useState(false);
   const [selectedRating, setSelectedRating] = useState(5);
+  const [activeRideRef] = useState(() => React.createRef());
+  const [searchTimeLeft, setSearchTimeLeft] = useState(null); // seconds remaining before auto-cancel
 
   const [pickupCoords, setPickupCoords] = useState(location.state?.pickupCoords || null);
   const [destCoords, setDestCoords] = useState(location.state?.dropCoords || null);
@@ -128,17 +123,21 @@ export default function BookRidePage({ user, onLogout }) {
     const restoreActiveBookingOnMount = async () => {
       if (!user) return;
       try {
-        const res = await fetchWithAuth('/api/v1/bookings/bookings/');
+        // Use the dedicated /active endpoint which also auto-cancels stale rides
+        const res = await fetchWithAuth('/api/v1/bookings/bookings/active/');
         if (res.ok) {
-          const bData = await res.json();
-          const bList = Array.isArray(bData) ? bData : (bData.results || []);
-          const active = bList.find(b => b.status !== 'Completed' && b.status !== 'Cancelled');
-          if (active) {
-            setActiveBookingData(active);
-            if (active.status === 'Searching') {
+          const data = await res.json();
+          if (data && !data.auto_cancelled && data.id) {
+            setActiveBookingData(data);
+            if (data.status === 'Searching') {
               setIsSearchingDriver(true);
               setBookingSuccess(false);
-            } else if (active.status === 'Accepted' || active.status === 'In Trip') {
+              // Calculate remaining search time
+              const created = new Date(data.created_at).getTime();
+              const elapsed = Math.floor((Date.now() - created) / 1000);
+              const remaining = Math.max(0, 15 * 60 - elapsed);
+              setSearchTimeLeft(remaining);
+            } else if (data.status === 'Accepted' || data.status === 'Arrived' || data.status === 'In Trip') {
               setIsSearchingDriver(false);
               setBookingSuccess(true);
             }
@@ -257,12 +256,14 @@ export default function BookRidePage({ user, onLogout }) {
     }
   }, [user]);
 
-  // Poll for Captain status updates (Accepted, Cancelled, Completed)
+  // Poll for Captain status updates + 15-min auto-cancel countdown
   useEffect(() => {
     let interval = null;
+    let countdownInterval = null;
     const bookingId = activeBookingData?.id;
 
     if (bookingId && activeBookingData?.status !== 'Completed' && activeBookingData?.status !== 'Cancelled') {
+      // ── Booking status polling (every 2s) ──────────────────────────────
       interval = setInterval(async () => {
         try {
           const res = await fetchWithAuth(`/api/v1/bookings/bookings/${bookingId}/`);
@@ -272,11 +273,13 @@ export default function BookRidePage({ user, onLogout }) {
 
             if (data.status !== 'Searching') {
               setIsSearchingDriver(false);
+              setSearchTimeLeft(null);
             }
 
             if (data.status === 'Accepted' && activeBookingData?.status === 'Searching') {
               setIsSearchingDriver(false);
               setBookingSuccess(true);
+              setSearchTimeLeft(null);
               setRideNotification({
                 type: 'accepted',
                 title: 'Captain Accepted Your Ride! 🎉',
@@ -285,14 +288,21 @@ export default function BookRidePage({ user, onLogout }) {
             } else if (data.status === 'Cancelled' && activeBookingData?.status !== 'Cancelled') {
               setIsSearchingDriver(false);
               setBookingSuccess(false);
+              setSearchTimeLeft(null);
+              const isAutoCancelled = data.status === 'Cancelled' &&
+                activeBookingData?.status === 'Searching';
               setRideNotification({
                 type: 'declined',
-                title: 'Sorry No Captain Available',
-                message: 'We could not find a captain nearby for your ride. Please try again or choose a different pickup location.'
+                title: isAutoCancelled ? 'No Driver Found ⏱️' : 'Sorry No Captain Available',
+                message: isAutoCancelled
+                  ? 'Your ride was automatically cancelled after 15 minutes with no driver response. Please try again.'
+                  : 'We could not find a captain nearby. Please try again or choose a different pickup.'
               });
+              setActiveBookingData(null);
             } else if (data.status === 'Completed') {
               setIsSearchingDriver(false);
               setBookingSuccess(false);
+              setSearchTimeLeft(null);
               setTripCompletedModal(true);
             }
           }
@@ -300,9 +310,41 @@ export default function BookRidePage({ user, onLogout }) {
           console.log('Poll booking notice:', err);
         }
       }, 2000);
+
+      // ── 15-minute countdown timer (every 1s, only while Searching) ────
+      if (activeBookingData?.status === 'Searching') {
+        const created = new Date(activeBookingData.created_at).getTime();
+        countdownInterval = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - created) / 1000);
+          const remaining = Math.max(0, 15 * 60 - elapsed);
+          setSearchTimeLeft(remaining);
+
+          if (remaining === 0) {
+            // Time's up — cancel the ride via API
+            clearInterval(countdownInterval);
+            fetchWithAuth(`/api/v1/bookings/bookings/${bookingId}/cancel/`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ reason: 'Auto-cancelled: no driver found within 15 minutes.' })
+            }).then(() => {
+              setIsSearchingDriver(false);
+              setBookingSuccess(false);
+              setSearchTimeLeft(null);
+              setActiveBookingData(null);
+              setRideNotification({
+                type: 'declined',
+                title: 'No Driver Found ⏱️',
+                message: 'Your ride was automatically cancelled after 15 minutes with no driver response. Please try again.'
+              });
+            }).catch(() => {});
+          }
+        }, 1000);
+      }
     }
+
     return () => {
       if (interval) clearInterval(interval);
+      if (countdownInterval) clearInterval(countdownInterval);
     };
   }, [activeBookingData?.id, activeBookingData?.status, isSearchingDriver]);
 
@@ -327,8 +369,8 @@ export default function BookRidePage({ user, onLogout }) {
 
     try {
       const loc = await getDeviceGpsLocation();
-      // Only set coordinates to show marker, do not auto-fill text input
-      setPickupCoords(prev => prev ? prev : { lat: loc.lat, lng: loc.lon });
+      setPickup(loc.address);
+      setPickupCoords({ lat: loc.lat, lng: loc.lon });
       setPickupError('');
       setGpsVerified(true);
       setLocationStatus(loc.displayStatus);
@@ -511,7 +553,12 @@ export default function BookRidePage({ user, onLogout }) {
     }
 
     if (activeBookingData && activeBookingData.status !== 'Completed' && activeBookingData.status !== 'Cancelled') {
-      alert(`Active Ride In Progress! You cannot request another ride while your current trip is ${activeBookingData.status}.`);
+      // Scroll to / highlight the active ride panel instead of blocking with an alert
+      if (activeRideRef.current) {
+        activeRideRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        activeRideRef.current.classList.add('ring-4', 'ring-yellow-400', 'ring-offset-2');
+        setTimeout(() => activeRideRef.current?.classList.remove('ring-4', 'ring-yellow-400', 'ring-offset-2'), 2000);
+      }
       return;
     }
 
@@ -535,7 +582,6 @@ export default function BookRidePage({ user, onLogout }) {
 
     setIsBooking(true);
     setBookingSuccess(false);
-    setIsSearchingDriver(false);
     const fareNum = calculateFare(selectedRide, currentDist);
 
     const pLat = pickupCoords ? parseFloat(Number(pickupCoords.lat).toFixed(6)) : 28.613900;
@@ -560,6 +606,11 @@ export default function BookRidePage({ user, onLogout }) {
       status: 'Searching'
     };
 
+    // ── Optimistic UI: show searching screen immediately ─────────────────
+    setIsSearchingDriver(true);
+    setSearchTimeLeft(15 * 60);
+    // ─────────────────────────────────────────────────────────────────────
+
     try {
       const res = await fetchWithAuth('/api/v1/bookings/bookings/', {
         method: 'POST',
@@ -569,14 +620,23 @@ export default function BookRidePage({ user, onLogout }) {
       const data = await res.json();
       if (res.ok) {
         setActiveBookingData(data);
-        setIsSearchingDriver(true);
+      } else {
+        // Revert optimistic UI on API error
+        setIsSearchingDriver(false);
+        setSearchTimeLeft(null);
+        const errMsg = data?.detail || data?.error || data?.non_field_errors?.[0] || 'Failed to create booking. Please try again.';
+        setRideNotification({ type: 'declined', title: 'Booking Failed', message: errMsg });
       }
     } catch (err) {
-      console.log('Book ride API notice:', err);
+      // Revert on network error
+      setIsSearchingDriver(false);
+      setSearchTimeLeft(null);
+      setRideNotification({ type: 'declined', title: 'Network Error', message: 'Could not reach server. Check your connection and try again.' });
     } finally {
       setIsBooking(false);
     }
   };
+
 
   const handleCancelBooking = async () => {
     if (activeBookingData?.id) {
@@ -588,12 +648,13 @@ export default function BookRidePage({ user, onLogout }) {
     }
     setIsSearchingDriver(false);
     setBookingSuccess(false);
+    setSearchTimeLeft(null);
     setActiveBookingData(null);
   };
 
   return (
     <div className="min-h-screen w-full bg-gray-50 flex flex-col font-sans relative overflow-x-hidden">
-      
+
       {/* Desktop Header */}
       <div className="hidden lg:block shrink-0">
         <Navbar user={user} onLogout={onLogout} />
@@ -601,389 +662,508 @@ export default function BookRidePage({ user, onLogout }) {
 
       {/* Main Container */}
       <div className="flex-1 w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-0 lg:gap-6 p-0 lg:p-6 relative">
-      
+
         {/* Left Sidebar (Mobile Layout) */}
-        <div className="w-full lg:w-[450px] bg-white min-h-screen lg:min-h-0 lg:h-[calc(100vh-140px)] lg:rounded-3xl lg:shadow-xl lg:border lg:border-gray-200 flex flex-col relative overflow-y-auto overflow-x-hidden scrollbar-none shrink-0 z-10 lg:mt-0">
+        <div className="w-full lg:w-[450px] bg-white h-screen lg:h-[calc(100vh-140px)] lg:rounded-3xl lg:shadow-xl lg:border lg:border-gray-200 flex flex-col relative overflow-hidden shrink-0 z-10 lg:mt-0">
 
-        {/* Floating Notification */}
-        {rideNotification && (
-          <div className={`absolute top-4 left-4 right-4 z-50 p-3 rounded-2xl shadow-xl border transition-all transform animate-bounce-short bg-white ${rideNotification.type === 'accepted' ? 'border-green-500 text-black' : 'border-red-500 text-black'
-            }`}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${rideNotification.type === 'accepted' ? 'bg-green-500' : 'bg-red-500'}`} />
-                <div>
-                  <h4 className="text-xs font-black text-gray-900">{rideNotification.title}</h4>
-                  <p className="text-xs font-semibold text-gray-500 mt-0.5">{rideNotification.message}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setRideNotification(null)}
-                className="text-gray-400 hover:text-black font-bold p-1 bg-transparent border-none cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Searching for Captain Animated Fullscreen Modal */}
-        {isSearchingDriver && (
-          <div className="absolute inset-0 bg-gray-900/95 backdrop-blur-md z-50 flex flex-col justify-between p-6 text-white animate-fade-in">
-            <div className="pt-8 text-center space-y-3">
-              <div className="w-20 h-20 rounded-full bg-yellow-400/20 text-yellow-400 mx-auto flex items-center justify-center relative">
-                <div className="absolute inset-0 rounded-full border-2 border-yellow-400 animate-ping opacity-75"></div>
-                <Car className="w-10 h-10 text-yellow-400 animate-bounce" />
-              </div>
-              <h2 className="text-2xl font-black tracking-tight">Finding Nearby Captain...</h2>
-              <p className="text-xs font-semibold text-gray-300 max-w-xs mx-auto">
-                Searching for available {selectedRide.toUpperCase()} partners near your pickup location.
-              </p>
-
-              <div className="w-full bg-white/10 h-2.5 rounded-full overflow-hidden mt-6">
-                <div
-                  className="bg-yellow-400 h-full transition-all duration-300 rounded-full"
-                  style={{ width: `${searchProgress}%` }}
-                ></div>
-              </div>
-            </div>
-
-            <div className="bg-white/10 rounded-3xl p-5 border border-white/10 space-y-3 backdrop-blur-sm">
-              <div className="flex items-center justify-between text-xs border-b border-white/10 pb-2">
-                <span className="text-gray-400 font-bold">Vehicle Type</span>
-                <span className="font-black uppercase text-yellow-400">{selectedRide}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs border-b border-white/10 pb-2">
-                <span className="text-gray-400 font-bold">Est. Total Fare</span>
-                <span className="font-black text-white text-sm">₹{calculateFare(selectedRide, currentDist)}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-400 font-bold">Pickup</span>
-                <span className="font-black text-gray-200 truncate max-w-44">{pickup || 'Current Location'}</span>
-              </div>
-            </div>
-
-            <button
-              onClick={handleCancelBooking}
-              className="w-full py-4 bg-red-500 hover:bg-red-600 text-white font-extrabold text-sm rounded-2xl shadow-xl transition-all border-none cursor-pointer mb-4"
-            >
-              Cancel Request
-            </button>
-          </div>
-        )}
-
-        {/* Header Bar */}
-        <div className="flex items-center justify-between px-5 pt-6 pb-4 border-b border-gray-200 bg-white shrink-0 z-30">
-          <button
-            type="button"
-            onClick={() => navigate('/home')}
-            className="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-900 flex items-center justify-center transition-colors cursor-pointer border-none"
-          >
-            <ArrowLeft className="w-5 h-5 text-gray-900" />
-          </button>
-          <div className="text-center">
-            <h1 className="text-base font-black text-gray-900">Book Ride</h1>
-            <span className="text-xs text-gray-400 font-bold block">RaahGo Express</span>
-          </div>
-          <div className="w-9"></div>
-        </div>
-
-        {/* Scrollable Content Area */}
-        <div className={`flex-1 overflow-y-auto px-4 pt-4 pb-6 space-y-4 scrollbar-none ${showFares ? 'pb-6' : 'pb-6'}`}>
-          <div className="space-y-4">
-            {/* Map View at Top (Mobile Only) */}
-            <div className="block lg:hidden h-56 sm:h-64 rounded-[24px] overflow-hidden border border-gray-200 relative z-10 shrink-0 shadow-sm">
-              <RealtimeMap
-                pickup={pickup}
-                destination={destination}
-                pickupCoords={pickupCoords}
-                destCoords={destCoords}
-                mode="booking"
-                selectedRide={selectedRide}
-                onRouteCalculated={(info) => setCalculatedRouteInfo(info)}
-                onLocateMe={handleDetectGpsLocation}
-              />
-            </div>
-
-            {/* GPS Status / Error Alert Banner */}
-            {locationStatus && (locationStatus.includes('Unable') || locationStatus.includes('unavailable') || locationStatus.includes('denied') || locationStatus.includes('Please enable')) && (
-              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center gap-2.5 text-xs text-red-500 font-bold animate-fade-in">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
-                <span className="flex-1">{locationStatus}</span>
-              </div>
-            )}
-
-            {/* Inputs Group Card */}
-            <div className="bg-gray-100 rounded-[24px] p-4 space-y-3 relative">
-              {/* Pickup Location Row */}
-              <div className="relative" ref={pickupContainerRef}>
-                <div className={`flex items-center gap-3 bg-white p-2.5 rounded-2xl border transition-all ${pickupError ? 'border-red-500 bg-red-500/5 ring-1 ring-red-500' : 'border-gray-200'
-                  }`}>
-                  <span className="text-green-500 text-base shrink-0">🟢</span>
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      value={pickup}
-                      onChange={handlePickupChange}
-                      onFocus={() => {
-                        setShowPickupDropdown(true);
-                        setPickupError('');
-                      }}
-                      placeholder="Pickup location"
-                      className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
-                    />
+          {/* Floating Notification */}
+          {rideNotification && (
+            <div className={`absolute top-4 left-4 right-4 z-50 p-3 rounded-2xl shadow-xl border transition-all transform animate-bounce-short bg-white ${rideNotification.type === 'accepted' ? 'border-green-500 text-black' : 'border-red-500 text-black'
+              }`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${rideNotification.type === 'accepted' ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <div>
+                    <h4 className="text-xs font-black text-gray-900">{rideNotification.title}</h4>
+                    <p className="text-xs font-semibold text-gray-500 mt-0.5">{rideNotification.message}</p>
                   </div>
-                  {pickup && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPickup('');
-                        setPickupCoords(null);
-                        setPickupSuggestions([]);
-                        setCalculatedRouteInfo(null);
-                      }}
-                      className="w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center shrink-0"
-                      title="Clear pickup location"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                  
+                </div>
+                <button
+                  onClick={() => setRideNotification(null)}
+                  className="text-gray-400 hover:text-black font-bold p-1 bg-transparent border-none cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Searching for Captain Animated Screen */}
+          {isSearchingDriver && (
+            <div ref={activeRideRef} className="absolute inset-0 z-50 flex flex-col justify-between overflow-hidden animate-fade-in">
+              {/* Full Background Map */}
+              <div className="absolute inset-0 w-full h-full z-0">
+                <RealtimeMap
+                  pickup={pickup}
+                  destination={destination}
+                  pickupCoords={pickupCoords}
+                  destCoords={destCoords}
+                  mode="searching"
+                  selectedRide={selectedRide}
+                />
+              </div>
+
+              {/* Floating Transparent Overlays */}
+              <div className="relative z-10 w-full h-full pointer-events-none flex flex-col justify-between p-4 sm:p-5">
+                {/* Top Radar Status Badge */}
+                <div className="pt-2 flex justify-center pointer-events-auto">
+                  <div className="bg-[#063B28] px-5 py-3 rounded-full shadow-[0_10px_30px_rgba(6,59,40,0.35)] flex items-center justify-between gap-4 text-white max-w-sm w-full border border-white/20">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="relative flex h-3 w-3 shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#22C55E] opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-[#22C55E]"></span>
+                      </span>
+                      <span className="text-xs font-bold tracking-tight text-white truncate">
+                        Radar Active · Finding nearest
+                      </span>
+                    </div>
+                    <div className="text-xs font-bold shrink-0 flex items-center gap-1.5">
+                      <span className="text-[#22C55E] font-black uppercase">{selectedRide}</span>
+                      <span className="text-white font-bold">Captains</span>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Inline Error Message */}
-                {pickupError && (
-                  <p className="text-xs font-extrabold text-red-500 mt-1.5 flex items-center gap-1.5 animate-fade-in pl-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
-                    <span>{pickupError}</span>
-                  </p>
-                )}
-
-                {showPickupDropdown && (
-                  <div className="absolute left-0 right-0 bg-white border border-gray-200 mt-2 rounded-2xl shadow-2xl z-50 max-h-56 overflow-y-auto text-left p-1 divide-y divide-gray-50">
-                    {/* 1-Tap Current Location Shortcut */}
-                    <div
-                      onClick={handleDetectGpsLocation}
-                      className="p-2.5 hover:bg-blue-50 cursor-pointer rounded-xl flex items-center gap-3 transition-colors text-xs font-bold text-blue-500 bg-blue-50 mb-1"
-                    >
-                      <div className="w-7 h-7 rounded-full bg-blue-500/15 flex items-center justify-center shrink-0">
-                        <LocateFixed className="w-4 h-4 text-blue-500 animate-pulse" />
+                {/* Bottom Floating Clean White Card */}
+                <div className="space-y-3 max-w-md w-full mx-auto pointer-events-auto">
+                  <div className="bg-white rounded-[32px] p-5 sm:p-6 shadow-[0_20px_60px_rgba(0,0,0,0.22)] border border-gray-100 text-gray-900 space-y-4">
+                    {/* Header with Mint Green Vehicle Box */}
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-14 h-14 rounded-2xl bg-[#EEF8F2] border border-[#D2EDD9] flex items-center justify-center shrink-0 shadow-xs">
+                        <span className="text-2xl animate-bounce">
+                          {selectedRide === 'bike' ? '🏍️' : (selectedRide === 'auto' || selectedRide === 'e-rickshaw') ? '🛺' : selectedRide === 'suv' ? '🚙' : '🚗'}
+                        </span>
                       </div>
-                      <div className="flex-1">
-                        <p className="font-extrabold text-blue-500 text-xs">Use Current GPS Location</p>
-                        <p className="text-xs text-gray-500 font-medium">Detect address via live device GPS</p>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-base sm:text-lg font-bold text-gray-900 tracking-tight leading-snug">
+                          Connecting <span className="text-[#16A34A] font-extrabold uppercase">{selectedRide}</span> Captain...
+                        </h3>
+                        <p className="text-xs text-gray-500 font-medium truncate mt-0.5">
+                          Notifying verified drivers near your pickup
+                        </p>
                       </div>
                     </div>
 
-                    {/* Autocomplete Search Suggestions */}
-                    {pickupSuggestions.map((loc, idx) => (
+                    {/* Clean Emerald Progress Bar */}
+                    <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
                       <div
-                        key={idx}
-                        onClick={() => selectPickupSuggestion(loc)}
-                        className="p-2.5 hover:bg-gray-100 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
-                      >
-                        <span className="text-base shrink-0">{loc.icon || '📍'}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between">
-                            <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
-                            {loc.distanceKm < 999 && (
-                              <span className="text-xs text-gray-500 font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
-                            )}
-                          </div>
-                          <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
+                        className="bg-[#16A34A] h-full transition-all duration-300 rounded-full"
+                        style={{ width: `${searchProgress}%` }}
+                      ></div>
+                    </div>
+
+                    {/* 15-min Auto-cancel Countdown */}
+                    {searchTimeLeft !== null && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-gray-500 font-semibold flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          Auto-cancel in
+                        </span>
+                        <span className={`font-black tabular-nums ${
+                          searchTimeLeft < 60 ? 'text-red-500' : searchTimeLeft < 180 ? 'text-orange-500' : 'text-gray-700'
+                        }`}>
+                          {String(Math.floor(searchTimeLeft / 60)).padStart(2, '0')}:{String(searchTimeLeft % 60).padStart(2, '0')}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Total Fare & Option Button Row */}
+                    <div className="bg-[#F8FAF9] rounded-2xl p-3.5 border border-[#E6EFE9] flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {/* <span className="bg-white border-2 border-[#16A34A] text-[#16A34A] font-black px-2.5 py-1 rounded-xl text-xs uppercase tracking-wide">
+                          {selectedRide}
+                        </span> */}
+                        <div className="flex flex-col">
+                          <span className="text-gray-500 font-semibold text-[10px] uppercase">Total Fare</span>
+                          <span className="text-[#16A34A] text-lg font-black tracking-tight leading-none">
+                            ₹{calculateFare(selectedRide, currentDist)}
+                          </span>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
 
-              {/* Divider line */}
-              <div className="border-t border-gray-200"></div>
+                      {/* Interactive Option Button to View/Hide Route Details */}
+                      <button
+                        type="button"
+                        onClick={() => setShowTripDetailsInSearch(!showTripDetailsInSearch)}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-[#D2EDD9] text-[#063B28] font-black text-xs hover:bg-[#EEF8F2] active:scale-95 transition-all shadow-2xs cursor-pointer"
+                        title="Toggle Route & Distance Details"
+                      >
+                        <MapPin className="w-3.5 h-3.5 text-[#16A34A]" />
+                        <span>{showTripDetailsInSearch ? 'Hide Details' : 'Route Details'}</span>
+                        <ChevronDown className={`w-4 h-4 text-[#16A34A] transition-transform duration-200 ${showTripDetailsInSearch ? 'rotate-180' : ''}`} />
+                      </button>
+                    </div>
 
-              {/* Destination Row */}
-              <div className="relative" ref={destContainerRef}>
-                <div className={`flex items-center gap-3 bg-white p-2.5 rounded-2xl border transition-all ${destError ? 'border-red-500 bg-red-500/5 ring-1 ring-red-500' : 'border-gray-200'
-                  }`}>
-                  <span className="text-red-500 text-base shrink-0">📍</span>
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      value={destination}
-                      onChange={handleDestChange}
-                      onFocus={() => {
-                        destSuggestions.length > 0 && setShowDestDropdown(true);
-                        setDestError('');
-                      }}
-                      placeholder="Drop location"
-                      className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
-                    />
-                  </div>
-                  {destination && (
+                    {/* Expandable Route & Distance Details Panel */}
+                    {showTripDetailsInSearch && (
+                      <div className="bg-[#F8FAF9] rounded-2xl p-4 border border-[#E6EFE9] space-y-3.5 animate-fade-in">
+                        {/* Pickup Row */}
+                        <div className="flex items-start gap-3">
+                          <div className="w-5 h-5 rounded-full border-2 border-[#16A34A] flex items-center justify-center shrink-0 mt-0.5 bg-white p-0.5 shadow-xs">
+                            <div className="w-2 h-2 rounded-full bg-[#16A34A]"></div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[10px] font-black uppercase text-[#16A34A] tracking-wider">Pickup Point</p>
+                            <p className="text-xs sm:text-sm font-bold text-gray-900 truncate mt-0.5">{pickup || 'Current Location'}</p>
+                          </div>
+                        </div>
+
+                        {/* Drop Row */}
+                        <div className="flex items-start gap-3 border-t border-[#E6EFE9] pt-3">
+                          <div className="w-5 h-5 rounded-full border-2 border-[#EF4444] flex items-center justify-center shrink-0 mt-0.5 bg-white p-0.5 shadow-xs">
+                            <div className="w-2 h-2 rounded-full bg-[#EF4444]"></div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[10px] font-black uppercase text-[#EF4444] tracking-wider">Drop Point</p>
+                            <p className="text-xs sm:text-sm font-bold text-gray-900 truncate mt-0.5">{destination || 'Selected Drop Location'}</p>
+                          </div>
+                        </div>
+
+                        {/* Distance to Travel Row */}
+                        <div className="border-t border-[#E6EFE9] pt-3 flex items-center justify-between text-xs">
+                          <span className="text-gray-500 font-bold">Distance:</span>
+                          <span className="text-gray-900 font-black flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-lg border border-gray-200">
+                            <span>🛣️ {currentDist} km</span>
+                            <span className="text-gray-400">·</span>
+                            <span className="text-emerald-700">~{calculatedRouteInfo?.durationMins || Math.max(3, Math.round(currentDist * 2.5))} mins</span>
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Dark Forest Green Cancel Request Button */}
                     <button
-                      type="button"
-                      onClick={() => {
-                        setDestination('');
-                        setDestCoords(null);
-                        setDestSuggestions([]);
-                        setCalculatedRouteInfo(null);
-                      }}
-                      className="w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center shrink-0"
-                      title="Clear drop location"
+                      onClick={handleCancelBooking}
+                      className="w-full py-4 bg-[#063B28] hover:bg-[#084A33] active:scale-[0.98] text-white font-extrabold text-sm sm:text-base rounded-2xl shadow-lg shadow-[#063B28]/25 transition-all border-none cursor-pointer text-center"
                     >
-                      <X className="w-4 h-4" />
+                      Cancel Request
                     </button>
-                  )}
-                </div>
-
-                {/* Inline Error Message */}
-                {destError && (
-                  <p className="text-xs font-extrabold text-red-500 mt-1.5 flex items-center gap-1.5 animate-fade-in pl-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
-                    <span>{destError}</span>
-                  </p>
-                )}
-
-                {showDestDropdown && destSuggestions.length > 0 && (
-                  <div className="absolute left-0 right-0 bg-white border border-gray-200 mt-2 rounded-2xl shadow-2xl z-50 max-h-56 overflow-y-auto text-left p-1 divide-y divide-gray-50">
-                    {destSuggestions.map((loc, idx) => (
-                      <div
-                        key={idx}
-                        onClick={() => selectDestSuggestion(loc)}
-                        className="p-2.5 hover:bg-gray-100 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
-                      >
-                        <span className="text-base shrink-0">{loc.icon || '📍'}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between">
-                            <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
-                            {loc.distanceKm < 999 && (
-                              <span className="text-xs text-gray-500 font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
-                            )}
-                          </div>
-                          <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
-                        </div>
-                      </div>
-                    ))}
                   </div>
-                )}
+                </div>
               </div>
             </div>
+          )}
 
-            {/* Note to Driver Container */}
-            <div>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Note to driver (optional)"
-                className="w-full bg-white border border-gray-200 rounded-[16px] p-3.5 text-xs text-gray-900 font-medium focus:border-yellow-400 focus:ring-0 focus:outline-none resize-none h-16 shadow-2xs"
-              />
-            </div>
-
-            {/* Show Fare Estimates Button */}
+          {/* Header Bar */}
+          <div className="flex items-center justify-between px-5 pt-6 pb-4 border-b border-gray-200 bg-white shrink-0 z-30">
             <button
               type="button"
-              onClick={() => {
-                let hasErr = false;
-
-                if (!pickup || !pickup.trim()) {
-                  setPickupError('Please enter pickup location');
-                  hasErr = true;
-                } else {
-                  setPickupError('');
-                }
-
-                if (!destination || !destination.trim()) {
-                  setDestError('Please enter destination location');
-                  hasErr = true;
-                } else {
-                  setDestError('');
-                }
-
-                if (hasErr) return;
-
-                setShowFares(true);
-              }}
-              className="w-full py-3.5 bg-yellow-400 hover:bg-yellow-500 text-black font-extrabold text-sm rounded-[16px] shadow-md transition-all text-center cursor-pointer border-none"
+              onClick={() => navigate('/home')}
+              className="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-900 flex items-center justify-center transition-colors cursor-pointer border-none"
             >
-              Show Fare Estimates
+              <ArrowLeft className="w-5 h-5 text-gray-900" />
             </button>
+            <div className="text-center">
+              <h1 className="text-base font-black text-gray-900">Book Ride</h1>
+              <span className="text-xs text-gray-400 font-bold block">RaahGo Express</span>
+            </div>
+            <div className="w-9"></div>
+          </div>
 
-            {/* Vehicle List (Revealed below after Show Fares click) */}
-            {showFares && (
-              <div ref={fareEstimatesRef} className="space-y-3 pt-2 animate-fade-in">
-                <h3 className="text-sm font-extrabold text-black">Choose vehicle · {currentDist} km</h3>
-                <div className="space-y-2.5">
-                  {rideTypes.map((ride) => {
-                    const isSelected = selectedRide === ride.id;
-                    return (
-                      <div
-                        key={ride.id}
-                        onClick={() => setSelectedRide(ride.id)}
-                        className={`p-3.5 rounded-[20px] border flex items-center justify-between transition-all bg-white cursor-pointer ${isSelected ? 'border-yellow-400 bg-yellow-50 shadow-xs' : 'border-gray-200 hover:border-gray-300'
-                          }`}
+          {/* Scrollable Content Area */}
+          <div className={`flex-1 overflow-y-auto px-4 pt-4 pb-6 space-y-4 scrollbar-none ${showFares ? 'pb-6' : 'pb-6'}`}>
+            <div className="space-y-4">
+              {/* Map View at Top (Mobile Only) */}
+              <div className="block lg:hidden h-56 sm:h-64 rounded-[24px] overflow-hidden border border-gray-200 relative z-10 shrink-0 shadow-sm">
+                <RealtimeMap
+                  pickup={pickup}
+                  destination={destination}
+                  pickupCoords={pickupCoords}
+                  destCoords={destCoords}
+                  mode="booking"
+                  selectedRide={selectedRide}
+                  onRouteCalculated={(info) => setCalculatedRouteInfo(info)}
+                  onLocateMe={handleDetectGpsLocation}
+                  onPickupChange={(address, coords) => {
+                    setPickup(address);
+                    setPickupCoords(coords);
+                    setPickupError('');
+                  }}
+                />
+              </div>
+
+              {/* GPS Status / Error Alert Banner */}
+              {locationStatus && (locationStatus.includes('Unable') || locationStatus.includes('unavailable') || locationStatus.includes('denied') || locationStatus.includes('Please enable')) && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center gap-2.5 text-xs text-red-500 font-bold animate-fade-in">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+                  <span className="flex-1">{locationStatus}</span>
+                </div>
+              )}
+
+              {/* Inputs Group Card */}
+              <div className="glass-card rounded-[28px] p-4 space-y-3 relative border border-emerald-500/15 shadow-sm">
+                {/* Pickup Location Row */}
+                <div className="relative" ref={pickupContainerRef}>
+                  <div className={`flex items-center gap-3 bg-white/90 p-3 rounded-2xl border transition-all ${pickupError ? 'border-red-500 bg-red-500/5 ring-1 ring-red-500' : 'border-gray-200/80'
+                    }`}>
+                    <span className="text-emerald-500 text-base shrink-0">🟢</span>
+                    <div className="flex-1">
+                      <input
+                        type="text"
+                        value={pickup}
+                        onChange={handlePickupChange}
+                        onFocus={() => {
+                          setShowPickupDropdown(true);
+                          setPickupError('');
+                        }}
+                        placeholder="Pickup location"
+                        className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
+                      />
+                    </div>
+                    {pickup && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPickup('');
+                          setPickupCoords(null);
+                          setPickupSuggestions([]);
+                          setCalculatedRouteInfo(null);
+                        }}
+                        className="w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center shrink-0"
+                        title="Clear pickup location"
                       >
-                        <div className="flex items-center gap-4">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${isSelected ? 'bg-yellow-400 text-black' : 'bg-gray-100 text-gray-500'
-                            }`}>
-                            <span className="text-lg">{ride.icon}</span>
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-extrabold text-sm text-black">{ride.name}</h4>
-                              <span className="text-xs bg-gray-100 font-bold text-gray-600 px-1.5 py-0.5 rounded">
-                                {ride.capacity}
-                              </span>
-                            </div>
-                            <p className="text-xs text-gray-500 font-medium">{ride.eta} away · {ride.desc}</p>
-                          </div>
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+
+                  </div>
+
+                  {/* Inline Error Message */}
+                  {pickupError && (
+                    <p className="text-xs font-extrabold text-red-500 mt-1.5 flex items-center gap-1.5 animate-fade-in pl-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
+                      <span>{pickupError}</span>
+                    </p>
+                  )}
+
+                  {showPickupDropdown && (
+                    <div className="absolute left-0 right-0 glass-panel border border-white/80 mt-2 rounded-2xl shadow-2xl z-50 max-h-56 overflow-y-auto text-left p-1.5 divide-y divide-gray-100/60">
+                      {/* 1-Tap Current Location Shortcut */}
+                      <div
+                        onClick={handleDetectGpsLocation}
+                        className="p-2.5 hover:bg-emerald-50 cursor-pointer rounded-xl flex items-center gap-3 transition-colors text-xs font-bold text-[#16A34A] bg-emerald-50/60 mb-1"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0">
+                          <LocateFixed className="w-4 h-4 text-emerald-600 animate-pulse" />
                         </div>
-                        <div className="text-right">
-                          <div className="font-black text-sm text-black">{ride.price}</div>
+                        <div className="flex-1">
+                          <p className="font-extrabold text-[#16A34A] text-xs">Use Current GPS Location</p>
+                          <p className="text-xs text-gray-500 font-medium">Detect address via live device GPS</p>
                         </div>
                       </div>
-                    );
-                  })}
+
+                      {/* Autocomplete Search Suggestions */}
+                      {pickupSuggestions.map((loc, idx) => (
+                        <div
+                          key={idx}
+                          onClick={() => selectPickupSuggestion(loc)}
+                          className="p-2.5 hover:bg-emerald-50/60 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
+                        >
+                          <span className="text-base shrink-0">{loc.icon || '📍'}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between">
+                              <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
+                              {loc.distanceKm < 999 && (
+                                <span className="text-xs text-gray-500 font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                {/* Confirm & Request Captain Action Button */}
-                <button
-                  type="button"
-                  onClick={handleBookRide}
-                  disabled={isBooking}
-                  className="w-full py-4 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-base rounded-[20px] shadow-lg hover:shadow-xl transition-all cursor-pointer border-none flex items-center justify-center gap-2 mt-4"
-                >
-                  {isBooking ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>Requesting Captain...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Book {selectedRide.toUpperCase()} Now</span>
-                      <ArrowRight className="w-5 h-5" />
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div> {/* End of Left Sidebar */}
+                {/* Divider line */}
+                <div className="border-t border-gray-100"></div>
 
-      {/* Right Area (Desktop Map) */}
-      <div className="hidden lg:block flex-1 rounded-3xl overflow-hidden shadow-xl border border-gray-200 relative h-[calc(100vh-140px)] lg:mt-0 shrink-0 z-10">
-        <RealtimeMap
-          pickup={pickup}
-          destination={destination}
-          pickupCoords={pickupCoords}
-          destCoords={destCoords}
-          mode="booking"
-          selectedRide={selectedRide}
-          onRouteCalculated={(info) => setCalculatedRouteInfo(info)}
-          onLocateMe={handleDetectGpsLocation}
-        />
-      </div>
-      
+                {/* Destination Row */}
+                <div className="relative" ref={destContainerRef}>
+                  <div className={`flex items-center gap-3 bg-white/90 p-3 rounded-2xl border transition-all ${destError ? 'border-red-500 bg-red-500/5 ring-1 ring-red-500' : 'border-gray-200/80'
+                    }`}>
+                    <span className="text-red-500 text-base shrink-0">📍</span>
+                    <div className="flex-1">
+                      <input
+                        type="text"
+                        value={destination}
+                        onChange={handleDestChange}
+                        onFocus={() => {
+                          destSuggestions.length > 0 && setShowDestDropdown(true);
+                          setDestError('');
+                        }}
+                        placeholder="Drop location"
+                        className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
+                      />
+                    </div>
+                    {destination && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDestination('');
+                          setDestCoords(null);
+                          setDestSuggestions([]);
+                          setCalculatedRouteInfo(null);
+                        }}
+                        className="w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center shrink-0"
+                        title="Clear drop location"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Inline Error Message */}
+                  {destError && (
+                    <p className="text-xs font-extrabold text-red-500 mt-1.5 flex items-center gap-1.5 animate-fade-in pl-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
+                      <span>{destError}</span>
+                    </p>
+                  )}
+
+                  {showDestDropdown && destSuggestions.length > 0 && (
+                    <div className="absolute left-0 right-0 glass-panel border border-white/80 mt-2 rounded-2xl shadow-2xl z-50 max-h-56 overflow-y-auto text-left p-1.5 divide-y divide-gray-100/60">
+                      {destSuggestions.map((loc, idx) => (
+                        <div
+                          key={idx}
+                          onClick={() => selectDestSuggestion(loc)}
+                          className="p-2.5 hover:bg-emerald-50/60 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
+                        >
+                          <span className="text-base shrink-0">{loc.icon || '📍'}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between">
+                              <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
+                              {loc.distanceKm < 999 && (
+                                <span className="text-xs text-gray-500 font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Note to Driver */}
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Note to driver (optional)"
+                  className="w-full bg-white/80 border border-gray-200/80 rounded-[16px] p-3 text-xs text-gray-900 font-medium focus:border-emerald-500 focus:ring-0 focus:outline-none resize-none h-14 shadow-2xs"
+                />
+              </div>
+
+              {/* Show Fare Estimates Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  let hasErr = false;
+
+                  if (!pickup || !pickup.trim()) {
+                    setPickupError('Please enter pickup location');
+                    hasErr = true;
+                  } else {
+                    setPickupError('');
+                  }
+
+                  if (!destination || !destination.trim()) {
+                    setDestError('Please enter destination location');
+                    hasErr = true;
+                  } else {
+                    setDestError('');
+                  }
+
+                  if (hasErr) return;
+
+                  setShowFares(true);
+                }}
+                className="w-full py-4 bg-[#063B28] hover:bg-[#084A33] active:scale-[0.98] text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-[#063B28]/20 transition-all text-center cursor-pointer border-none"
+              >
+                Show Fare Estimates
+              </button>
+
+              {/* Vehicle List (Revealed below after Show Fares click) */}
+              {showFares && (
+                <div ref={fareEstimatesRef} className="space-y-3 pt-2 animate-fade-in">
+                  <h3 className="text-sm font-black text-gray-900">Choose vehicle · {currentDist} km</h3>
+                  <div className="space-y-2.5">
+                    {rideTypes.map((ride) => {
+                      const isSelected = selectedRide === ride.id;
+                      return (
+                        <div
+                          key={ride.id}
+                          onClick={() => setSelectedRide(ride.id)}
+                          className={`p-3.5 rounded-2xl border flex items-center justify-between transition-all cursor-pointer ${isSelected ? 'border-2 border-[#16A34A] bg-[#EEF8F2]/90 shadow-sm' : 'glass-card border-gray-200/80 hover:bg-emerald-50/30'
+                            }`}
+                        >
+                          <div className="flex items-center gap-3.5">
+                            <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${isSelected ? 'bg-white text-[#16A34A] shadow-sm border border-[#D2EDD9]' : 'bg-gray-100 text-gray-600'
+                              }`}>
+                              <span className="text-xl">{ride.icon}</span>
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-extrabold text-sm text-gray-900">{ride.name}</h4>
+                                <span className="text-[10px] bg-white/80 border border-gray-200 font-black text-gray-600 px-1.5 py-0.5 rounded-md">
+                                  {ride.capacity}
+                                </span>
+                              </div>
+                              <p className="text-xs text-gray-500 font-medium">{ride.eta} away · {ride.desc}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-black text-base text-[#16A34A]">{ride.price}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Confirm & Request Captain Action Button */}
+                  <button
+                    type="button"
+                    onClick={handleBookRide}
+                    disabled={isBooking}
+                    className="w-full py-4 bg-gradient-to-r from-[#063B28] to-[#0D5B3E] hover:from-[#084A33] hover:to-[#106A49] text-white font-black text-base rounded-2xl shadow-xl shadow-[#063B28]/25 active:scale-[0.98] transition-all cursor-pointer border-none flex items-center justify-center gap-2 mt-4"
+                  >
+                    {isBooking ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span>Requesting Captain...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Book {selectedRide.toUpperCase()} Now</span>
+                        <ArrowRight className="w-5 h-5" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div> {/* End of Left Sidebar */}
+
+        {/* Right Area (Desktop Map) */}
+        <div className="hidden lg:block flex-1 rounded-3xl overflow-hidden shadow-xl border border-gray-200 relative h-[calc(100vh-140px)] lg:mt-0 shrink-0 z-10">
+          <RealtimeMap
+            pickup={pickup}
+            destination={destination}
+            pickupCoords={pickupCoords}
+            destCoords={destCoords}
+            mode="booking"
+            selectedRide={selectedRide}
+            onRouteCalculated={(info) => setCalculatedRouteInfo(info)}
+            onLocateMe={handleDetectGpsLocation}
+            onPickupChange={(address, coords) => {
+              setPickup(address);
+              setPickupCoords(coords);
+              setPickupError('');
+            }}
+          />
+        </div>
+
       </div> {/* End of Main Container */}
 
       {/* Desktop Footer */}

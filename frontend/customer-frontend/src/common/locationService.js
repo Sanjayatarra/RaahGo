@@ -137,41 +137,55 @@ export const reverseGeocodeGps = async (lat, lon) => {
 };
 
 // 3. Get Device GPS Location (Uses True Device GPS with accurate fallback, removing inaccurate IP lookup)
+let lastCachedGpsLocation = null;
+let lastGpsFetchTime = 0;
+
 export const getDeviceGpsLocation = () => {
   return new Promise((resolve) => {
+    // Return cached GPS if fetched within last 15 seconds
+    const now = Date.now();
+    if (lastCachedGpsLocation && (now - lastGpsFetchTime < 15000)) {
+      resolve(lastCachedGpsLocation);
+      return;
+    }
+
     const fallbackLocation = async () => {
       try {
         const saved = localStorage.getItem('raahgo_last_gps_location');
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (parsed.lat && parsed.lon) {
+          if (parsed?.lat && parsed?.lon) {
             const addr = parsed.address || await reverseGeocodeGps(parsed.lat, parsed.lon);
-            resolve({
-              lat: parsed.lat,
-              lon: parsed.lon,
+            const result = {
+              lat: parseFloat(parsed.lat),
+              lon: parseFloat(parsed.lon),
               accuracy: '10',
               address: addr,
               displayStatus: `GPS Active: ${addr}`
-            });
+            };
+            lastCachedGpsLocation = result;
+            lastGpsFetchTime = Date.now();
+            resolve(result);
             return;
           }
         }
-      } catch (e) {
-        console.log('Saved location parse notice:', e);
-      }
+      } catch (e) {}
 
       // Default to Sector 38, Gurgaon (28.440886, 77.038938)
       const defaultLat = 28.440886;
       const defaultLon = 77.038938;
       const defaultAddress = await reverseGeocodeGps(defaultLat, defaultLon);
 
-      resolve({
+      const result = {
         lat: defaultLat,
         lon: defaultLon,
         accuracy: '10',
         address: defaultAddress || 'Guru Haridas Road, Sector 38, Gurgaon',
         displayStatus: `GPS Active: Guru Haridas Road, Sector 38, Gurgaon`
-      });
+      };
+      lastCachedGpsLocation = result;
+      lastGpsFetchTime = Date.now();
+      resolve(result);
     };
 
     if (!navigator.geolocation) {
@@ -187,23 +201,26 @@ export const getDeviceGpsLocation = () => {
 
         const address = await reverseGeocodeGps(lat, lon);
 
-        try {
-          localStorage.setItem('raahgo_last_gps_location', JSON.stringify({ lat, lon, address }));
-        } catch (e) {}
-
-        resolve({
+        const result = {
           lat,
           lon,
           accuracy,
           address,
           displayStatus: `GPS Active: ${address}`
-        });
+        };
+
+        try {
+          localStorage.setItem('raahgo_last_gps_location', JSON.stringify({ lat, lon, address }));
+        } catch (e) {}
+
+        lastCachedGpsLocation = result;
+        lastGpsFetchTime = Date.now();
+        resolve(result);
       },
-      (error) => {
-        console.warn('HTML5 Geolocation not granted/available, using accurate local fallback:', error);
+      () => {
         fallbackLocation();
       },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 }
     );
   });
 };

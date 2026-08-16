@@ -26,6 +26,7 @@ def tile_proxy_view(request, z, x, y):
     headers = {
         'User-Agent': 'RaahGo-Map-Service/1.0 (https://raahgo.com; contact@raahgo.com)'
     }
+    print("efrgth",osm_tile_url)
     try:
         resp = requests.get(osm_tile_url, headers=headers, timeout=5)
         if resp.status_code == 200:

@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'bookings',
     'common',
     'notifications',
@@ -170,7 +171,7 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER or 'noreply@raahgo.com'
 # Django REST Framework Settings
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'users.authentication.SingleDeviceJWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ),
 }

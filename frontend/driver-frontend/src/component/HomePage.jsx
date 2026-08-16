@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Car, Navigation, Power, DollarSign, Star, CheckCircle, Clock, ShieldCheck, MapPin, Phone, User, LogOut, RefreshCw, KeyRound, ArrowRight, Compass, AlertCircle, X, Sliders, MoveLeft, MoveRight } from 'lucide-react';
+import { Car, Navigation, Power, DollarSign, Star, CheckCircle, Clock, ShieldCheck, MapPin, Phone, User, LogOut, RefreshCw, KeyRound, ArrowRight, Compass, AlertCircle, X, Sliders, MoveLeft, MoveRight, Volume2, VolumeX, Bell } from 'lucide-react';
 import { fetchWithAuth } from '../common/apiClient';
+import { startIncomingRideRingtone, stopIncomingRideRingtone, playRideAcceptedChime } from '../common/soundService';
 import RealtimeMap from './RealtimeMap';
 
 export default function HomePage({ user, onLogout }) {
   const [isOnline, setIsOnline] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
 
   // Live Touch/Mouse Floating Drag & Snap Handling
   const [floatingPos, setFloatingPos] = useState({
@@ -129,31 +131,34 @@ export default function HomePage({ user, onLogout }) {
     const fetchBackendData = async () => {
       setIsLoadingApi(true);
       try {
-        // 1. Fetch Driver Profile API
-        const driverRes = await safeAuthFetch('/api/v1/drivers/drivers/');
+        // 1. Fetch Driver Profile API via /api/v1/driver/profile/
+        const driverRes = await safeAuthFetch('/api/v1/driver/profile/');
         if (driverRes.ok) {
           const data = await driverRes.json();
-          const list = Array.isArray(data) ? data : (data.results || []);
-          if (list.length > 0) {
-            setDriverProfile(list[0]);
-            setIsOnline(list[0].availability_status === 'Online');
-            if (list[0].current_daily_online_seconds !== undefined) {
-              setDutySeconds(list[0].current_daily_online_seconds);
-            }
+          setDriverProfile(data);
+          setIsOnline(data.availability_status === 'Online');
+          if (data.duty_seconds_today !== undefined) {
+            setDutySeconds(data.duty_seconds_today);
           }
         }
 
-        // 2. Fetch Active & Completed Bookings API
-        const bookingRes = await safeAuthFetch('/api/v1/bookings/bookings/');
+        // 2. Fetch Active & Completed Bookings API via /api/v1/driver/rides/
+        const bookingRes = await safeAuthFetch('/api/v1/driver/rides/?limit=30');
         if (bookingRes.ok) {
-          const bData = await bookingRes.json();
-          const bList = Array.isArray(bData) ? bData : (bData.results || []);
+          const bList = await bookingRes.json();
+          const list = Array.isArray(bList) ? bList : (bList.results || []);
           
-          const pending = bList.filter(b => b.status === 'Searching');
-          const completed = bList.filter(b => b.status === 'Completed');
-          
-          setLiveBookings(pending);
+          const completed = list.filter(b => b.status === 'Completed');
           setCompletedBookings(completed);
+        }
+
+        // Check if there is an active current ride
+        const currentRes = await safeAuthFetch('/api/v1/driver/rides/current/');
+        if (currentRes.ok) {
+          const currentData = await currentRes.json();
+          if (currentData && currentData.id) {
+            setActiveAcceptedRide(currentData);
+          }
         }
       } catch (err) {
         console.log('Backend Dashboard Fetch Notice:', err);
@@ -165,7 +170,7 @@ export default function HomePage({ user, onLogout }) {
     fetchBackendData();
   }, []);
 
-  // Increment live duty timer every minute when Online
+  // Increment live duty timer every second when Online
   useEffect(() => {
     let timer = null;
     if (isOnline) {
@@ -185,27 +190,36 @@ export default function HomePage({ user, onLogout }) {
     };
   }, [isOnline]);
 
-  // Live polling for incoming passenger rides under 5 km (Backend Filtered)
+  // Live polling for incoming passenger rides under 5 km (/api/v1/driver/rides/requests/)
   useEffect(() => {
     let interval = null;
-    if (isOnline) {
+    if (isOnline && !activeAcceptedRide) {
       interval = setInterval(() => {
-        const queryUrl = `/api/v1/bookings/bookings/searching_nearby/?driver_lat=${captainLocation.lat}&driver_lng=${captainLocation.lng}&driver_id=${driverProfile?.id || ''}&max_distance=5.0`;
+        const queryUrl = `/api/v1/driver/rides/requests/?driver_lat=${captainLocation.lat}&driver_lng=${captainLocation.lng}&driver_id=${driverProfile?.id || ''}`;
         safeAuthFetch(queryUrl)
           .then((res) => res.json())
           .then((bData) => {
             const bList = Array.isArray(bData) ? bData : (bData.results || []);
             setLiveBookings(bList);
+
+            if (bList.length > 0 && !isMuted) {
+              startIncomingRideRingtone();
+            } else {
+              stopIncomingRideRingtone();
+            }
           })
           .catch((err) => console.log('Backend polling notice:', err));
       }, 3000);
+    } else {
+      stopIncomingRideRingtone();
     }
     return () => {
       if (interval) clearInterval(interval);
+      stopIncomingRideRingtone();
     };
-  }, [isOnline, captainLocation.lat, captainLocation.lng]);
+  }, [isOnline, captainLocation.lat, captainLocation.lng, activeAcceptedRide, isMuted, driverProfile?.id]);
 
-  // 5-Minute Periodic Driver GPS Location Update Timer
+  // 5-Minute Periodic Driver GPS Location Update Timer (/api/v1/driver/location/)
   useEffect(() => {
     let gpsInterval = null;
 
@@ -217,37 +231,19 @@ export default function HomePage({ user, onLogout }) {
             const lng = Number(pos.coords.longitude.toFixed(7));
             setCaptainLocation({ lat, lng });
 
-            if (driverProfile?.id) {
-              const token = localStorage.getItem('driver_access_token');
-              const headers = {
-                'Content-Type': 'application/json',
-                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-              };
-
-              // 1. Dedicated Tracking API (saves into driver_locations DB table)
-              fetch('/api/v1/tracking/locations/save_driver_location/', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ driver_id: driverProfile.id, latitude: lat, longitude: lng, is_online: true })
-              }).catch((err) => console.log('Tracking save location notice:', err));
-
-              // 2. Driver Profile location update API
-              fetch(`/api/v1/drivers/drivers/${driverProfile.id}/update_location/`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ latitude: lat, longitude: lng })
-              }).catch((err) => console.log('Driver GPS update notice:', err));
-            }
+            // Post location to /api/v1/driver/location/
+            fetchWithAuth('/api/v1/driver/location/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                latitude: lat,
+                longitude: lng,
+                driver_id: driverProfile?.id
+              })
+            }).catch((err) => console.log('Driver location update notice:', err));
           },
           (err) => {
             console.log('Device Geolocation Notice:', err);
-            if (driverProfile?.id) {
-              fetchWithAuth('/api/v1/tracking/locations/save_driver_location/', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ driver_id: driverProfile.id, latitude: captainLocation.lat, longitude: captainLocation.lng, is_online: true })
-              }).catch((e) => console.log('Tracking fallback save notice:', e));
-            }
           }
         );
       }
@@ -263,13 +259,16 @@ export default function HomePage({ user, onLogout }) {
     };
   }, [isOnline, driverProfile?.id]);
 
-  // Accept Ride API handler
+  // Accept Ride API handler (/api/v1/driver/rides/{id}/accept/)
   const handleAcceptRide = async (bookingId) => {
+    // Immediately stop ringtone and play accept confirmation chime
+    playRideAcceptedChime();
+
     // Immediately remove from incoming list UI
     setLiveBookings((prev) => prev.filter((b) => b.id !== bookingId));
 
     try {
-      const res = await fetchWithAuth(`/api/v1/bookings/bookings/${bookingId}/accept/`, {
+      const res = await fetchWithAuth(`/api/v1/driver/rides/${bookingId}/accept/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ driver_id: driverProfile?.id })
@@ -283,13 +282,19 @@ export default function HomePage({ user, onLogout }) {
     }
   };
 
-  // Decline Ride API handler
+  // Decline Ride API handler (/api/v1/driver/rides/{id}/reject/)
   const handleDeclineRide = async (bookingId) => {
     // Immediately remove from incoming list UI
-    setLiveBookings((prev) => prev.filter((b) => b.id !== bookingId));
+    setLiveBookings((prev) => {
+      const updated = prev.filter((b) => b.id !== bookingId);
+      if (updated.length === 0) {
+        stopIncomingRideRingtone();
+      }
+      return updated;
+    });
 
     try {
-      await fetchWithAuth(`/api/v1/bookings/bookings/${bookingId}/decline/`, {
+      await fetchWithAuth(`/api/v1/driver/rides/${bookingId}/reject/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Captain unavailable' })
@@ -299,7 +304,7 @@ export default function HomePage({ user, onLogout }) {
     }
   };
 
-  // Verify PIN & Start Trip API Handler
+  // Verify PIN & Start Trip API Handler (/api/v1/driver/rides/{id}/start/)
   const handleVerifyPinAndStartTrip = async () => {
     const pinStr = enteredPin.join('');
     if (pinStr.length !== 4) {
@@ -310,7 +315,7 @@ export default function HomePage({ user, onLogout }) {
 
     if (activeAcceptedRide?.id) {
       try {
-        const res = await fetchWithAuth(`/api/v1/bookings/bookings/${activeAcceptedRide.id}/start_trip/`, {
+        const res = await fetchWithAuth(`/api/v1/driver/rides/${activeAcceptedRide.id}/start/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pin: pinStr })
@@ -327,23 +332,22 @@ export default function HomePage({ user, onLogout }) {
     }
   };
 
-  // Complete Trip API Handler
+  // Complete Trip API Handler (/api/v1/driver/rides/{id}/complete/)
   const handleCompleteTrip = async () => {
     if (activeAcceptedRide?.id) {
       try {
-        const res = await fetchWithAuth(`/api/v1/bookings/bookings/${activeAcceptedRide.id}/complete/`, {
+        const res = await fetchWithAuth(`/api/v1/driver/rides/${activeAcceptedRide.id}/complete/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
         });
         if (res.ok) {
           setActiveAcceptedRide(null);
           setEnteredPin(['', '', '', '']);
-          const bRes = await fetchWithAuth('/api/v1/bookings/bookings/');
+          const bRes = await fetchWithAuth('/api/v1/driver/rides/?status=Completed');
           if (bRes.ok) {
             const bData = await bRes.json();
             const bList = Array.isArray(bData) ? bData : (bData.results || []);
-            setLiveBookings(bList.filter((b) => b.status !== 'Completed' && b.status !== 'Cancelled'));
-            setCompletedBookings(bList.filter((b) => b.status === 'Completed'));
+            setCompletedBookings(bList);
           }
         }
       } catch (err) {
@@ -352,31 +356,28 @@ export default function HomePage({ user, onLogout }) {
     }
   };
 
-  // Toggle Availability via Django Backend API
+  // Toggle Availability via /api/v1/driver/status/online/ & /offline/
   const handleToggleOnline = async () => {
-    const newStatus = isOnline ? 'Offline' : 'Online';
+    const endpoint = isOnline ? '/api/v1/driver/status/offline/' : '/api/v1/driver/status/online/';
 
-    if (driverProfile?.id) {
-      try {
-        const res = await fetchWithAuth(`/api/v1/drivers/drivers/${driverProfile.id}/toggle_availability/`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ availability_status: newStatus })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          setIsOnline(newStatus === 'Online');
-          if (data.current_daily_online_seconds !== undefined) {
-            setDutySeconds(data.current_daily_online_seconds);
-          }
-        } else {
-          setIsOnline(false);
-          alert(data.error || 'Daily 12-hour online shift limit reached for today. Maximum 12 hours online per day permitted. Please rest until tomorrow.');
+    try {
+      const res = await fetchWithAuth(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driver_id: driverProfile?.id })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIsOnline(data.is_online);
+        if (data.duty_seconds_today !== undefined) {
+          setDutySeconds(data.duty_seconds_today);
         }
-      } catch (err) {
-        console.log('Toggle Availability Notice:', err);
+      } else {
+        setIsOnline(false);
+        alert(data.error || 'Shift limit reached or unable to change status.');
       }
-    } else {
+    } catch (err) {
+      console.log('Toggle Availability Notice:', err);
       setIsOnline(!isOnline);
     }
   };
@@ -631,14 +632,51 @@ export default function HomePage({ user, onLogout }) {
         )}
         {isOnline && (
           liveBookings.length > 0 ? (
-            <div className="bg-white border border-[#FFC000] rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 bg-[#FFC000] text-black font-extrabold text-[10px] uppercase px-4 py-1 rounded-bl-2xl">
-                Live Ride Request
+            <div className="bg-white border-2 border-[#FFC000] rounded-3xl p-5 sm:p-6 shadow-2xl relative overflow-hidden animate-fade-in">
+              <div className="absolute top-0 right-0 bg-[#FFC000] text-black font-extrabold text-[10px] uppercase px-4 py-1.5 rounded-bl-2xl flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-red-600 animate-ping"></span>
+                <span>Incoming Alert</span>
               </div>
 
-              <h2 className="text-lg font-extrabold text-[#1C1C1E] mb-4 flex items-center gap-2">
-                <Car className="w-5 h-5 text-[#FFC000]" /> Incoming Ride Request
-              </h2>
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2 className="text-lg font-extrabold text-[#1C1C1E] flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-[#FFF9E6] border border-[#FFC000] flex items-center justify-center">
+                    <Car className="w-4 h-4 text-black" />
+                  </div>
+                  <span>Incoming Ride Request</span>
+                </h2>
+
+                {/* Sound Indicator & Mute Toggle */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isMuted) {
+                      stopIncomingRideRingtone();
+                      setIsMuted(true);
+                    } else {
+                      setIsMuted(false);
+                      startIncomingRideRingtone();
+                    }
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${!isMuted
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-2xs'
+                    : 'bg-gray-100 text-gray-500 border-gray-200'
+                  }`}
+                  title={!isMuted ? 'Mute Alert Sound' : 'Unmute Alert Sound'}
+                >
+                  {!isMuted ? (
+                    <>
+                      <Volume2 className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+                      <span>Ringtone Active</span>
+                    </>
+                  ) : (
+                    <>
+                      <VolumeX className="w-3.5 h-3.5 text-gray-500" />
+                      <span>Muted</span>
+                    </>
+                  )}
+                </button>
+              </div>
 
               {liveBookings.map((b) => (
                 <div key={b.id} className="space-y-4 border-b border-[#E5E5EA] pb-4 last:border-b-0 last:pb-0">
@@ -714,30 +752,52 @@ export default function HomePage({ user, onLogout }) {
         {/* Recent Completed Trips Table */}
         <div className="bg-white border border-[#E5E5EA] rounded-3xl p-5 sm:p-6 shadow-xs">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-extrabold text-[#1C1C1E]">Recent Completed Rides</h3>
-            <span className="text-xs text-[#007AFF] font-bold cursor-pointer hover:underline">View All History</span>
+            <div>
+              <h3 className="text-base font-extrabold text-[#1C1C1E]">Recent Completed Rides</h3>
+              <p className="text-[11px] text-[#8E8E93] font-medium">Showing last {Math.min(10, completedBookings.length)} completed trips</p>
+            </div>
+            <span className="text-xs bg-[#F2F2F7] text-[#1C1C1E] font-bold px-2.5 py-1 rounded-full border border-[#E5E5EA]">
+              {completedBookings.length} Total
+            </span>
           </div>
 
           {completedBookings.length > 0 ? (
             <div className="divide-y divide-[#E5E5EA]">
-              {completedBookings.map((trip) => (
-                <div key={trip.id} className="py-3.5 flex items-center justify-between first:pt-0 last:pb-0">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-[#F8F9FA] text-[#1C1C1E] font-bold flex items-center justify-center text-xs border border-[#E5E5EA]">
-                      <Car className="w-4 h-4 text-[#636366]" />
-                    </div>
-                    <div>
-                      <h4 className="font-extrabold text-xs text-[#1C1C1E]">{trip.customer_name || 'Passenger'}</h4>
-                      <span className="text-[11px] text-[#636366]">{trip.distance_km ? `${trip.distance_km} km` : '10 km'}</span>
-                    </div>
-                  </div>
+              {completedBookings.slice(0, 10).map((trip) => {
+                const customerName = trip.customer_details?.name || trip.customer_name || 'Passenger';
+                const fareAmount = trip.total_fare || trip.fare || 0;
+                const distanceKm = trip.distance_km ? `${trip.distance_km} km` : 'Standard trip';
+                const bookingRef = trip.booking_number ? `#${trip.booking_number}` : '';
+                const timeFormatted = trip.updated_at ? new Date(trip.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
 
-                  <div className="text-right">
-                    <span className="font-extrabold text-sm text-[#1C1C1E]">₹{trip.fare || 0}</span>
-                    <span className="text-[11px] text-amber-600 font-bold block">★ 5.0</span>
+                return (
+                  <div key={trip.id} className="py-3.5 flex items-center justify-between first:pt-0 last:pb-0 hover:bg-[#F9F9FB] rounded-xl px-2 transition-colors">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-2xl bg-[#E8F8F0] text-[#34C759] font-bold flex items-center justify-center text-xs border border-[#34C759]/30 shrink-0">
+                        <CheckCircle className="w-5 h-5 text-[#34C759]" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-extrabold text-xs text-[#1C1C1E] truncate">{customerName}</h4>
+                          {bookingRef && <span className="text-[10px] bg-[#F2F2F7] text-[#636366] px-1.5 py-0.5 rounded font-mono">{bookingRef}</span>}
+                        </div>
+                        <p className="text-[11px] text-[#636366] truncate max-w-[200px] sm:max-w-[280px]">
+                          {trip.pickup_address ? `${trip.pickup_address.split(',')[0]} → ${trip.dropoff_address ? trip.dropoff_address.split(',')[0] : 'Dropoff'}` : distanceKm}
+                        </p>
+                        <div className="flex items-center gap-2 text-[10px] text-[#8E8E93] mt-0.5">
+                          <span>{distanceKm}</span>
+                          {timeFormatted && <span>• {timeFormatted}</span>}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0 pl-2">
+                      <span className="font-extrabold text-sm text-[#1C1C1E]">₹{Number(fareAmount).toFixed(0)}</span>
+                      <span className="text-[10px] bg-amber-50 text-amber-700 font-bold px-1.5 py-0.5 rounded border border-amber-200 block mt-0.5">★ 5.0 Paid</span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="text-center py-8 space-y-2">

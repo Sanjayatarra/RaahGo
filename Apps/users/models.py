@@ -39,6 +39,9 @@ class User(models.Model):
     is_phone_verified = models.BooleanField(default=False)
     is_email_verified = models.BooleanField(default=False)
     last_login = models.DateTimeField(null=True, blank=True)
+    # Rotated on every new login — any JWT that embeds an old nonce is rejected,
+    # forcing logout from all previously logged-in devices.
+    session_nonce = models.CharField(max_length=64, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
