@@ -8,7 +8,7 @@ from users.driver_auth_views import (
     DriverCompleteProfileView,
     DriverGoogleAuthView,
 )
-from rest_framework_simplejwt.views import TokenRefreshView
+from users.token_refresh_views import SingleDeviceTokenRefreshView
 from .driver_api_views import (
     DriverRegisterView,
     DriverProfileView,
@@ -52,8 +52,8 @@ urlpatterns = [
     path('auth/signup/', DriverSignupView.as_view(), name='driver-auth-signup'),
     path('auth/verify-signup-otp/', DriverVerifySignupOTPView.as_view(), name='driver-auth-verify-signup-otp'),
     path('auth/complete-profile/', DriverCompleteProfileView.as_view(), name='driver-auth-complete-profile'),
-    path('auth/google-auth/', DriverGoogleAuthView.as_view(), name='driver-auth-google'),
-    path('auth/token/refresh/', TokenRefreshView.as_view(), name='driver-auth-token-refresh'),
+    path('auth/token/refresh/', SingleDeviceTokenRefreshView.as_view(), name='driver-auth-token-refresh'),
+    path('token/refresh/', SingleDeviceTokenRefreshView.as_view(), name='driver-token-refresh'),
 
     # Registration & Profile
     path('register/', DriverRegisterView.as_view(), name='driver-register'),

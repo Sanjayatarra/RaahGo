@@ -4,18 +4,20 @@ import {
   MapPin, Navigation, Car, ShieldCheck, Clock, Search, ArrowRight, ArrowLeft, Star,
   CreditCard, Tag, CheckCircle2, ChevronRight, LogOut, User, RefreshCw, Zap,
   LocateFixed, Loader2, KeyRound, Lock, Unlock, AlertCircle, X, Menu, Ticket, Package,
-  Apple, Play
+  Apple, Play, Train, Luggage, Coins, Bell, Shield, Settings, ChevronLeft
 } from 'lucide-react';
 import { getDeviceGpsLocation, reverseGeocodeGps } from '../common/locationService';
 import { fetchWithAuth } from '../common/apiClient';
 import Navbar from './Navbar';
 import Footer from './Footer';
+import CustomerProfileMenu from './CustomerProfileMenu';
 
 export default function HomePage({ user, onLogout }) {
   const navigate = useNavigate();
   const location = useLocation();
 
   const [activeTab, setActiveTab] = useState('home');
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [pickup, setPickup] = useState('');
   const [pickupCoords, setPickupCoords] = useState(null);
   const [currentGpsName, setCurrentGpsName] = useState('');
@@ -373,8 +375,20 @@ export default function HomePage({ user, onLogout }) {
           <div className="w-3.5 h-1 bg-black/40 rounded-full blur-[1px] mt-0.5"></div>
         </div>
 
-        {/* Top Floating Location Search Bar */}
+        {/* Top Floating Location Search Bar with Profile / Menu Button */}
         <div className="absolute top-4 left-4 right-4 z-30 flex items-center justify-between pointer-events-none gap-2">
+          
+          {/* Profile / Menu Button */}
+          <button
+            onClick={() => setShowProfileModal(true)}
+            className="w-11 h-11 glass-panel rounded-full flex items-center justify-center shadow-lg pointer-events-auto text-[#063B28] hover:bg-white active:scale-95 transition-all border border-white/80 shrink-0 cursor-pointer"
+            title="Open Profile Menu"
+          >
+            <div className="w-7 h-7 rounded-full bg-[#063B28] text-white font-black text-xs flex items-center justify-center shadow-xs">
+              {user?.name ? user.name.charAt(0).toUpperCase() : '👤'}
+            </div>
+          </button>
+
           <div 
             onClick={() => navigate('/book-ride')}
             className="flex-1 glass-panel rounded-full px-4 py-3 shadow-lg pointer-events-auto flex items-center gap-2.5 cursor-pointer hover:bg-white/95 transition-all border border-white/80"
@@ -388,7 +402,7 @@ export default function HomePage({ user, onLogout }) {
             onClick={handleReLocateGps}
             disabled={isLocatingGps}
             title="Re-center Current GPS Location"
-            className="w-11 h-11 glass-panel rounded-full flex items-center justify-center shadow-lg pointer-events-auto text-[#063B28] hover:bg-white active:scale-95 transition-all border border-white/80 shrink-0"
+            className="w-11 h-11 glass-panel rounded-full flex items-center justify-center shadow-lg pointer-events-auto text-[#063B28] hover:bg-white active:scale-95 transition-all border border-white/80 shrink-0 cursor-pointer"
           >
             {isLocatingGps ? (
               <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
@@ -549,33 +563,65 @@ export default function HomePage({ user, onLogout }) {
           </div>
         </div>
 
-        {/* Mobile Glassmorphic Bottom Tab Bar */}
-        <div className="absolute bottom-0 left-0 right-0 h-[76px] glass-panel border-t border-white/80 flex items-center justify-around z-40 pb-2 shadow-[0_-5px_25px_rgba(0,0,0,0.06)]">
-          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none w-16 ${activeTab === 'home' ? 'text-[#063B28]' : 'text-gray-400'}`}>
-            <div className={`p-1 rounded-xl transition-all ${activeTab === 'home' ? 'bg-[#EEF8F2]' : ''}`}>
-              <Car className={`w-5 h-5 ${activeTab === 'home' ? 'text-[#063B28]' : ''}`} />
-            </div>
-            <span className="text-[10px] font-black">Ride</span>
+        {/* Mobile Glassmorphic Bottom Tab Bar matching the 5 items in image */}
+        <div className="absolute bottom-0 left-0 right-0 h-[72px] bg-white border-t border-gray-100 flex items-center justify-around z-40 pb-1 shadow-[0_-5px_25px_rgba(0,0,0,0.06)]">
+          
+          {/* 1. Ride */}
+          <button 
+            onClick={() => setActiveTab('home')} 
+            className={`flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none w-16 ${
+              activeTab === 'home' ? 'text-[#063B28]' : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            <Navigation className={`w-5 h-5 ${activeTab === 'home' ? 'stroke-[2.5] text-[#063B28]' : 'stroke-[1.8]'}`} />
+            <span className={`text-[11px] ${activeTab === 'home' ? 'font-black text-[#063B28]' : 'font-bold text-gray-500'}`}>Ride</span>
           </button>
-          <button onClick={() => alert('Metro coming soon')} className="flex flex-col items-center gap-1 cursor-pointer bg-transparent border-none text-gray-400 w-16">
-            <div className="p-1 rounded-xl">
-              <Ticket className="w-5 h-5" />
-            </div>
-            <span className="text-[10px] font-bold">Metro</span>
+
+          {/* 2. Metro */}
+          <button 
+            onClick={() => alert('Metro ticket booking is launching soon!')} 
+            className="flex flex-col items-center gap-1 cursor-pointer bg-transparent border-none text-gray-400 hover:text-gray-600 w-16"
+          >
+            <Train className="w-5 h-5 stroke-[1.8]" />
+            <span className="text-[11px] font-bold text-gray-500">Metro</span>
           </button>
-          <button onClick={() => alert('Parcel coming soon')} className="flex flex-col items-center gap-1 cursor-pointer bg-transparent border-none text-gray-400 w-16">
-            <div className="p-1 rounded-xl">
-              <Package className="w-5 h-5" />
-            </div>
-            <span className="text-[10px] font-bold">Parcel</span>
+
+          {/* 3. Parcel */}
+          <button 
+            onClick={() => alert('Parcel delivery service is launching soon!')} 
+            className="flex flex-col items-center gap-1 cursor-pointer bg-transparent border-none text-gray-400 hover:text-gray-600 w-16"
+          >
+            <Package className="w-5 h-5 stroke-[1.8]" />
+            <span className="text-[11px] font-bold text-gray-500">Parcel</span>
           </button>
-          <button onClick={() => setActiveTab('profile')} className={`flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none w-16 ${activeTab === 'profile' ? 'text-[#063B28]' : 'text-gray-400'}`}>
-            <div className={`p-1 rounded-xl transition-all ${activeTab === 'profile' ? 'bg-[#EEF8F2]' : ''}`}>
-              <User className={`w-5 h-5 ${activeTab === 'profile' ? 'text-[#063B28]' : ''}`} />
-            </div>
-            <span className="text-[10px] font-black">Profile</span>
+
+          {/* 4. Travel */}
+          <button 
+            onClick={() => alert('Outstation & airport travel bookings launching soon!')} 
+            className="flex flex-col items-center gap-1 cursor-pointer bg-transparent border-none text-gray-400 hover:text-gray-600 w-16"
+          >
+            <Luggage className="w-5 h-5 stroke-[1.8]" />
+            <span className="text-[11px] font-bold text-gray-500">Travel</span>
+          </button>
+
+          {/* 5. Profile */}
+          <button 
+            onClick={() => setShowProfileModal(true)} 
+            className="flex flex-col items-center gap-1 transition-all cursor-pointer bg-transparent border-none w-16 text-gray-900"
+          >
+            <User className="w-5 h-5 stroke-[2] text-gray-900" />
+            <span className="text-[11px] font-black text-gray-900">Profile</span>
           </button>
         </div>
+
+        {/* Customer Profile Modal Popup */}
+        <CustomerProfileMenu
+          isOpen={showProfileModal}
+          onClose={() => setShowProfileModal(false)}
+          user={user}
+          onLogout={onLogout}
+          activeNav="profile"
+        />
       </div>
 
 

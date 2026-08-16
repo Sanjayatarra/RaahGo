@@ -3,10 +3,10 @@ Custom JWT Authentication for RaahGo
 =====================================
 Implements single-device login via session_nonce:
   - On every login, a new random nonce is saved to User.session_nonce.
-  - The nonce is embedded in the JWT access token as the 'snonce' claim.
+  - The nonce is embedded in the JWT access token and refresh token as the 'snonce' claim.
   - On each authenticated request, the nonce in the token is compared
-    to the current nonce in the DB.  A mismatch means the user logged in
-    from another device → return 401 "Session expired. Please log in again."
+    to the current nonce in the DB. A mismatch means the user logged in
+    from another device → returns HTTP 401 "Session expired. Please log in again."
 """
 
 import secrets
@@ -51,7 +51,7 @@ class SingleDeviceJWTAuthentication(JWTAuthentication):
     Extends simplejwt's JWTAuthentication to enforce single-device login.
 
     After standard token validation, it checks that the 'snonce' claim in
-    the token matches the nonce stored in the DB for that user.  If they
+    the token matches the nonce stored in the DB for that user. If they
     differ, the token belongs to a session that has been superseded by a
     newer login and is rejected with HTTP 401.
     """
@@ -61,15 +61,18 @@ class SingleDeviceJWTAuthentication(JWTAuthentication):
 
         token_nonce = validated_token.get('snonce')
 
-        # Tokens issued before this feature was deployed won't have 'snonce'.
-        # Treat them as valid to avoid locking out existing users on first deploy.
+        # If token has no snonce, reject if user has an active session_nonce
         if token_nonce is None:
+            if user.session_nonce:
+                raise AuthenticationFailed(
+                    'Session expired. Your account was logged in on another device. Please log in again.',
+                    code='session_superseded',
+                )
             return user
 
         if user.session_nonce != token_nonce:
             raise AuthenticationFailed(
-                'Session expired. Your account was logged in on another device. '
-                'Please log in again.',
+                'Session expired. Your account was logged in on another device. Please log in again.',
                 code='session_superseded',
             )
 

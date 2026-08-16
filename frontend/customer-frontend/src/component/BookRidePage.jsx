@@ -10,6 +10,7 @@ import { fetchWithAuth } from '../common/apiClient';
 import RealtimeMap from './RealtimeMap';
 import Navbar from './Navbar';
 import Footer from './Footer';
+import CustomerProfileMenu from './CustomerProfileMenu';
 // Vehicle fare rates dynamically from .env
 const VEHICLE_RATES = {
   bike: {
@@ -58,6 +59,7 @@ export default function BookRidePage({ user, onLogout }) {
   const [selectedRating, setSelectedRating] = useState(5);
   const [activeRideRef] = useState(() => React.createRef());
   const [searchTimeLeft, setSearchTimeLeft] = useState(null); // seconds remaining before auto-cancel
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   const [pickupCoords, setPickupCoords] = useState(location.state?.pickupCoords || null);
   const [destCoords, setDestCoords] = useState(location.state?.dropCoords || null);
@@ -857,7 +859,14 @@ export default function BookRidePage({ user, onLogout }) {
               <h1 className="text-base font-black text-gray-900">Book Ride</h1>
               <span className="text-xs text-gray-400 font-bold block">RaahGo Express</span>
             </div>
-            <div className="w-9"></div>
+            <button
+              type="button"
+              onClick={() => setShowProfileMenu(true)}
+              className="w-9 h-9 rounded-full bg-[#063B28] text-white flex items-center justify-center font-bold text-xs shadow-xs cursor-pointer border-none"
+              title="Open Profile"
+            >
+              {user?.name ? user.name.charAt(0).toUpperCase() : '👤'}
+            </button>
           </div>
 
           {/* Scrollable Content Area */}
@@ -1170,6 +1179,15 @@ export default function BookRidePage({ user, onLogout }) {
       <div className="hidden lg:block shrink-0 w-full mt-auto">
         <Footer />
       </div>
+
+      {/* Customer Profile Menu Modal */}
+      <CustomerProfileMenu
+        isOpen={showProfileMenu}
+        onClose={() => setShowProfileMenu(false)}
+        user={user}
+        onLogout={onLogout}
+        activeNav="profile"
+      />
 
     </div>
   );

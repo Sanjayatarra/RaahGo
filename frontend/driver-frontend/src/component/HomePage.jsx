@@ -147,7 +147,7 @@ export default function HomePage({ user, onLogout }) {
         if (bookingRes.ok) {
           const bList = await bookingRes.json();
           const list = Array.isArray(bList) ? bList : (bList.results || []);
-          
+
           const completed = list.filter(b => b.status === 'Completed');
           setCompletedBookings(completed);
         }
@@ -438,8 +438,8 @@ export default function HomePage({ user, onLogout }) {
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
         {/* Status Alert Banner */}
         <div className={`rounded-2xl p-4 border flex items-center justify-between transition-all ${isOnline
-            ? 'bg-[#E8F8EE] border-[#34C759]/30 text-[#1C1C1E]'
-            : 'bg-[#FFF3D6] border-[#FFC000]/40 text-[#1C1C1E]'
+          ? 'bg-[#E8F8EE] border-[#34C759]/30 text-[#1C1C1E]'
+          : 'bg-[#FFF3D6] border-[#FFC000]/40 text-[#1C1C1E]'
           }`}>
           <div className="flex items-center gap-3">
             <div className={`p-2.5 rounded-xl ${isOnline ? 'bg-[#34C759] text-white' : 'bg-[#FFC000] text-black'}`}>
@@ -661,7 +661,7 @@ export default function HomePage({ user, onLogout }) {
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${!isMuted
                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-2xs'
                     : 'bg-gray-100 text-gray-500 border-gray-200'
-                  }`}
+                    }`}
                   title={!isMuted ? 'Mute Alert Sound' : 'Unmute Alert Sound'}
                 >
                   {!isMuted ? (
@@ -824,30 +824,27 @@ export default function HomePage({ user, onLogout }) {
         }
         onMouseDown={handleDragStart}
         onTouchStart={handleDragStart}
-        className={`fixed ${
-          floatingPos.currX !== null
+        className={`fixed ${floatingPos.currX !== null
             ? ''
             : floatingPos.side === 'right'
-            ? 'right-0'
-            : 'left-0'
-        } z-50 transition-all duration-75 select-none touch-none shadow-2xl`}
+              ? 'right-0'
+              : 'left-0'
+          } z-50 transition-all duration-75 select-none touch-none shadow-2xl`}
       >
         <button
           type="button"
           onClick={() => {
             if (!isDragging) handleToggleOnline();
           }}
-          className={`p-3.5 ${
-            floatingPos.currX !== null
+          className={`p-3.5 ${floatingPos.currX !== null
               ? 'rounded-full border shadow-2xl scale-110'
               : floatingPos.side === 'right'
-              ? 'rounded-l-full border-l border-y'
-              : 'rounded-r-full border-r border-y'
-          } border-white/40 text-white shadow-2xl backdrop-blur-md cursor-grab active:cursor-grabbing transition-transform duration-150 active:scale-95 flex items-center justify-center ${
-            isOnline
+                ? 'rounded-l-full border-l border-y'
+                : 'rounded-r-full border-r border-y'
+            } border-white/40 text-white shadow-2xl backdrop-blur-md cursor-grab active:cursor-grabbing transition-transform duration-150 active:scale-95 flex items-center justify-center ${isOnline
               ? 'bg-[#34C759] text-white shadow-emerald-500/60 ring-4 ring-emerald-500/30 hover:bg-[#2fb350]'
               : 'bg-[#FF3B30] text-white shadow-red-500/60 ring-4 ring-red-500/30 hover:bg-[#e03126]'
-          }`}
+            }`}
           title={isOnline ? 'ONLINE - Tap to go Offline (Hold & drag to move)' : 'OFFLINE - Tap to go Online (Hold & drag to move)'}
         >
           <Power className="w-5 h-5 sm:w-6 sm:h-6 text-white" />

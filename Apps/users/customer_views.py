@@ -10,6 +10,7 @@ from django.contrib.auth.models import update_last_login
 from .models import User, OTPVerification
 from .serializers import UserSerializer
 from .views import send_otp_email
+from .authentication import issue_tokens_for_user
 
 # Fixed role for Customer API endpoints
 CUSTOMER_ROLE = User.RoleChoices.CUSTOMER
@@ -156,12 +157,12 @@ class CustomerVerifyOTPView(APIView):
             user.save()
 
             update_last_login(None, user)
-            refresh = RefreshToken.for_user(user)
+            tokens = issue_tokens_for_user(user)
 
             return Response({
                 'status': 'OTP verified successfully',
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
+                'access': tokens['access'],
+                'refresh': tokens['refresh'],
                 'user': UserSerializer(user).data
             }, status=status.HTTP_200_OK)
 
@@ -274,7 +275,7 @@ class CustomerVerifySignupOTPView(APIView):
             user.save()
 
             update_last_login(None, user)
-            refresh = RefreshToken.for_user(user)
+            tokens = issue_tokens_for_user(user)
 
             required_fields = ['full_name']
             if user.email and not user.phone_number:
@@ -284,8 +285,8 @@ class CustomerVerifySignupOTPView(APIView):
 
             return Response({
                 'status': 'Customer OTP verified successfully.',
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
+                'access': tokens['access'],
+                'refresh': tokens['refresh'],
                 'user_id': str(user.id),
                 'user': UserSerializer(user).data,
                 'next_step': 'complete_profile',
@@ -389,11 +390,11 @@ class CustomerGoogleAuthView(APIView):
             )
 
         update_last_login(None, user)
-        refresh = RefreshToken.for_user(user)
+        tokens = issue_tokens_for_user(user)
 
         return Response({
             'status': 'Customer Google authentication successful',
-            'access': str(refresh.access_token),
-            'refresh': str(refresh),
+            'access': tokens['access'],
+            'refresh': tokens['refresh'],
             'user': UserSerializer(user).data
         }, status=status.HTTP_200_OK)

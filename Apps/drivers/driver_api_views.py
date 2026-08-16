@@ -17,21 +17,31 @@ from reviews.models import Rating
 from notifications.models import Notification
 from bookings.views import calculate_haversine_distance
 
-
 def get_driver_from_request(request):
-    """Helper to extract Driver instance from request (via auth user or header/param fallback)"""
+    """Helper to extract Driver instance from authenticated request"""
     user = request.user
     if user and user.is_authenticated:
         driver = Driver.objects.filter(user=user).first()
         if driver:
             return driver
-    
-    # Fallback to driver_id param or header if provided
+        return None
+
+    # If the request included an Authorization header, DRF ran SingleDeviceJWTAuthentication.
+    # If user is still not authenticated, it means the token was expired, invalid, or superseded by another device!
+    auth_header = request.headers.get('Authorization') or request.META.get('HTTP_AUTHORIZATION')
+    if auth_header and str(auth_header).startswith('Bearer '):
+        from rest_framework.exceptions import AuthenticationFailed
+        raise AuthenticationFailed(
+            'Session expired. Your account was logged in on another device. Please log in again.',
+            code='session_superseded'
+        )
+
+    # Fallback to driver_id param ONLY if NO Authorization header was supplied at all
     driver_id = request.query_params.get('driver_id') or request.data.get('driver_id') or request.headers.get('X-Driver-Id')
     if driver_id:
         return Driver.objects.filter(id=driver_id).first()
-        
-    return Driver.objects.first()
+
+    return None
 
 
 # ============================================================================
