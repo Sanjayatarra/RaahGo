@@ -1,5 +1,24 @@
 import uuid
+from django.contrib.auth.models import BaseUserManager
 from django.db import models
+
+
+class UserManager(BaseUserManager):
+    def create_user(self, email=None, username=None, password=None, **extra_fields):
+        if email:
+            email = self.normalize_email(email)
+        user = self.model(email=email, username=username, **extra_fields)
+        if password:
+            user.password = password
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        extra_fields.setdefault('role', User.RoleChoices.SUPER_ADMIN)
+        extra_fields.setdefault('is_active', True)
+        extra_fields.setdefault('is_verified', True)
+        extra_fields.setdefault('is_email_verified', True)
+        return self.create_user(email=email, password=password, **extra_fields)
 
 
 class User(models.Model):
@@ -45,8 +64,11 @@ class User(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = UserManager()
+
     # Authentication is OTP-based. Using the UUID as Django's identity field
-    # allows usernames to be unique within a role instead of globally.
+    # allows email/phone to be unique within a role (Customer, Driver, Admin)
+    # rather than globally unique.
     USERNAME_FIELD = 'id'
     REQUIRED_FIELDS = []
 
@@ -57,6 +79,20 @@ class User(models.Model):
     @property
     def is_anonymous(self):
         return False
+
+    @property
+    def is_staff(self):
+        return self.role in [self.RoleChoices.ADMIN, self.RoleChoices.SUPER_ADMIN]
+
+    @property
+    def is_superuser(self):
+        return self.role == self.RoleChoices.SUPER_ADMIN
+
+    def has_perm(self, perm, obj=None):
+        return self.is_superuser
+
+    def has_module_perms(self, app_label):
+        return self.is_superuser
 
     class Meta:
         db_table = 'users'

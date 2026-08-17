@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MapPin, Navigation, Car, ShieldCheck, Clock, Search, ArrowRight, ArrowLeft, Star,
   CreditCard, Tag, CheckCircle2, ChevronRight, ChevronDown, ChevronUp, LogOut, User, RefreshCw, Zap,
-  LocateFixed, Loader2, KeyRound, Lock, Unlock, AlertCircle, X, Info
+  LocateFixed, Loader2, KeyRound, Lock, Unlock, AlertCircle, X, Info, Phone, MessageSquare, Shield, Share2, AlertTriangle
 } from 'lucide-react';
 import { fetchLocationSuggestions, getDeviceGpsLocation } from '../common/locationService';
 import { fetchWithAuth } from '../common/apiClient';
@@ -11,6 +11,7 @@ import RealtimeMap from './RealtimeMap';
 import Navbar from './Navbar';
 import Footer from './Footer';
 import CustomerProfileMenu from './CustomerProfileMenu';
+
 // Vehicle fare rates dynamically from .env
 const VEHICLE_RATES = {
   bike: {
@@ -57,8 +58,12 @@ export default function BookRidePage({ user, onLogout }) {
   const [rideNotification, setRideNotification] = useState(null);
   const [tripCompletedModal, setTripCompletedModal] = useState(false);
   const [selectedRating, setSelectedRating] = useState(5);
+  const [ratingCompliments, setRatingCompliments] = useState(['Polite Captain', 'Smooth Ride']);
+  const [showSosModal, setShowSosModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('Change of plans');
   const [activeRideRef] = useState(() => React.createRef());
-  const [searchTimeLeft, setSearchTimeLeft] = useState(null); // seconds remaining before auto-cancel
+  const [searchTimeLeft, setSearchTimeLeft] = useState(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   const [pickupCoords, setPickupCoords] = useState(location.state?.pickupCoords || null);
@@ -125,7 +130,6 @@ export default function BookRidePage({ user, onLogout }) {
     const restoreActiveBookingOnMount = async () => {
       if (!user) return;
       try {
-        // Use the dedicated /active endpoint which also auto-cancels stale rides
         const res = await fetchWithAuth('/api/v1/bookings/bookings/active/');
         if (res.ok) {
           const data = await res.json();
@@ -134,14 +138,15 @@ export default function BookRidePage({ user, onLogout }) {
             if (data.status === 'Searching') {
               setIsSearchingDriver(true);
               setBookingSuccess(false);
-              // Calculate remaining search time
               const created = new Date(data.created_at).getTime();
               const elapsed = Math.floor((Date.now() - created) / 1000);
               const remaining = Math.max(0, 15 * 60 - elapsed);
               setSearchTimeLeft(remaining);
-            } else if (data.status === 'Accepted' || data.status === 'Arrived' || data.status === 'In Trip') {
+            } else if (['Accepted', 'Arrived', 'In Trip'].includes(data.status)) {
               setIsSearchingDriver(false);
               setBookingSuccess(true);
+            } else if (data.status === 'Completed') {
+              setTripCompletedModal(true);
             }
           }
         }
@@ -194,70 +199,6 @@ export default function BookRidePage({ user, onLogout }) {
     }
   }, [showFares]);
 
-  // Restore and perform pending booking after user logs in
-  useEffect(() => {
-    const pendingDataStr = localStorage.getItem('pending_booking');
-    if (pendingDataStr && user) {
-      const pending = JSON.parse(pendingDataStr);
-      localStorage.removeItem('pending_booking');
-
-      setPickup(pending.pickup);
-      setDestination(pending.destination);
-      setPickupCoords(pending.pickupCoords);
-      setDestCoords(pending.destCoords);
-      setCalculatedRouteInfo(pending.calculatedRouteInfo);
-      setSelectedRide(pending.selectedRide);
-
-      const autoBook = async () => {
-        setIsBooking(true);
-        setBookingSuccess(false);
-        setIsSearchingDriver(false);
-        const fareNum = calculateFare(pending.selectedRide, pending.calculatedRouteInfo?.distanceKm || 5);
-
-        const pLat = pending.pickupCoords ? parseFloat(Number(pending.pickupCoords.lat).toFixed(6)) : 28.613900;
-        const pLng = pending.pickupCoords ? parseFloat(Number(pending.pickupCoords.lng).toFixed(6)) : 77.209000;
-        const dLat = pending.destCoords ? parseFloat(Number(pending.destCoords.lat).toFixed(6)) : 28.535500;
-        const dLng = pending.destCoords ? parseFloat(Number(pending.destCoords.lng).toFixed(6)) : 77.391000;
-        const distClean = pending.calculatedRouteInfo?.distanceKm ? parseFloat(Number(pending.calculatedRouteInfo.distanceKm).toFixed(2)) : 5.00;
-
-        const payload = {
-          selected_ride: pending.selectedRide,
-          pickup_address: pending.pickup || 'Current Location',
-          dropoff_address: pending.destination,
-          pickup_latitude: pLat,
-          pickup_longitude: pLng,
-          dropoff_latitude: dLat,
-          dropoff_longitude: dLng,
-          distance_km: distClean,
-          estimated_duration_mins: Math.round(pending.calculatedRouteInfo?.durationMins || (distClean * 2)),
-          base_fare: fareNum,
-          total_fare: fareNum,
-          notes_for_driver: pending.notes || '',
-          status: 'Searching'
-        };
-
-        try {
-          const res = await fetchWithAuth('/api/v1/bookings/bookings/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          const data = await res.json();
-          if (res.ok) {
-            setActiveBookingData(data);
-            setIsSearchingDriver(true);
-          }
-        } catch (err) {
-          console.log('Book ride API notice:', err);
-        } finally {
-          setIsBooking(false);
-        }
-      };
-
-      autoBook();
-    }
-  }, [user]);
-
   // Poll for Captain status updates + 15-min auto-cancel countdown
   useEffect(() => {
     let interval = null;
@@ -265,7 +206,6 @@ export default function BookRidePage({ user, onLogout }) {
     const bookingId = activeBookingData?.id;
 
     if (bookingId && activeBookingData?.status !== 'Completed' && activeBookingData?.status !== 'Cancelled') {
-      // ── Booking status polling (every 2s) ──────────────────────────────
       interval = setInterval(async () => {
         try {
           const res = await fetchWithAuth(`/api/v1/bookings/bookings/${bookingId}/`);
@@ -291,14 +231,10 @@ export default function BookRidePage({ user, onLogout }) {
               setIsSearchingDriver(false);
               setBookingSuccess(false);
               setSearchTimeLeft(null);
-              const isAutoCancelled = data.status === 'Cancelled' &&
-                activeBookingData?.status === 'Searching';
               setRideNotification({
                 type: 'declined',
-                title: isAutoCancelled ? 'No Driver Found ⏱️' : 'Sorry No Captain Available',
-                message: isAutoCancelled
-                  ? 'Your ride was automatically cancelled after 15 minutes with no driver response. Please try again.'
-                  : 'We could not find a captain nearby. Please try again or choose a different pickup.'
+                title: 'Ride Cancelled',
+                message: 'This ride has been cancelled.'
               });
               setActiveBookingData(null);
             } else if (data.status === 'Completed') {
@@ -313,7 +249,6 @@ export default function BookRidePage({ user, onLogout }) {
         }
       }, 2000);
 
-      // ── 15-minute countdown timer (every 1s, only while Searching) ────
       if (activeBookingData?.status === 'Searching') {
         const created = new Date(activeBookingData.created_at).getTime();
         countdownInterval = setInterval(() => {
@@ -322,7 +257,6 @@ export default function BookRidePage({ user, onLogout }) {
           setSearchTimeLeft(remaining);
 
           if (remaining === 0) {
-            // Time's up — cancel the ride via API
             clearInterval(countdownInterval);
             fetchWithAuth(`/api/v1/bookings/bookings/${bookingId}/cancel/`, {
               method: 'POST',
@@ -554,18 +488,11 @@ export default function BookRidePage({ user, onLogout }) {
       return;
     }
 
-    if (activeBookingData && activeBookingData.status !== 'Completed' && activeBookingData.status !== 'Cancelled') {
-      // Scroll to / highlight the active ride panel instead of blocking with an alert
-      if (activeRideRef.current) {
-        activeRideRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        activeRideRef.current.classList.add('ring-4', 'ring-yellow-400', 'ring-offset-2');
-        setTimeout(() => activeRideRef.current?.classList.remove('ring-4', 'ring-yellow-400', 'ring-offset-2'), 2000);
-      }
+    if (activeBookingData && ['Searching', 'Accepted', 'Arrived', 'In Trip'].includes(activeBookingData.status)) {
       return;
     }
 
     let hasErr = false;
-
     if (!pickup || !pickup.trim()) {
       setPickupError('Please enter pickup location');
       hasErr = true;
@@ -608,10 +535,8 @@ export default function BookRidePage({ user, onLogout }) {
       status: 'Searching'
     };
 
-    // ── Optimistic UI: show searching screen immediately ─────────────────
     setIsSearchingDriver(true);
     setSearchTimeLeft(15 * 60);
-    // ─────────────────────────────────────────────────────────────────────
 
     try {
       const res = await fetchWithAuth('/api/v1/bookings/bookings/', {
@@ -623,14 +548,12 @@ export default function BookRidePage({ user, onLogout }) {
       if (res.ok) {
         setActiveBookingData(data);
       } else {
-        // Revert optimistic UI on API error
         setIsSearchingDriver(false);
         setSearchTimeLeft(null);
         const errMsg = data?.detail || data?.error || data?.non_field_errors?.[0] || 'Failed to create booking. Please try again.';
         setRideNotification({ type: 'declined', title: 'Booking Failed', message: errMsg });
       }
     } catch (err) {
-      // Revert on network error
       setIsSearchingDriver(false);
       setSearchTimeLeft(null);
       setRideNotification({ type: 'declined', title: 'Network Error', message: 'Could not reach server. Check your connection and try again.' });
@@ -639,20 +562,44 @@ export default function BookRidePage({ user, onLogout }) {
     }
   };
 
-
-  const handleCancelBooking = async () => {
+  const handleConfirmCancel = async () => {
     if (activeBookingData?.id) {
       try {
-        await fetchWithAuth(`/api/v1/bookings/bookings/${activeBookingData.id}/cancel/`, { method: 'POST' });
+        await fetchWithAuth(`/api/v1/bookings/bookings/${activeBookingData.id}/cancel/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: cancelReason })
+        });
       } catch (err) {
         console.log(err);
       }
     }
+    setShowCancelModal(false);
     setIsSearchingDriver(false);
     setBookingSuccess(false);
     setSearchTimeLeft(null);
     setActiveBookingData(null);
+    setRideNotification({
+      type: 'declined',
+      title: 'Ride Cancelled',
+      message: 'Your ride has been successfully cancelled.'
+    });
   };
+
+  const handleCompleteRating = () => {
+    setTripCompletedModal(false);
+    setActiveBookingData(null);
+    setBookingSuccess(false);
+    setIsSearchingDriver(false);
+    setPickup('');
+    setDestination('');
+    setCalculatedRouteInfo(null);
+    setShowFares(false);
+    navigate('/home');
+  };
+
+  // Helper check for active accepted ride status
+  const isAcceptedRide = activeBookingData && ['Accepted', 'Arrived', 'In Trip'].includes(activeBookingData.status);
 
   return (
     <div className="min-h-screen w-full bg-gray-50 flex flex-col font-sans relative overflow-x-hidden">
@@ -665,16 +612,17 @@ export default function BookRidePage({ user, onLogout }) {
       {/* Main Container */}
       <div className="flex-1 w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-0 lg:gap-6 p-0 lg:p-6 relative">
 
-        {/* Left Sidebar (Mobile Layout) */}
-        <div className="w-full lg:w-[450px] bg-white h-screen lg:h-[calc(100vh-140px)] lg:rounded-3xl lg:shadow-xl lg:border lg:border-gray-200 flex flex-col relative overflow-hidden shrink-0 z-10 lg:mt-0">
+        {/* Left Sidebar */}
+        <div className="w-full lg:w-[460px] bg-white h-screen lg:h-[calc(100vh-140px)] lg:rounded-3xl lg:shadow-xl lg:border lg:border-gray-200 flex flex-col relative overflow-hidden shrink-0 z-10 lg:mt-0">
 
-          {/* Floating Notification */}
+          {/* Floating Notification Toast */}
           {rideNotification && (
-            <div className={`absolute top-4 left-4 right-4 z-50 p-3 rounded-2xl shadow-xl border transition-all transform animate-bounce-short bg-white ${rideNotification.type === 'accepted' ? 'border-green-500 text-black' : 'border-red-500 text-black'
-              }`}>
+            <div className={`absolute top-4 left-4 right-4 z-50 p-3.5 rounded-2xl shadow-2xl border transition-all transform animate-bounce-short bg-white ${
+              rideNotification.type === 'accepted' ? 'border-green-500 text-black' : 'border-red-500 text-black'
+            }`}>
               <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${rideNotification.type === 'accepted' ? 'bg-green-500' : 'bg-red-500'}`} />
+                <div className="flex items-center gap-2.5">
+                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${rideNotification.type === 'accepted' ? 'bg-green-500 animate-ping' : 'bg-red-500'}`} />
                   <div>
                     <h4 className="text-xs font-black text-gray-900">{rideNotification.title}</h4>
                     <p className="text-xs font-semibold text-gray-500 mt-0.5">{rideNotification.message}</p>
@@ -690,10 +638,11 @@ export default function BookRidePage({ user, onLogout }) {
             </div>
           )}
 
-          {/* Searching for Captain Animated Screen */}
+          {/* ═════════════════════════════════════════════════════════════════════ */}
+          {/* 1. SEARCHING FOR CAPTAIN ANIMATED SCREEN */}
+          {/* ═════════════════════════════════════════════════════════════════════ */}
           {isSearchingDriver && (
             <div ref={activeRideRef} className="absolute inset-0 z-50 flex flex-col justify-between overflow-hidden animate-fade-in">
-              {/* Full Background Map */}
               <div className="absolute inset-0 w-full h-full z-0">
                 <RealtimeMap
                   pickup={pickup}
@@ -705,9 +654,7 @@ export default function BookRidePage({ user, onLogout }) {
                 />
               </div>
 
-              {/* Floating Transparent Overlays */}
               <div className="relative z-10 w-full h-full pointer-events-none flex flex-col justify-between p-4 sm:p-5">
-                {/* Top Radar Status Badge */}
                 <div className="pt-2 flex justify-center pointer-events-auto">
                   <div className="bg-[#063B28] px-5 py-3 rounded-full shadow-[0_10px_30px_rgba(6,59,40,0.35)] flex items-center justify-between gap-4 text-white max-w-sm w-full border border-white/20">
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -726,10 +673,8 @@ export default function BookRidePage({ user, onLogout }) {
                   </div>
                 </div>
 
-                {/* Bottom Floating Clean White Card */}
                 <div className="space-y-3 max-w-md w-full mx-auto pointer-events-auto">
                   <div className="bg-white rounded-[32px] p-5 sm:p-6 shadow-[0_20px_60px_rgba(0,0,0,0.22)] border border-gray-100 text-gray-900 space-y-4">
-                    {/* Header with Mint Green Vehicle Box */}
                     <div className="flex items-center gap-3.5">
                       <div className="w-14 h-14 rounded-2xl bg-[#EEF8F2] border border-[#D2EDD9] flex items-center justify-center shrink-0 shadow-xs">
                         <span className="text-2xl animate-bounce">
@@ -746,7 +691,6 @@ export default function BookRidePage({ user, onLogout }) {
                       </div>
                     </div>
 
-                    {/* Clean Emerald Progress Bar */}
                     <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
                       <div
                         className="bg-[#16A34A] h-full transition-all duration-300 rounded-full"
@@ -754,7 +698,6 @@ export default function BookRidePage({ user, onLogout }) {
                       ></div>
                     </div>
 
-                    {/* 15-min Auto-cancel Countdown */}
                     {searchTimeLeft !== null && (
                       <div className="flex items-center justify-between text-xs">
                         <span className="text-gray-500 font-semibold flex items-center gap-1">
@@ -769,26 +712,18 @@ export default function BookRidePage({ user, onLogout }) {
                       </div>
                     )}
 
-                    {/* Total Fare & Option Button Row */}
                     <div className="bg-[#F8FAF9] rounded-2xl p-3.5 border border-[#E6EFE9] flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {/* <span className="bg-white border-2 border-[#16A34A] text-[#16A34A] font-black px-2.5 py-1 rounded-xl text-xs uppercase tracking-wide">
-                          {selectedRide}
-                        </span> */}
-                        <div className="flex flex-col">
-                          <span className="text-gray-500 font-semibold text-[10px] uppercase">Total Fare</span>
-                          <span className="text-[#16A34A] text-lg font-black tracking-tight leading-none">
-                            ₹{calculateFare(selectedRide, currentDist)}
-                          </span>
-                        </div>
+                      <div className="flex flex-col">
+                        <span className="text-gray-500 font-semibold text-[10px] uppercase">Total Fare</span>
+                        <span className="text-[#16A34A] text-lg font-black tracking-tight leading-none">
+                          ₹{calculateFare(selectedRide, currentDist)}
+                        </span>
                       </div>
 
-                      {/* Interactive Option Button to View/Hide Route Details */}
                       <button
                         type="button"
                         onClick={() => setShowTripDetailsInSearch(!showTripDetailsInSearch)}
                         className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-[#D2EDD9] text-[#063B28] font-black text-xs hover:bg-[#EEF8F2] active:scale-95 transition-all shadow-2xs cursor-pointer"
-                        title="Toggle Route & Distance Details"
                       >
                         <MapPin className="w-3.5 h-3.5 text-[#16A34A]" />
                         <span>{showTripDetailsInSearch ? 'Hide Details' : 'Route Details'}</span>
@@ -796,10 +731,8 @@ export default function BookRidePage({ user, onLogout }) {
                       </button>
                     </div>
 
-                    {/* Expandable Route & Distance Details Panel */}
                     {showTripDetailsInSearch && (
                       <div className="bg-[#F8FAF9] rounded-2xl p-4 border border-[#E6EFE9] space-y-3.5 animate-fade-in">
-                        {/* Pickup Row */}
                         <div className="flex items-start gap-3">
                           <div className="w-5 h-5 rounded-full border-2 border-[#16A34A] flex items-center justify-center shrink-0 mt-0.5 bg-white p-0.5 shadow-xs">
                             <div className="w-2 h-2 rounded-full bg-[#16A34A]"></div>
@@ -810,7 +743,6 @@ export default function BookRidePage({ user, onLogout }) {
                           </div>
                         </div>
 
-                        {/* Drop Row */}
                         <div className="flex items-start gap-3 border-t border-[#E6EFE9] pt-3">
                           <div className="w-5 h-5 rounded-full border-2 border-[#EF4444] flex items-center justify-center shrink-0 mt-0.5 bg-white p-0.5 shadow-xs">
                             <div className="w-2 h-2 rounded-full bg-[#EF4444]"></div>
@@ -821,7 +753,6 @@ export default function BookRidePage({ user, onLogout }) {
                           </div>
                         </div>
 
-                        {/* Distance to Travel Row */}
                         <div className="border-t border-[#E6EFE9] pt-3 flex items-center justify-between text-xs">
                           <span className="text-gray-500 font-bold">Distance:</span>
                           <span className="text-gray-900 font-black flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-lg border border-gray-200">
@@ -833,9 +764,8 @@ export default function BookRidePage({ user, onLogout }) {
                       </div>
                     )}
 
-                    {/* Dark Forest Green Cancel Request Button */}
                     <button
-                      onClick={handleCancelBooking}
+                      onClick={() => setShowCancelModal(true)}
                       className="w-full py-4 bg-[#063B28] hover:bg-[#084A33] active:scale-[0.98] text-white font-extrabold text-sm sm:text-base rounded-2xl shadow-lg shadow-[#063B28]/25 transition-all border-none cursor-pointer text-center"
                     >
                       Cancel Request
@@ -846,322 +776,553 @@ export default function BookRidePage({ user, onLogout }) {
             </div>
           )}
 
-          {/* Header Bar */}
-          <div className="flex items-center justify-between px-5 pt-6 pb-4 border-b border-gray-200 bg-white shrink-0 z-30">
-            <button
-              type="button"
-              onClick={() => navigate('/home')}
-              className="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-900 flex items-center justify-center transition-colors cursor-pointer border-none"
-            >
-              <ArrowLeft className="w-5 h-5 text-gray-900" />
-            </button>
-            <div className="text-center">
-              <h1 className="text-base font-black text-gray-900">Book Ride</h1>
-              <span className="text-xs text-gray-400 font-bold block">RaahGo Express</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowProfileMenu(true)}
-              className="w-9 h-9 rounded-full bg-[#063B28] text-white flex items-center justify-center font-bold text-xs shadow-xs cursor-pointer border-none"
-              title="Open Profile"
-            >
-              {user?.name ? user.name.charAt(0).toUpperCase() : '👤'}
-            </button>
-          </div>
-
-          {/* Scrollable Content Area */}
-          <div className={`flex-1 overflow-y-auto px-4 pt-4 pb-6 space-y-4 scrollbar-none ${showFares ? 'pb-6' : 'pb-6'}`}>
-            <div className="space-y-4">
-              {/* Map View at Top (Mobile Only) */}
-              <div className="block lg:hidden h-56 sm:h-64 rounded-[24px] overflow-hidden border border-gray-200 relative z-10 shrink-0 shadow-sm">
-                <RealtimeMap
-                  pickup={pickup}
-                  destination={destination}
-                  pickupCoords={pickupCoords}
-                  destCoords={destCoords}
-                  mode="booking"
-                  selectedRide={selectedRide}
-                  onRouteCalculated={(info) => setCalculatedRouteInfo(info)}
-                  onLocateMe={handleDetectGpsLocation}
-                  onPickupChange={(address, coords) => {
-                    setPickup(address);
-                    setPickupCoords(coords);
-                    setPickupError('');
-                  }}
-                />
+          {/* ═════════════════════════════════════════════════════════════════════ */}
+          {/* 2. ACCEPTED CAPTAIN & LIVE RIDE TRACKING SCREEN */}
+          {/* ═════════════════════════════════════════════════════════════════════ */}
+          {isAcceptedRide ? (
+            <div className="flex flex-col h-full overflow-y-auto scrollbar-none animate-fade-in bg-slate-50">
+              {/* Header Bar */}
+              <div className="flex items-center justify-between px-5 pt-6 pb-4 border-b border-gray-200 bg-white shrink-0 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-600 to-[#063B28] text-white flex items-center justify-center shadow-md shadow-emerald-700/20">
+                    <Car className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-black text-gray-900">
+                      {activeBookingData.status === 'Accepted' && 'Captain En Route'}
+                      {activeBookingData.status === 'Arrived' && 'Captain Has Arrived'}
+                      {activeBookingData.status === 'In Trip' && 'Trip In Progress'}
+                    </h2>
+                    <span className="text-xs text-emerald-600 font-extrabold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                      Live Tracking Active
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSosModal(true)}
+                  className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-extrabold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all active:scale-95"
+                >
+                  <Shield className="w-3.5 h-3.5 text-red-600" />
+                  <span>SOS</span>
+                </button>
               </div>
 
-              {/* GPS Status / Error Alert Banner */}
-              {locationStatus && (locationStatus.includes('Unable') || locationStatus.includes('unavailable') || locationStatus.includes('denied') || locationStatus.includes('Please enable')) && (
-                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center gap-2.5 text-xs text-red-500 font-bold animate-fade-in">
-                  <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
-                  <span className="flex-1">{locationStatus}</span>
-                </div>
-              )}
+              {/* Scrollable Content inside Accepted View */}
+              <div className="p-4 space-y-4 flex-1">
 
-              {/* Inputs Group Card */}
-              <div className="glass-card rounded-[28px] p-4 space-y-3 relative border border-emerald-500/15 shadow-sm">
-                {/* Pickup Location Row */}
-                <div className="relative" ref={pickupContainerRef}>
-                  <div className={`flex items-center gap-3 bg-white/90 p-3 rounded-2xl border transition-all ${pickupError ? 'border-red-500 bg-red-500/5 ring-1 ring-red-500' : 'border-gray-200/80'
-                    }`}>
-                    <span className="text-emerald-500 text-base shrink-0">🟢</span>
-                    <div className="flex-1">
-                      <input
-                        type="text"
-                        value={pickup}
-                        onChange={handlePickupChange}
-                        onFocus={() => {
-                          setShowPickupDropdown(true);
-                          setPickupError('');
-                        }}
-                        placeholder="Pickup location"
-                        className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
-                      />
-                    </div>
-                    {pickup && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPickup('');
-                          setPickupCoords(null);
-                          setPickupSuggestions([]);
-                          setCalculatedRouteInfo(null);
-                        }}
-                        className="w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center shrink-0"
-                        title="Clear pickup location"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-
+                {/* Status Indicator Banner */}
+                <div className={`p-4 rounded-2xl border text-white shadow-md flex items-center justify-between ${
+                  activeBookingData.status === 'Accepted'
+                    ? 'bg-gradient-to-r from-[#063B28] to-[#0E5C41] border-emerald-600'
+                    : activeBookingData.status === 'Arrived'
+                    ? 'bg-gradient-to-r from-amber-600 to-amber-700 border-amber-500'
+                    : 'bg-gradient-to-r from-blue-700 to-indigo-800 border-blue-600'
+                }`}>
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest opacity-80">RIDE STATUS</span>
+                    <h3 className="text-base font-black tracking-tight mt-0.5">
+                      {activeBookingData.status === 'Accepted' && 'Captain arriving in ~3 mins'}
+                      {activeBookingData.status === 'Arrived' && 'Captain reached pickup point!'}
+                      {activeBookingData.status === 'In Trip' && 'On the way to destination'}
+                    </h3>
                   </div>
+                  <div className="w-10 h-10 rounded-2xl bg-white/15 backdrop-blur-md flex items-center justify-center text-xl">
+                    {activeBookingData.status === 'Accepted' && '🚕'}
+                    {activeBookingData.status === 'Arrived' && '📍'}
+                    {activeBookingData.status === 'In Trip' && '🚀'}
+                  </div>
+                </div>
 
-                  {/* Inline Error Message */}
-                  {pickupError && (
-                    <p className="text-xs font-extrabold text-red-500 mt-1.5 flex items-center gap-1.5 animate-fade-in pl-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
-                      <span>{pickupError}</span>
-                    </p>
-                  )}
+                {/* Prominent Start Ride OTP Box */}
+                <div className="bg-white rounded-2xl p-4 border border-emerald-200 shadow-sm flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center border border-emerald-200 font-bold">
+                      <KeyRound className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">START RIDE OTP</p>
+                      <p className="text-xs text-gray-600 font-medium">Share PIN with captain before boarding</p>
+                    </div>
+                  </div>
+                  <div className="bg-emerald-500 text-white font-black text-xl px-4 py-1.5 rounded-xl tracking-widest shadow-sm font-mono">
+                    {activeBookingData.otp || activeBookingData.start_otp || '4821'}
+                  </div>
+                </div>
 
-                  {showPickupDropdown && (
-                    <div className="absolute left-0 right-0 glass-panel border border-white/80 mt-2 rounded-2xl shadow-2xl z-50 max-h-56 overflow-y-auto text-left p-1.5 divide-y divide-gray-100/60">
-                      {/* 1-Tap Current Location Shortcut */}
-                      <div
-                        onClick={handleDetectGpsLocation}
-                        className="p-2.5 hover:bg-emerald-50 cursor-pointer rounded-xl flex items-center gap-3 transition-colors text-xs font-bold text-[#16A34A] bg-emerald-50/60 mb-1"
-                      >
-                        <div className="w-7 h-7 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0">
-                          <LocateFixed className="w-4 h-4 text-emerald-600 animate-pulse" />
+                {/* Captain Profile & Vehicle Details Card */}
+                <div className="bg-white rounded-3xl p-5 border border-gray-200 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3.5">
+                      <div className="relative">
+                        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-100 to-emerald-200 text-emerald-800 flex items-center justify-center font-black text-xl border-2 border-emerald-500/20 shadow-xs">
+                          {(activeBookingData.driver_details?.captain_name || 'C').charAt(0).toUpperCase()}
                         </div>
-                        <div className="flex-1">
-                          <p className="font-extrabold text-[#16A34A] text-xs">Use Current GPS Location</p>
-                          <p className="text-xs text-gray-500 font-medium">Detect address via live device GPS</p>
+                        <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] border-2 border-white shadow-xs">
+                          ✓
+                        </span>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-extrabold text-base text-gray-900">
+                            {activeBookingData.driver_details?.captain_name || 'Captain Partner'}
+                          </h3>
+                          <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-1.5 py-0.5 rounded-md">
+                            Verified
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="flex items-center gap-1 text-xs font-black text-amber-500">
+                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                            {activeBookingData.driver_details?.rating || '4.95'}
+                          </span>
+                          <span className="text-gray-300">·</span>
+                          <span className="text-xs text-gray-500 font-semibold">1,240+ trips</span>
                         </div>
                       </div>
-
-                      {/* Autocomplete Search Suggestions */}
-                      {pickupSuggestions.map((loc, idx) => (
-                        <div
-                          key={idx}
-                          onClick={() => selectPickupSuggestion(loc)}
-                          className="p-2.5 hover:bg-emerald-50/60 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
-                        >
-                          <span className="text-base shrink-0">{loc.icon || '📍'}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between">
-                              <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
-                              {loc.distanceKm < 999 && (
-                                <span className="text-xs text-gray-500 font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
-                              )}
-                            </div>
-                            <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
-                          </div>
-                        </div>
-                      ))}
                     </div>
-                  )}
-                </div>
 
-                {/* Divider line */}
-                <div className="border-t border-gray-100"></div>
-
-                {/* Destination Row */}
-                <div className="relative" ref={destContainerRef}>
-                  <div className={`flex items-center gap-3 bg-white/90 p-3 rounded-2xl border transition-all ${destError ? 'border-red-500 bg-red-500/5 ring-1 ring-red-500' : 'border-gray-200/80'
-                    }`}>
-                    <span className="text-red-500 text-base shrink-0">📍</span>
-                    <div className="flex-1">
-                      <input
-                        type="text"
-                        value={destination}
-                        onChange={handleDestChange}
-                        onFocus={() => {
-                          destSuggestions.length > 0 && setShowDestDropdown(true);
-                          setDestError('');
-                        }}
-                        placeholder="Drop location"
-                        className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
-                      />
+                    {/* Vehicle Type Icon */}
+                    <div className="w-12 h-12 rounded-2xl bg-gray-50 border border-gray-200 flex items-center justify-center text-2xl shadow-2xs">
+                      {selectedRide === 'bike' ? '🏍️' : (selectedRide === 'auto' || selectedRide === 'e-rickshaw') ? '🛺' : '🚗'}
                     </div>
-                    {destination && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDestination('');
-                          setDestCoords(null);
-                          setDestSuggestions([]);
-                          setCalculatedRouteInfo(null);
-                        }}
-                        className="w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center shrink-0"
-                        title="Clear drop location"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
                   </div>
 
-                  {/* Inline Error Message */}
-                  {destError && (
-                    <p className="text-xs font-extrabold text-red-500 mt-1.5 flex items-center gap-1.5 animate-fade-in pl-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
-                      <span>{destError}</span>
-                    </p>
-                  )}
-
-                  {showDestDropdown && destSuggestions.length > 0 && (
-                    <div className="absolute left-0 right-0 glass-panel border border-white/80 mt-2 rounded-2xl shadow-2xl z-50 max-h-56 overflow-y-auto text-left p-1.5 divide-y divide-gray-100/60">
-                      {destSuggestions.map((loc, idx) => (
-                        <div
-                          key={idx}
-                          onClick={() => selectDestSuggestion(loc)}
-                          className="p-2.5 hover:bg-emerald-50/60 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
-                        >
-                          <span className="text-base shrink-0">{loc.icon || '📍'}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between">
-                              <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
-                              {loc.distanceKm < 999 && (
-                                <span className="text-xs text-gray-500 font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
-                              )}
-                            </div>
-                            <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
-                          </div>
-                        </div>
-                      ))}
+                  {/* Vehicle Model & Registration Number Plate */}
+                  <div className="bg-[#F8FAF9] rounded-2xl p-3.5 border border-[#E6EFE9] flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] font-black uppercase text-gray-500 tracking-wider">VEHICLE DETAILS</p>
+                      <p className="text-xs font-bold text-gray-900 mt-0.5">
+                        {activeBookingData.driver_details?.vehicle_name || 'Maruti Swift Dzire'}
+                      </p>
                     </div>
-                  )}
-                </div>
-
-                {/* Note to Driver */}
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Note to driver (optional)"
-                  className="w-full bg-white/80 border border-gray-200/80 rounded-[16px] p-3 text-xs text-gray-900 font-medium focus:border-emerald-500 focus:ring-0 focus:outline-none resize-none h-14 shadow-2xs"
-                />
-              </div>
-
-              {/* Show Fare Estimates Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  let hasErr = false;
-
-                  if (!pickup || !pickup.trim()) {
-                    setPickupError('Please enter pickup location');
-                    hasErr = true;
-                  } else {
-                    setPickupError('');
-                  }
-
-                  if (!destination || !destination.trim()) {
-                    setDestError('Please enter destination location');
-                    hasErr = true;
-                  } else {
-                    setDestError('');
-                  }
-
-                  if (hasErr) return;
-
-                  setShowFares(true);
-                }}
-                className="w-full py-4 bg-[#063B28] hover:bg-[#084A33] active:scale-[0.98] text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-[#063B28]/20 transition-all text-center cursor-pointer border-none"
-              >
-                Show Fare Estimates
-              </button>
-
-              {/* Vehicle List (Revealed below after Show Fares click) */}
-              {showFares && (
-                <div ref={fareEstimatesRef} className="space-y-3 pt-2 animate-fade-in">
-                  <h3 className="text-sm font-black text-gray-900">Choose vehicle · {currentDist} km</h3>
-                  <div className="space-y-2.5">
-                    {rideTypes.map((ride) => {
-                      const isSelected = selectedRide === ride.id;
-                      return (
-                        <div
-                          key={ride.id}
-                          onClick={() => setSelectedRide(ride.id)}
-                          className={`p-3.5 rounded-2xl border flex items-center justify-between transition-all cursor-pointer ${isSelected ? 'border-2 border-[#16A34A] bg-[#EEF8F2]/90 shadow-sm' : 'glass-card border-gray-200/80 hover:bg-emerald-50/30'
-                            }`}
-                        >
-                          <div className="flex items-center gap-3.5">
-                            <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${isSelected ? 'bg-white text-[#16A34A] shadow-sm border border-[#D2EDD9]' : 'bg-gray-100 text-gray-600'
-                              }`}>
-                              <span className="text-xl">{ride.icon}</span>
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h4 className="font-extrabold text-sm text-gray-900">{ride.name}</h4>
-                                <span className="text-[10px] bg-white/80 border border-gray-200 font-black text-gray-600 px-1.5 py-0.5 rounded-md">
-                                  {ride.capacity}
-                                </span>
-                              </div>
-                              <p className="text-xs text-gray-500 font-medium">{ride.eta} away · {ride.desc}</p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="font-black text-base text-[#16A34A]">{ride.price}</div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {/* Indian Standard Number Plate Style */}
+                    <div className="bg-amber-300 text-black border-2 border-black font-mono font-black text-xs px-3 py-1 rounded-lg tracking-wider shadow-xs">
+                      {activeBookingData.driver_details?.vehicle_number || 'DL 01 AB 1234'}
+                    </div>
                   </div>
 
-                  {/* Confirm & Request Captain Action Button */}
+                  {/* Direct Contact Buttons */}
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <a
+                      href={`tel:${activeBookingData.driver_details?.captain_phone || '+919876543210'}`}
+                      className="py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 shadow-md shadow-emerald-700/20 transition-all no-underline cursor-pointer"
+                    >
+                      <Phone className="w-4 h-4" />
+                      <span>Call Captain</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => alert(`Messaging Captain: ${activeBookingData.driver_details?.captain_name || 'Partner'}`)}
+                      className="py-3 bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-900 font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 border border-gray-200 transition-all cursor-pointer"
+                    >
+                      <MessageSquare className="w-4 h-4 text-gray-600" />
+                      <span>Message</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Trip Route Details Card */}
+                <div className="bg-white rounded-3xl p-5 border border-gray-200 shadow-sm space-y-3.5">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-gray-500">Trip Overview</h4>
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-5 h-5 rounded-full border-2 border-emerald-600 flex items-center justify-center shrink-0 mt-0.5 bg-white p-0.5 shadow-xs">
+                        <div className="w-2 h-2 rounded-full bg-emerald-600"></div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">Pickup</p>
+                        <p className="text-xs font-bold text-gray-900 truncate mt-0.5">{activeBookingData.pickup_address || pickup}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-3 border-t border-gray-100 pt-3">
+                      <div className="w-5 h-5 rounded-full border-2 border-red-500 flex items-center justify-center shrink-0 mt-0.5 bg-white p-0.5 shadow-xs">
+                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-black uppercase text-red-500 tracking-wider">Dropoff</p>
+                        <p className="text-xs font-bold text-gray-900 truncate mt-0.5">{activeBookingData.dropoff_address || destination}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-gray-100 pt-3 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5 text-gray-600 font-bold">
+                      <span>Distance:</span>
+                      <span className="font-extrabold text-gray-900">{activeBookingData.distance_km || currentDist} km</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-gray-500 font-bold">Total Fare:</span>
+                      <span className="text-emerald-700 font-black text-base">
+                        ₹{activeBookingData.total_fare || calculateFare(selectedRide, currentDist)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Safety & Share Links */}
+                <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={handleBookRide}
-                    disabled={isBooking}
-                    className="w-full py-4 bg-gradient-to-r from-[#063B28] to-[#0D5B3E] hover:from-[#084A33] hover:to-[#106A49] text-white font-black text-base rounded-2xl shadow-xl shadow-[#063B28]/25 active:scale-[0.98] transition-all cursor-pointer border-none flex items-center justify-center gap-2 mt-4"
+                    onClick={() => {
+                      if (navigator.share) {
+                        navigator.share({
+                          title: 'My RaahGo Ride',
+                          text: `I am on a RaahGo ride with Captain ${activeBookingData.driver_details?.captain_name || 'Partner'} (${activeBookingData.driver_details?.vehicle_number || 'DL 01 AB 1234'}). Tracking live!`,
+                          url: window.location.href
+                        }).catch(() => {});
+                      } else {
+                        navigator.clipboard?.writeText(window.location.href);
+                        alert('Ride tracking link copied to clipboard!');
+                      }
+                    }}
+                    className="flex-1 py-3 bg-white hover:bg-gray-50 active:scale-95 text-gray-800 font-extrabold text-xs rounded-2xl border border-gray-200 flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer"
                   >
-                    {isBooking ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        <span>Requesting Captain...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Book {selectedRide.toUpperCase()} Now</span>
-                        <ArrowRight className="w-5 h-5" />
-                      </>
-                    )}
+                    <Share2 className="w-4 h-4 text-gray-600" />
+                    <span>Share Ride</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowSosModal(true)}
+                    className="flex-1 py-3 bg-red-50 hover:bg-red-100 active:scale-95 text-red-600 font-extrabold text-xs rounded-2xl border border-red-200 flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <Shield className="w-4 h-4 text-red-600" />
+                    <span>Safety Shield</span>
                   </button>
                 </div>
-              )}
+
+                {/* Cancel Ride Option */}
+                {activeBookingData.status !== 'In Trip' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCancelModal(true)}
+                    className="w-full py-3.5 bg-gray-100 hover:bg-red-50 hover:text-red-600 text-gray-600 font-extrabold text-xs rounded-2xl transition-all border border-gray-200 cursor-pointer text-center"
+                  >
+                    Cancel Ride Request
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          ) : (
+            /* ═════════════════════════════════════════════════════════════════════ */
+            /* 3. DEFAULT BOOKING INPUTS & FARE SELECTION FORM */
+            /* ═════════════════════════════════════════════════════════════════════ */
+            <>
+              {/* Header Bar */}
+              <div className="flex items-center justify-between px-5 pt-6 pb-4 border-b border-gray-200 bg-white shrink-0 z-30">
+                <button
+                  type="button"
+                  onClick={() => navigate('/home')}
+                  className="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-900 flex items-center justify-center transition-colors cursor-pointer border-none"
+                >
+                  <ArrowLeft className="w-5 h-5 text-gray-900" />
+                </button>
+                <div className="text-center">
+                  <h1 className="text-base font-black text-gray-900">Book Ride</h1>
+                  <span className="text-xs text-gray-400 font-bold block">RaahGo Express</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowProfileMenu(true)}
+                  className="w-9 h-9 rounded-full bg-[#063B28] text-white flex items-center justify-center font-bold text-xs shadow-xs cursor-pointer border-none"
+                  title="Open Profile"
+                >
+                  {user?.name ? user.name.charAt(0).toUpperCase() : '👤'}
+                </button>
+              </div>
+
+              {/* Scrollable Content Area */}
+              <div className="flex-1 overflow-y-auto px-4 pt-4 pb-6 space-y-4 scrollbar-none">
+                {/* Mobile Map View */}
+                <div className="block lg:hidden h-56 sm:h-64 rounded-[24px] overflow-hidden border border-gray-200 relative z-10 shrink-0 shadow-sm">
+                  <RealtimeMap
+                    pickup={pickup}
+                    destination={destination}
+                    pickupCoords={pickupCoords}
+                    destCoords={destCoords}
+                    mode="booking"
+                    selectedRide={selectedRide}
+                    onRouteCalculated={(info) => setCalculatedRouteInfo(info)}
+                    onLocateMe={handleDetectGpsLocation}
+                    onPickupChange={(address, coords) => {
+                      setPickup(address);
+                      setPickupCoords(coords);
+                      setPickupError('');
+                    }}
+                  />
+                </div>
+
+                {/* Location Status / Alert Banner */}
+                {locationStatus && (locationStatus.includes('Unable') || locationStatus.includes('unavailable') || locationStatus.includes('denied') || locationStatus.includes('Please enable')) && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center gap-2.5 text-xs text-red-500 font-bold animate-fade-in">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+                    <span className="flex-1">{locationStatus}</span>
+                  </div>
+                )}
+
+                {/* Pickup & Drop Inputs Card */}
+                <div className="glass-card rounded-[28px] p-4 space-y-3 relative border border-emerald-500/15 shadow-sm">
+                  {/* Pickup Location Row */}
+                  <div className="relative" ref={pickupContainerRef}>
+                    <div className={`flex items-center gap-3 bg-white/90 p-3 rounded-2xl border transition-all ${
+                      pickupError ? 'border-red-500 bg-red-500/5 ring-1 ring-red-500' : 'border-gray-200/80'
+                    }`}>
+                      <span className="text-emerald-500 text-base shrink-0">🟢</span>
+                      <div className="flex-1">
+                        <input
+                          type="text"
+                          value={pickup}
+                          onChange={handlePickupChange}
+                          onFocus={() => {
+                            setShowPickupDropdown(true);
+                            setPickupError('');
+                          }}
+                          placeholder="Pickup location"
+                          className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
+                        />
+                      </div>
+                      {pickup && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPickup('');
+                            setPickupCoords(null);
+                            setPickupSuggestions([]);
+                            setCalculatedRouteInfo(null);
+                          }}
+                          className="w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center shrink-0"
+                          title="Clear pickup location"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    {pickupError && (
+                      <p className="text-xs font-extrabold text-red-500 mt-1.5 flex items-center gap-1.5 animate-fade-in pl-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
+                        <span>{pickupError}</span>
+                      </p>
+                    )}
+
+                    {showPickupDropdown && (
+                      <div className="absolute left-0 right-0 glass-panel border border-white/80 mt-2 rounded-2xl shadow-2xl z-50 max-h-56 overflow-y-auto text-left p-1.5 divide-y divide-gray-100/60">
+                        <div
+                          onClick={handleDetectGpsLocation}
+                          className="p-2.5 hover:bg-emerald-50 cursor-pointer rounded-xl flex items-center gap-3 transition-colors text-xs font-bold text-[#16A34A] bg-emerald-50/60 mb-1"
+                        >
+                          <div className="w-7 h-7 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0">
+                            <LocateFixed className="w-4 h-4 text-emerald-600 animate-pulse" />
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-extrabold text-[#16A34A] text-xs">Use Current GPS Location</p>
+                            <p className="text-xs text-gray-500 font-medium">Detect address via live device GPS</p>
+                          </div>
+                        </div>
+
+                        {pickupSuggestions.map((loc, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => selectPickupSuggestion(loc)}
+                            className="p-2.5 hover:bg-emerald-50/60 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
+                          >
+                            <span className="text-base shrink-0">{loc.icon || '📍'}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between">
+                                <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
+                                {loc.distanceKm < 999 && (
+                                  <span className="text-xs text-gray-500 font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border-t border-gray-100"></div>
+
+                  {/* Drop Location Row */}
+                  <div className="relative" ref={destContainerRef}>
+                    <div className={`flex items-center gap-3 bg-white/90 p-3 rounded-2xl border transition-all ${
+                      destError ? 'border-red-500 bg-red-500/5 ring-1 ring-red-500' : 'border-gray-200/80'
+                    }`}>
+                      <span className="text-red-500 text-base shrink-0">📍</span>
+                      <div className="flex-1">
+                        <input
+                          type="text"
+                          value={destination}
+                          onChange={handleDestChange}
+                          onFocus={() => {
+                            destSuggestions.length > 0 && setShowDestDropdown(true);
+                            setDestError('');
+                          }}
+                          placeholder="Drop location"
+                          className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
+                        />
+                      </div>
+                      {destination && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDestination('');
+                            setDestCoords(null);
+                            setDestSuggestions([]);
+                            setCalculatedRouteInfo(null);
+                          }}
+                          className="w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center shrink-0"
+                          title="Clear drop location"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    {destError && (
+                      <p className="text-xs font-extrabold text-red-500 mt-1.5 flex items-center gap-1.5 animate-fade-in pl-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
+                        <span>{destError}</span>
+                      </p>
+                    )}
+
+                    {showDestDropdown && destSuggestions.length > 0 && (
+                      <div className="absolute left-0 right-0 glass-panel border border-white/80 mt-2 rounded-2xl shadow-2xl z-50 max-h-56 overflow-y-auto text-left p-1.5 divide-y divide-gray-100/60">
+                        {destSuggestions.map((loc, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => selectDestSuggestion(loc)}
+                            className="p-2.5 hover:bg-emerald-50/60 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
+                          >
+                            <span className="text-base shrink-0">{loc.icon || '📍'}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between">
+                                <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
+                                {loc.distanceKm < 999 && (
+                                  <span className="text-xs text-gray-500 font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Note to Driver */}
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Note to driver (optional)"
+                    className="w-full bg-white/80 border border-gray-200/80 rounded-[16px] p-3 text-xs text-gray-900 font-medium focus:border-emerald-500 focus:ring-0 focus:outline-none resize-none h-14 shadow-2xs"
+                  />
+                </div>
+
+                {/* Show Fare Estimates Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    let hasErr = false;
+                    if (!pickup || !pickup.trim()) {
+                      setPickupError('Please enter pickup location');
+                      hasErr = true;
+                    } else {
+                      setPickupError('');
+                    }
+
+                    if (!destination || !destination.trim()) {
+                      setDestError('Please enter destination location');
+                      hasErr = true;
+                    } else {
+                      setDestError('');
+                    }
+
+                    if (hasErr) return;
+                    setShowFares(true);
+                  }}
+                  className="w-full py-4 bg-[#063B28] hover:bg-[#084A33] active:scale-[0.98] text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-[#063B28]/20 transition-all text-center cursor-pointer border-none"
+                >
+                  Show Fare Estimates
+                </button>
+
+                {/* Vehicle Fare Options List */}
+                {showFares && (
+                  <div ref={fareEstimatesRef} className="space-y-3 pt-2 animate-fade-in">
+                    <h3 className="text-sm font-black text-gray-900">Choose vehicle · {currentDist} km</h3>
+                    <div className="space-y-2.5">
+                      {rideTypes.map((ride) => {
+                        const isSelected = selectedRide === ride.id;
+                        return (
+                          <div
+                            key={ride.id}
+                            onClick={() => setSelectedRide(ride.id)}
+                            className={`p-3.5 rounded-2xl border flex items-center justify-between transition-all cursor-pointer ${
+                              isSelected ? 'border-2 border-[#16A34A] bg-[#EEF8F2]/90 shadow-sm' : 'glass-card border-gray-200/80 hover:bg-emerald-50/30'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3.5">
+                              <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${
+                                isSelected ? 'bg-white text-[#16A34A] shadow-sm border border-[#D2EDD9]' : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                <span className="text-xl">{ride.icon}</span>
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-extrabold text-sm text-gray-900">{ride.name}</h4>
+                                  <span className="text-[10px] bg-white/80 border border-gray-200 font-black text-gray-600 px-1.5 py-0.5 rounded-md">
+                                    {ride.capacity}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-500 font-medium">{ride.eta} away · {ride.desc}</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-black text-base text-[#16A34A]">{ride.price}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleBookRide}
+                      disabled={isBooking}
+                      className="w-full py-4 bg-gradient-to-r from-[#063B28] to-[#0D5B3E] hover:from-[#084A33] hover:to-[#106A49] text-white font-black text-base rounded-2xl shadow-xl shadow-[#063B28]/25 active:scale-[0.98] transition-all cursor-pointer border-none flex items-center justify-center gap-2 mt-4"
+                    >
+                      {isBooking ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          <span>Requesting Captain...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Book {selectedRide.toUpperCase()} Now</span>
+                          <ArrowRight className="w-5 h-5" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
         </div> {/* End of Left Sidebar */}
 
-        {/* Right Area (Desktop Map) */}
+        {/* Right Area Desktop Map */}
         <div className="hidden lg:block flex-1 rounded-3xl overflow-hidden shadow-xl border border-gray-200 relative h-[calc(100vh-140px)] lg:mt-0 shrink-0 z-10">
           <RealtimeMap
-            pickup={pickup}
-            destination={destination}
+            pickup={activeBookingData?.pickup_address || pickup}
+            destination={activeBookingData?.dropoff_address || destination}
             pickupCoords={pickupCoords}
             destCoords={destCoords}
-            mode="booking"
+            mode={isAcceptedRide ? "tracking" : "booking"}
             selectedRide={selectedRide}
             onRouteCalculated={(info) => setCalculatedRouteInfo(info)}
             onLocateMe={handleDetectGpsLocation}
@@ -1173,14 +1334,14 @@ export default function BookRidePage({ user, onLogout }) {
           />
         </div>
 
-      </div> {/* End of Main Container */}
+      </div>
 
       {/* Desktop Footer */}
       <div className="hidden lg:block shrink-0 w-full mt-auto">
         <Footer />
       </div>
 
-      {/* Customer Profile Menu Modal */}
+      {/* Profile Menu Modal */}
       <CustomerProfileMenu
         isOpen={showProfileMenu}
         onClose={() => setShowProfileMenu(false)}
@@ -1188,6 +1349,187 @@ export default function BookRidePage({ user, onLogout }) {
         onLogout={onLogout}
         activeNav="profile"
       />
+
+      {/* ═════════════════════════════════════════════════════════════════════ */}
+      {/* 4. EMERGENCY SOS SAFETY MODAL */}
+      {/* ═════════════════════════════════════════════════════════════════════ */}
+      {showSosModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-red-200 space-y-4 text-center">
+            <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto border-2 border-red-200">
+              <Shield className="w-7 h-7 text-red-600 animate-pulse" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-gray-900">RaahGo Safety Support</h3>
+              <p className="text-xs text-gray-500 font-medium mt-1">
+                Immediate 24x7 emergency response with live location sharing
+              </p>
+            </div>
+            <div className="space-y-2.5 pt-2">
+              <a
+                href="tel:112"
+                className="w-full py-3.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-sm rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-red-600/30 no-underline cursor-pointer"
+              >
+                <Phone className="w-4 h-4" />
+                <span>Call National Emergency (112)</span>
+              </a>
+              <a
+                href="tel:+911800123456"
+                className="w-full py-3 bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-900 font-bold text-xs rounded-xl flex items-center justify-center gap-2 border border-gray-200 no-underline cursor-pointer"
+              >
+                <Phone className="w-3.5 h-3.5" />
+                <span>Call RaahGo Safety Helpline</span>
+              </a>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowSosModal(false)}
+              className="text-xs text-gray-400 font-bold hover:text-gray-700 mt-2 bg-transparent border-none cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ═════════════════════════════════════════════════════════════════════ */}
+      {/* 5. CANCEL RIDE CONFIRMATION MODAL */}
+      {/* ═════════════════════════════════════════════════════════════════════ */}
+      {showCancelModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-gray-200 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center border border-red-100">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-gray-900">Cancel Ride Request?</h3>
+                <p className="text-xs text-gray-500 font-medium">Please let us know the reason</p>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              {[
+                'Change of plans',
+                'Driver is taking too long',
+                'Booked by mistake',
+                'Found alternate transport'
+              ].map((reason) => (
+                <label
+                  key={reason}
+                  className={`flex items-center gap-3 p-3 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                    cancelReason === reason ? 'border-red-500 bg-red-50/50 text-red-700' : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="cancel_reason"
+                    checked={cancelReason === reason}
+                    onChange={() => setCancelReason(reason)}
+                    className="text-red-600 focus:ring-red-500"
+                  />
+                  <span>{reason}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowCancelModal(false)}
+                className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-800 font-extrabold text-xs rounded-xl border border-gray-200 cursor-pointer"
+              >
+                Keep Ride
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCancel}
+                className="flex-1 py-3 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-md shadow-red-600/30 border-none cursor-pointer"
+              >
+                Cancel Ride
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═════════════════════════════════════════════════════════════════════ */}
+      {/* 6. TRIP COMPLETED & RATING MODAL */}
+      {/* ═════════════════════════════════════════════════════════════════════ */}
+      {tripCompletedModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-emerald-200 space-y-5 text-center">
+            <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto border-4 border-emerald-200">
+              <CheckCircle2 className="w-9 h-9 text-emerald-600" />
+            </div>
+            <div>
+              <span className="text-[10px] font-black uppercase text-emerald-700 tracking-widest bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                TRIP COMPLETED
+              </span>
+              <h3 className="text-lg font-black text-gray-900 mt-2">You have arrived safely!</h3>
+              <p className="text-xs text-gray-500 font-medium mt-0.5">
+                Total fare: <strong className="text-emerald-700 text-sm">₹{activeBookingData?.total_fare || calculateFare(selectedRide, currentDist)}</strong> (Paid in Cash)
+              </p>
+            </div>
+
+            {/* Star Rating Selection */}
+            <div className="bg-slate-50 rounded-2xl p-4 border border-gray-200 space-y-2">
+              <p className="text-xs font-extrabold text-gray-700">Rate your experience with Captain</p>
+              <div className="flex items-center justify-center gap-2">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    type="button"
+                    onClick={() => setSelectedRating(star)}
+                    className="p-1 bg-transparent border-none cursor-pointer transform hover:scale-125 transition-transform"
+                  >
+                    <Star
+                      className={`w-7 h-7 ${
+                        star <= selectedRating ? 'fill-amber-400 text-amber-400' : 'text-gray-300'
+                      }`}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Compliments Badges */}
+            <div className="flex flex-wrap gap-2 justify-center">
+              {['Polite Captain', 'Smooth Ride', 'Clean Vehicle', 'On Time'].map((tag) => {
+                const isSelected = ratingCompliments.includes(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => {
+                      if (isSelected) {
+                        setRatingCompliments(ratingCompliments.filter((t) => t !== tag));
+                      } else {
+                        setRatingCompliments([...ratingCompliments, tag]);
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-full text-xs font-extrabold border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCompleteRating}
+              className="w-full py-4 bg-[#063B28] hover:bg-[#084A33] active:scale-[0.98] text-white font-black text-sm rounded-2xl shadow-xl shadow-[#063B28]/25 border-none cursor-pointer"
+            >
+              Submit Feedback & Done
+            </button>
+          </div>
+        </div>
+      )}
 
     </div>
   );

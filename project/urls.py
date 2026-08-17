@@ -18,6 +18,7 @@ urlpatterns = [
     path('api/v1/reviews/', include('reviews.urls')),
     path('api/v1/wallets/', include('wallets.urls')),
     path('api/v1/coupons/', include('coupons.urls')),
+    path('api/admin/', include('users.admin_urls')),
 ]
 
 if settings.DEBUG:
