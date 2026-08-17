@@ -10,7 +10,9 @@ import Dashboard from './pages/dashboard/Dashboard';
 import LiveMap from './pages/operations/LiveMap';
 import { AllRides, LiveRides, ScheduledRides } from './pages/operations/Rides';
 import { CustomerList, CustomerWallets } from './pages/customers/Customers';
+import CustomerDetailPage from './pages/customers/CustomerDetailPage';
 import { DriverList, PendingApprovals, DriverDocuments, DriverEarnings, DriverRatings } from './pages/drivers/Drivers';
+import DriverDetailPage from './pages/drivers/DriverDetailPage';
 import { VehicleList, VehicleTypes } from './pages/vehicles/Vehicles';
 import Services from './pages/services/Services';
 import { FareManagement, SurgePricing, CancellationCharges } from './pages/pricing/Pricing';
@@ -60,13 +62,16 @@ function AppRoutes() {
 
         {/* Customers */}
         <Route path="customers" element={<CustomerList />} />
+        <Route path="customers/:id" element={<CustomerDetailPage />} />
         <Route path="customers/wallets" element={<CustomerWallets />} />
         <Route path="customers/complaints" element={<Complaints />} />
 
         {/* Drivers */}
         <Route path="drivers" element={<DriverList />} />
+        <Route path="drivers/:id" element={<DriverDetailPage />} />
         <Route path="drivers/pending" element={<PendingApprovals />} />
         <Route path="drivers/documents" element={<DriverDocuments />} />
+        <Route path="drivers/vehicles" element={<VehicleList />} />
         <Route path="drivers/earnings" element={<DriverEarnings />} />
         <Route path="drivers/ratings" element={<DriverRatings />} />
 

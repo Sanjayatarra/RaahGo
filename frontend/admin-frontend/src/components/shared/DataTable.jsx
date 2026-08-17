@@ -12,6 +12,9 @@ export default function DataTable({
   onRowClick,
   actions,
   emptyMessage = 'No records found',
+  maxHeight,
+  stickyHeader = true,
+  tableContainerStyle = {},
 }) {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -74,9 +77,15 @@ export default function DataTable({
         </div>
       </div>
 
-      <div style={{ overflowX: 'auto' }}>
-        <table>
-          <thead>
+      <div style={{
+        overflowX: 'auto',
+        overflowY: maxHeight ? 'auto' : undefined,
+        maxHeight: maxHeight || undefined,
+        position: 'relative',
+        ...tableContainerStyle
+      }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead style={stickyHeader && maxHeight ? { position: 'sticky', top: 0, zIndex: 2, background: 'var(--bg-card, #111827)' } : {}}>
             <tr>
               {columns.map((col) => (
                 <th key={col.key} style={col.style}>{col.label}</th>

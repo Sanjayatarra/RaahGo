@@ -157,7 +157,7 @@ class CustomerVerifyOTPView(APIView):
             user.save()
 
             update_last_login(None, user)
-            tokens = issue_tokens_for_user(user)
+            tokens = issue_tokens_for_user(user, request)
 
             return Response({
                 'status': 'OTP verified successfully',
@@ -275,7 +275,7 @@ class CustomerVerifySignupOTPView(APIView):
             user.save()
 
             update_last_login(None, user)
-            tokens = issue_tokens_for_user(user)
+            tokens = issue_tokens_for_user(user, request)
 
             required_fields = ['full_name']
             if user.email and not user.phone_number:
@@ -390,7 +390,7 @@ class CustomerGoogleAuthView(APIView):
             )
 
         update_last_login(None, user)
-        tokens = issue_tokens_for_user(user)
+        tokens = issue_tokens_for_user(user, request)
 
         return Response({
             'status': 'Customer Google authentication successful',

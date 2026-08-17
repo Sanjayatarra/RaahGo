@@ -5,6 +5,7 @@ from rest_framework.response import Response
 
 from .models import Wallet, WalletTransaction
 from .serializers import WalletSerializer, WalletTransactionSerializer
+from users.models import SystemSetting
 
 
 class WalletViewSet(viewsets.ModelViewSet):
@@ -20,6 +21,17 @@ class WalletViewSet(viewsets.ModelViewSet):
 
         if amount <= 0:
             return Response({'error': 'Amount must be greater than zero'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Enforce maximum wallet limit from Admin Settings
+        max_wallet_str = SystemSetting.get_setting('wallet_max', '10000')
+        try:
+            max_wallet = Decimal(str(max_wallet_str))
+            if (wallet.balance + amount) > max_wallet:
+                return Response({
+                    'error': f'Top-up exceeds maximum wallet balance limit of ₹{max_wallet}. Current balance: ₹{wallet.balance}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            pass
 
         wallet.balance += amount
         wallet.save()

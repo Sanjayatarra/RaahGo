@@ -1,6 +1,8 @@
-import { useState } from 'react';
-import { Save } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Save, RefreshCw, CheckCircle2 } from 'lucide-react';
 import PageHeader from '../../components/shared/PageHeader';
+import AlertModal from '../../components/shared/AlertModal';
+import api from '../../api/client';
 
 const SECTIONS = [
   { key: 'general', label: '⚙️ General', fields: [
@@ -8,6 +10,7 @@ const SECTIONS = [
     { key: 'support_email', label: 'Support Email', type: 'email', value: 'support@raahgo.in' },
     { key: 'support_phone', label: 'Support Phone', type: 'text', value: '+91 1800-XXX-XXXX' },
     { key: 'timezone', label: 'Timezone', type: 'select', value: 'Asia/Kolkata', options: ['Asia/Kolkata','UTC'] },
+    { key: 'location_suggestion_radius_km', label: 'Location Suggestion Radius (km)', type: 'number', value: 50, desc: 'Maximum radius in km for autocomplete pickup/drop suggestions and nearby searches (.env LOCATION_SUGGESTION_RADIUS_KM)' },
   ]},
   { key: 'ride', label: '🚗 Ride', fields: [
     { key: 'max_cancellations', label: 'Max Cancellations (per day)', type: 'number', value: 3 },
@@ -34,8 +37,9 @@ const SECTIONS = [
     { key: 'fcm_key', label: 'FCM Server Key', type: 'text', value: 'AAAA...' },
   ]},
   { key: 'maps', label: '🗺️ Maps', fields: [
-    { key: 'maps_provider', label: 'Maps Provider', type: 'select', value: 'google', options: ['google','openstreetmap'] },
-    { key: 'maps_api_key', label: 'Google Maps API Key', type: 'text', value: 'AIzaSy...' },
+    { key: 'maps_provider', label: 'Maps Provider', type: 'select', value: 'openstreetmap', options: ['openstreetmap', 'google'] },
+    { key: 'maps_api_key', label: 'Google Maps API Key', type: 'text', value: '' },
+    { key: 'location_suggestion_radius_km', label: 'Location Suggestion Radius (km)', type: 'number', value: 50, desc: 'Maximum distance from user coordinates to suggest locations' },
     { key: 'geocoding_enabled', label: 'Geocoding Enabled', type: 'toggle', value: true },
   ]},
   { key: 'security', label: '🔒 Security', fields: [
@@ -54,13 +58,61 @@ export default function Settings() {
     });
     return s;
   });
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [alertModal, setAlertModal] = useState({ isOpen: false, title: '', message: '', type: 'info' });
+
+  // Fetch persisted settings from backend
+  useEffect(() => {
+    const fetchSettings = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get('/api/admin/settings/');
+        if (res.data && typeof res.data === 'object') {
+          setSettings(prev => ({
+            ...prev,
+            ...res.data,
+            location_suggestion_radius_km: res.data.location_suggestion_radius_km !== undefined ? res.data.location_suggestion_radius_km : prev.location_suggestion_radius_km
+          }));
+        }
+      } catch (err) {
+        console.log('Settings fetch notice:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchSettings();
+  }, []);
 
   const section = SECTIONS.find(s => s.key === activeSection);
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await api.post('/api/admin/settings/', settings);
+      setSaved(true);
+      if (res.data?.settings) {
+        setSettings(prev => ({ ...prev, ...res.data.settings }));
+      }
+      setAlertModal({
+        isOpen: true,
+        title: 'Settings Saved',
+        message: `Global system settings updated successfully. Location suggestion radius is set to ${settings.location_suggestion_radius_km || 50} km.`,
+        type: 'success'
+      });
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      console.log('Save settings error:', err);
+      setAlertModal({
+        isOpen: true,
+        title: 'Save Failed',
+        message: 'Could not save settings. Please check server connection.',
+        type: 'error'
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -92,19 +144,30 @@ export default function Settings() {
         {/* Content */}
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700 }}>{section?.label} Settings</h3>
-            <button className="btn btn-primary" onClick={handleSave}>
-              <Save size={14} /> {saved ? 'Saved!' : 'Save Changes'}
+            <div>
+              <h3 style={{ fontSize: 16, fontWeight: 700 }}>{section?.label} Settings</h3>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                Update configurations and environment values
+              </p>
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={handleSave}
+              disabled={saving}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+              {saved ? 'Saved!' : 'Save Changes'}
             </button>
           </div>
 
           <div style={{ display: 'grid', gap: 20 }}>
             {section?.fields.map(field => (
-              <div key={field.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24 }}>
+              <div key={field.key} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 24, paddingBottom: 12, borderBottom: '1px solid var(--border-light)' }}>
                 <div style={{ flex: 1 }}>
-                  <label className="form-label" style={{ marginBottom: 2 }}>{field.label}</label>
+                  <label className="form-label" style={{ marginBottom: 2, fontWeight: 600 }}>{field.label}</label>
                   <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {`settings.${field.key}`}
+                    {field.desc || `settings.${field.key}`}
                   </p>
                 </div>
                 <div style={{ flex: 1, maxWidth: 320 }}>
@@ -133,7 +196,7 @@ export default function Settings() {
                   ) : field.type === 'select' ? (
                     <select
                       className="form-control"
-                      value={settings[field.key]}
+                      value={settings[field.key] || ''}
                       onChange={e => setSettings(s => ({ ...s, [field.key]: e.target.value }))}
                     >
                       {field.options.map(o => <option key={o} value={o}>{o}</option>)}
@@ -142,7 +205,7 @@ export default function Settings() {
                     <textarea
                       className="form-control"
                       rows={3}
-                      value={settings[field.key]}
+                      value={settings[field.key] || ''}
                       onChange={e => setSettings(s => ({ ...s, [field.key]: e.target.value }))}
                       placeholder="One IP per line..."
                     />
@@ -150,8 +213,11 @@ export default function Settings() {
                     <input
                       className="form-control"
                       type={field.type}
-                      value={settings[field.key]}
-                      onChange={e => setSettings(s => ({ ...s, [field.key]: e.target.value }))}
+                      value={settings[field.key] !== undefined ? settings[field.key] : ''}
+                      onChange={e => setSettings(s => ({
+                        ...s,
+                        [field.key]: field.type === 'number' ? (e.target.value === '' ? '' : parseFloat(e.target.value)) : e.target.value
+                      }))}
                     />
                   )}
                 </div>
@@ -160,6 +226,14 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        title={alertModal.title}
+        message={alertModal.message}
+        type={alertModal.type}
+        onClose={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

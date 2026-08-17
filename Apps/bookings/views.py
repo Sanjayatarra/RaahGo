@@ -17,6 +17,7 @@ from .serializers import (
     BookingTrackingSerializer
 )
 from vehicles.models import VehicleType
+from users.models import SystemSetting
 
 # Auto-cancel a Searching ride after this many minutes with no driver
 AUTO_CANCEL_SEARCHING_MINUTES = 15
@@ -102,6 +103,36 @@ class BookingViewSet(viewsets.ModelViewSet):
             qs = qs[:20]
 
         return qs
+
+    def create(self, request, *args, **kwargs):
+        # Enforce max_cancellations setting from Admin Settings
+        user = request.user
+        customer = None
+        if user and getattr(user, 'is_authenticated', False) and hasattr(user, 'id'):
+            customer = user
+        else:
+            cust_id = request.data.get('customer_id') or request.data.get('customer')
+            if cust_id:
+                from users.models import User
+                customer = User.objects.filter(id=cust_id).first()
+
+        if customer:
+            try:
+                max_cancels = int(SystemSetting.get_setting('max_cancellations', '3'))
+                today = timezone.now().date()
+                cancelled_today = Booking.objects.filter(
+                    customer=customer,
+                    status=Booking.BookingStatus.CANCELLED,
+                    created_at__date=today
+                ).count()
+                if cancelled_today >= max_cancels:
+                    return Response({
+                        'error': f'Daily cancellation limit of {max_cancels} rides reached for today. You cannot create new bookings at this time. Please contact support.'
+                    }, status=status.HTTP_403_FORBIDDEN)
+            except Exception:
+                pass
+
+        return super().create(request, *args, **kwargs)
 
     # ── Active ride endpoint ────────────────────────────────────────────────
     @action(detail=False, methods=['get'], url_path='active')
@@ -414,10 +445,33 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking.status = Booking.BookingStatus.CANCELLED
         booking.save()
 
+        # Enforce Auto-Refund from Admin Settings
+        refund_msg = ""
+        try:
+            auto_refund_enabled = str(SystemSetting.get_setting('auto_refund', 'false')).lower() == 'true'
+            if auto_refund_enabled and booking.customer and booking.estimated_fare:
+                if booking.payment_status in [Booking.PaymentStatus.PAID, Booking.PaymentStatus.COMPLETED]:
+                    from wallets.models import Wallet, WalletTransaction
+                    wallet, _ = Wallet.objects.get_or_create(user=booking.customer)
+                    wallet.balance += booking.estimated_fare
+                    wallet.save()
+                    WalletTransaction.objects.create(
+                        wallet=wallet,
+                        amount=booking.estimated_fare,
+                        transaction_type=WalletTransaction.TransactionType.CREDIT,
+                        description=f"Auto-refund for cancelled booking #{booking.id}",
+                        reference_id=str(booking.id)
+                    )
+                    booking.payment_status = Booking.PaymentStatus.REFUNDED
+                    booking.save()
+                    refund_msg = f" (₹{booking.estimated_fare} refunded to customer wallet)"
+        except Exception as e:
+            print(f"[Auto-Refund Error]: {e}")
+
         BookingTracking.objects.create(
             booking=booking,
             status=booking.status,
-            remarks=f"Cancelled: {reason}"
+            remarks=f"Cancelled: {reason}{refund_msg}"
         )
         return Response(BookingSerializer(booking).data, status=status.HTTP_200_OK)
 
@@ -508,11 +562,11 @@ class LocationSuggestionView(APIView):
                             except Exception:
                                 pass
                                 
-                        # max_radius km restriction
-                        radius_str = os.getenv('LOCATION_SUGGESTION_RADIUS_KM', '50')
+                        # max_radius km restriction from Database SystemSetting
+                        radius_str = SystemSetting.get_setting('location_suggestion_radius_km') or SystemSetting.get_setting('LOCATION_SUGGESTION_RADIUS_KM') or os.getenv('LOCATION_SUGGESTION_RADIUS_KM', '50')
                         try:
                             max_radius = float(radius_str)
-                        except ValueError:
+                        except (ValueError, TypeError):
                             max_radius = 50.0
 
                         if lat and lon and dist_km > max_radius:

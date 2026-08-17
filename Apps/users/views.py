@@ -8,7 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.core.mail import send_mail
 from django.conf import settings
-from .models import User, UserAddress, OTPVerification, UserDevice
+from .models import User, UserAddress, OTPVerification, UserDevice, SystemSetting
 from .serializers import (
     UserSerializer,
     UserAddressSerializer,
@@ -38,6 +38,11 @@ def get_target_role(request):
 
 
 def send_otp_email(email, otp_code):
+    email_enabled = str(SystemSetting.get_setting('email_enabled', 'false')).lower() == 'true'
+    if not email_enabled:
+        print(f"[NOTICE] Email notifications are disabled in Admin Settings. Skipping SMTP dispatch for {email}.")
+        return
+
     if email and getattr(settings, 'EMAIL_HOST_USER', None):
         try:
             send_mail(

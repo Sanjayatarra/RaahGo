@@ -62,9 +62,12 @@ export const customersAPI = {
   rides: (id) => api.get(`/api/admin/customers/${id}/rides/`),
   payments: (id) => api.get(`/api/admin/customers/${id}/payments/`),
   wallet: (id) => api.get(`/api/admin/customers/${id}/wallet/`),
+  adjustWallet: (id, data) => api.post(`/api/admin/customers/${id}/wallet/adjust/`, data),
+  sendNotification: (id, data) => api.post(`/api/admin/customers/${id}/notifications/send/`, data),
   addresses: (id) => api.get(`/api/admin/customers/${id}/addresses/`),
   complaints: (id) => api.get(`/api/admin/customers/${id}/complaints/`),
   devices: (id) => api.get(`/api/admin/customers/${id}/devices/`),
+  terminateDevice: (id, deviceId) => api.post(`/api/admin/customers/${id}/devices/${deviceId}/logout/`),
 };
 
 // ── DRIVERS ──────────────────────────────────────────────
@@ -75,6 +78,8 @@ export const driversAPI = {
   reject: (id, data) => api.post(`/api/admin/drivers/${id}/reject/`, data),
   suspend: (id, data) => api.post(`/api/admin/drivers/${id}/suspend/`, data),
   unsuspend: (id) => api.post(`/api/admin/drivers/${id}/unsuspend/`),
+  block: (id, data) => api.post(`/api/admin/drivers/${id}/block/`, data),
+  unblock: (id) => api.post(`/api/admin/drivers/${id}/unblock/`),
   documents: (id) => api.get(`/api/admin/drivers/${id}/documents/`),
   approveDoc: (id, docId) => api.post(`/api/admin/drivers/${id}/documents/${docId}/approve/`),
   rejectDoc: (id, docId, data) => api.post(`/api/admin/drivers/${id}/documents/${docId}/reject/`, data),
@@ -84,6 +89,8 @@ export const driversAPI = {
   wallet: (id) => api.get(`/api/admin/drivers/${id}/wallet/`),
   ratings: (id) => api.get(`/api/admin/drivers/${id}/ratings/`),
   complaints: (id) => api.get(`/api/admin/drivers/${id}/complaints/`),
+  sendNotification: (id, data) => api.post(`/api/admin/drivers/${id}/notifications/send/`, data),
+  terminateDevice: (id, deviceId) => api.post(`/api/admin/drivers/${id}/devices/${deviceId}/logout/`),
   location: (id) => api.get(`/api/admin/drivers/${id}/location/`),
 };
 

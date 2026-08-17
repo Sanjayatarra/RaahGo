@@ -117,8 +117,8 @@ export default function LiveMap() {
       <div style={{ borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-light)', height: 500 }}>
         <MapContainer center={centre} zoom={13} style={{ height: '100%', width: '100%' }}>
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution=""
+            url="/api/v1/services/tiles/{z}/{x}/{y}.png"
           />
           {visible.map((d) => {
             const lat = Number(d.lat ?? d.latitude);

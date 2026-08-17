@@ -52,10 +52,10 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
       zoomControl: false,
     });
 
-    // Clean, modern OpenStreetMap CartoDB tiles
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    // Dynamic Backend Map Tile API (switches dynamically based on Admin Settings: Google Maps / OSM)
+    L.tileLayer('/api/v1/services/tiles/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      attribution: ''
     }).addTo(map);
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);

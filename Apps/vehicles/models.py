@@ -57,5 +57,21 @@ class Vehicle(models.Model):
         verbose_name = 'Vehicle'
         verbose_name_plural = 'Vehicles'
 
+    def clean(self):
+        super().clean()
+        if self.is_active and self.driver:
+            existing = Vehicle.objects.filter(driver=self.driver, is_active=True).exclude(pk=self.pk)
+            if existing.exists():
+                # Will be auto-deactivated on save, but raise validation error if explicitly validating
+                pass
+
+    def save(self, *args, **kwargs):
+        # Business Rule: A driver can have at most 1 active vehicle.
+        # If saving an active vehicle, deactivate all other vehicles for this driver.
+        if self.is_active and self.driver:
+            Vehicle.objects.filter(driver=self.driver, is_active=True).exclude(pk=self.pk).update(is_active=False)
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f"{self.make} {self.model} ({self.registration_number})"
+        status_str = "Active" if self.is_active else "Inactive"
+        return f"{self.make} {self.model} ({self.registration_number}) - {status_str}"

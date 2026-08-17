@@ -113,8 +113,8 @@ urlpatterns = [
     # Notifications
     path('notifications/', DriverNotificationsView.as_view(), name='driver-notifications'),
     path('notifications/read-all/', DriverNotificationActionView.as_view(), {'notif_id': 'read-all'}, name='driver-notif-read-all'),
-    path('notifications/<uuid:notif_id>/read/', DriverNotificationActionView.as_view(), name='driver-notif-read'),
-    path('notifications/<uuid:notif_id>/', DriverNotificationActionView.as_view(), name='driver-notif-delete'),
+    path('notifications/<str:notif_id>/read/', DriverNotificationActionView.as_view(), name='driver-notif-read'),
+    path('notifications/<str:notif_id>/', DriverNotificationActionView.as_view(), name='driver-notif-delete'),
 
     # Emergency / SOS
     path('rides/<uuid:ride_id>/sos/', DriverSosView.as_view(), name='driver-ride-sos'),

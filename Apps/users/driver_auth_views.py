@@ -154,7 +154,7 @@ class DriverVerifyOTPView(APIView):
             user.is_verified = True
             user.save()
 
-            tokens = issue_tokens_for_user(user)
+            tokens = issue_tokens_for_user(user, request)
 
             return Response({
                 'status': 'OTP verified successfully',
@@ -271,7 +271,7 @@ class DriverVerifySignupOTPView(APIView):
             user.is_verified = True
             user.save()
 
-            tokens = issue_tokens_for_user(user)
+            tokens = issue_tokens_for_user(user, request)
 
             return Response({
                 'status': 'Driver OTP verified successfully.',
@@ -369,7 +369,7 @@ class DriverGoogleAuthView(APIView):
                 is_email_verified=True
             )
 
-        tokens = issue_tokens_for_user(user)
+        tokens = issue_tokens_for_user(user, request)
 
         return Response({
             'status': 'Driver Google authentication successful',

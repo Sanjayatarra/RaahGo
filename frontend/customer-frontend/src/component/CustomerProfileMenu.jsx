@@ -78,6 +78,13 @@ export default function CustomerProfileMenu({
   const [newAddrText, setNewAddrText] = useState('');
   const [showAddAddr, setShowAddAddr] = useState(false);
 
+  // Wallet State
+  const [walletData, setWalletData] = useState({ balance: 0.0, transactions: [] });
+  const [isLoadingWallet, setIsLoadingWallet] = useState(false);
+  const [showAddMoneyModal, setShowAddMoneyModal] = useState(false);
+  const [topupAmount, setTopupAmount] = useState('200');
+  const [isAddingMoney, setIsAddingMoney] = useState(false);
+
   // Fetch real Ride History when history submodal is opened
   useEffect(() => {
     if (activeSubModal === 'history') {
@@ -91,6 +98,55 @@ export default function CustomerProfileMenu({
       fetchNotifications();
     }
   }, [activeSubModal]);
+
+  // Fetch real Wallet balance and transactions
+  useEffect(() => {
+    if (isOpen || activeSubModal === 'payments') {
+      fetchWallet();
+    }
+  }, [isOpen, activeSubModal]);
+
+  const fetchWallet = async () => {
+    setIsLoadingWallet(true);
+    try {
+      const res = await fetchWithAuth('/api/v1/customer/wallet/');
+      if (res.ok) {
+        const data = await res.json();
+        setWalletData(prev => ({ ...prev, balance: data.balance ?? 0 }));
+      }
+      const txRes = await fetchWithAuth('/api/v1/customer/wallet/transactions/');
+      if (txRes.ok) {
+        const txData = await txRes.json();
+        setWalletData(prev => ({ ...prev, transactions: Array.isArray(txData) ? txData : (txData.results || []) }));
+      }
+    } catch (e) {
+      console.log('Fetch wallet notice:', e);
+    } finally {
+      setIsLoadingWallet(false);
+    }
+  };
+
+  const handleAddMoney = async (customAmt) => {
+    const amt = parseFloat(customAmt || topupAmount);
+    if (!amt || amt <= 0) return;
+    setIsAddingMoney(true);
+    try {
+      const res = await fetchWithAuth('/api/v1/customer/wallet/add-money/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: amt, payment_method: 'UPI' })
+      });
+      if (res.ok) {
+        await fetchWallet();
+        setShowAddMoneyModal(false);
+        setTopupAmount('200');
+      }
+    } catch (e) {
+      console.log('Add money notice:', e);
+    } finally {
+      setIsAddingMoney(false);
+    }
+  };
 
   const fetchRides = async () => {
     setIsLoadingHistory(true);
@@ -137,6 +193,16 @@ export default function CustomerProfileMenu({
     } catch (e) {
       console.log('Mark all read notice:', e);
       setNotificationsList(prev => prev.map(n => ({ ...n, is_read: true })));
+    }
+  };
+
+  const handleMarkSingleRead = async (notifId) => {
+    if (!notifId) return;
+    try {
+      await fetchWithAuth(`/api/v1/customer/notifications/${notifId}/read/`, { method: 'POST' });
+      setNotificationsList(prev => prev.map(n => n.id === notifId ? { ...n, is_read: true } : n));
+    } catch (e) {
+      console.log('Mark single read notice:', e);
     }
   };
 
@@ -269,7 +335,7 @@ export default function CustomerProfileMenu({
                 <Wallet className="w-4 h-4 text-emerald-700" />
               </div>
               <div className="mt-2">
-                <span className="text-lg font-black text-emerald-950">₹320.00</span>
+                <span className="text-lg font-black text-emerald-950">₹{Number(walletData.balance).toFixed(2)}</span>
                 <span className="text-[10px] font-bold text-emerald-700 block mt-0.5">Wallet Balance</span>
               </div>
             </div>
@@ -836,8 +902,9 @@ export default function CustomerProfileMenu({
                       {notificationsList.map((n, idx) => (
                         <div
                           key={n.id || idx}
-                          className={`p-3.5 rounded-2xl border transition-all flex items-start gap-3 ${
-                            n.is_read ? 'bg-white border-gray-200' : 'bg-emerald-50/70 border-emerald-200 shadow-2xs'
+                          onClick={() => !n.is_read && handleMarkSingleRead(n.id)}
+                          className={`p-3.5 rounded-2xl border transition-all flex items-start gap-3 cursor-pointer ${
+                            n.is_read ? 'bg-white border-gray-200 opacity-80' : 'bg-emerald-50/70 border-emerald-200 shadow-2xs hover:bg-emerald-50'
                           }`}
                         >
                           <div className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${n.is_read ? 'bg-gray-300' : 'bg-emerald-500 animate-pulse'}`} />
@@ -898,15 +965,64 @@ export default function CustomerProfileMenu({
               {/* 4. Payments */}
               {activeSubModal === 'payments' && (
                 <div className="space-y-4">
-                  <div className="bg-[#063B28] rounded-3xl p-5 text-white flex items-center justify-between">
+                  <div className="bg-[#063B28] rounded-3xl p-5 text-white flex items-center justify-between shadow-lg shadow-emerald-950/20">
                     <div>
                       <p className="text-xs font-semibold text-emerald-200 uppercase">RaahGo Wallet</p>
-                      <h3 className="text-2xl font-black mt-0.5">₹320.00</h3>
+                      <h3 className="text-2xl font-black mt-0.5">₹{Number(walletData.balance).toFixed(2)}</h3>
                     </div>
-                    <button className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-[#063B28] font-extrabold text-xs rounded-xl border-none cursor-pointer">
+                    <button
+                      onClick={() => setShowAddMoneyModal(true)}
+                      className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-[#063B28] font-extrabold text-xs rounded-xl border-none cursor-pointer active:scale-95 transition-transform"
+                    >
                       + Add Money
                     </button>
                   </div>
+
+                  {/* Add Money Input Modal / Drawer when active */}
+                  {showAddMoneyModal && (
+                    <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-emerald-950">Top-up Wallet (₹)</span>
+                        <button
+                          onClick={() => setShowAddMoneyModal(false)}
+                          className="text-gray-400 hover:text-gray-600 text-xs font-bold border-none bg-transparent cursor-pointer"
+                        >
+                          ✕ Close
+                        </button>
+                      </div>
+                      <div className="flex gap-2">
+                        {['100', '200', '500', '1000'].map(val => (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => setTopupAmount(val)}
+                            className={`flex-1 py-1.5 text-xs font-bold rounded-lg border ${
+                              topupAmount === val ? 'bg-[#063B28] text-white border-[#063B28]' : 'bg-white text-gray-700 border-gray-200'
+                            }`}
+                          >
+                            +₹{val}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          placeholder="Enter amount"
+                          value={topupAmount}
+                          onChange={(e) => setTopupAmount(e.target.value)}
+                          className="flex-1 px-3 py-2 text-sm font-bold bg-white border border-gray-200 rounded-xl focus:outline-none focus:border-emerald-500"
+                        />
+                        <button
+                          disabled={isAddingMoney}
+                          onClick={() => handleAddMoney()}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl border-none cursor-pointer disabled:opacity-50"
+                        >
+                          {isAddingMoney ? 'Adding...' : 'Add Now'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     <h5 className="text-xs font-black text-gray-400 uppercase tracking-wider">Payment Options</h5>
                     <div className="p-3.5 bg-gray-50 rounded-2xl flex items-center justify-between border border-gray-100">
@@ -939,6 +1055,32 @@ export default function CustomerProfileMenu({
                       </div>
                       <span className="text-[10px] font-bold bg-gray-200 text-gray-700 px-2 py-0.5 rounded">Enabled</span>
                     </div>
+                  </div>
+
+                  {/* Recent Wallet Transactions */}
+                  <div className="space-y-2 pt-2">
+                    <h5 className="text-xs font-black text-gray-400 uppercase tracking-wider">Recent Transactions</h5>
+                    {isLoadingWallet ? (
+                      <div className="p-4 text-center text-xs text-gray-400">Loading wallet ledger...</div>
+                    ) : (walletData.transactions || []).length === 0 ? (
+                      <div className="p-4 bg-gray-50 rounded-2xl text-center text-xs text-gray-400">
+                        No wallet transactions yet.
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                        {walletData.transactions.map((tx, idx) => (
+                          <div key={tx.id || idx} className="p-2.5 bg-gray-50 rounded-xl flex items-center justify-between text-xs">
+                            <div>
+                              <p className="font-bold text-gray-900">{tx.description || (tx.type === 'credit' ? 'Money Added' : 'Ride Payment')}</p>
+                              <p className="text-[10px] text-gray-400">{typeof tx.created_at === 'string' ? tx.created_at.substring(0, 16).replace('T', ' ') : 'Recent'}</p>
+                            </div>
+                            <span className={`font-black ${tx.type === 'credit' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {tx.type === 'credit' ? '+' : '-'}₹{tx.amount}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

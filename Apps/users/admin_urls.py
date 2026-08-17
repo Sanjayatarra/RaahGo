@@ -19,13 +19,26 @@ urlpatterns = [
 
     # ── 4. Customers ──────────────────────────────────────────
     path('customers/', admin_api_views.AdminCustomersListView.as_view(), name='admin-customers-list'),
+    path('customers/<uuid:pk>/', admin_api_views.AdminCustomerDetailView.as_view(), name='admin-customer-detail'),
     path('customers/<uuid:pk>/block/', admin_api_views.AdminCustomerBlockView.as_view(), name='admin-customer-block'),
     path('customers/<uuid:pk>/unblock/', admin_api_views.AdminCustomerUnblockView.as_view(), name='admin-customer-unblock'),
+    path('customers/<uuid:pk>/wallet/adjust/', admin_api_views.AdminCustomerWalletAdjustView.as_view(), name='admin-customer-wallet-adjust'),
+    path('customers/<uuid:pk>/notifications/send/', admin_api_views.AdminCustomerNotificationView.as_view(), name='admin-customer-notification-send'),
+    path('customers/<uuid:pk>/devices/<str:device_id>/logout/', admin_api_views.AdminCustomerDeviceLogoutView.as_view(), name='admin-customer-device-logout'),
 
     # ── 5. Drivers ────────────────────────────────────────────
     path('drivers/', admin_api_views.AdminDriversListView.as_view(), name='admin-drivers-list'),
+    path('drivers/<uuid:pk>/', admin_api_views.AdminDriverDetailView.as_view(), name='admin-driver-detail'),
     path('drivers/<uuid:pk>/approve/', admin_api_views.AdminDriverApproveView.as_view(), name='admin-driver-approve'),
     path('drivers/<uuid:pk>/reject/', admin_api_views.AdminDriverRejectView.as_view(), name='admin-driver-reject'),
+    path('drivers/<uuid:pk>/block/', admin_api_views.AdminDriverBlockView.as_view(), name='admin-driver-block'),
+    path('drivers/<uuid:pk>/unblock/', admin_api_views.AdminDriverUnblockView.as_view(), name='admin-driver-unblock'),
+    path('drivers/<uuid:pk>/suspend/', admin_api_views.AdminDriverBlockView.as_view(), name='admin-driver-suspend'),
+    path('drivers/<uuid:pk>/unsuspend/', admin_api_views.AdminDriverUnblockView.as_view(), name='admin-driver-unsuspend'),
+    path('drivers/<uuid:pk>/notifications/send/', admin_api_views.AdminDriverNotificationView.as_view(), name='admin-driver-notification-send'),
+    path('drivers/<uuid:pk>/devices/<str:device_id>/logout/', admin_api_views.AdminDriverDeviceLogoutView.as_view(), name='admin-driver-device-logout'),
+    path('drivers/<uuid:driver_pk>/documents/<uuid:doc_pk>/approve/', admin_api_views.AdminDriverDocApproveView.as_view(), name='admin-driver-doc-approve'),
+    path('drivers/<uuid:driver_pk>/documents/<uuid:doc_pk>/reject/', admin_api_views.AdminDriverDocRejectView.as_view(), name='admin-driver-doc-reject'),
 
     # ── 6. Vehicles ───────────────────────────────────────────
     path('vehicles/', admin_api_views.AdminVehiclesListView.as_view(), name='admin-vehicles-list'),

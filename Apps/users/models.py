@@ -205,6 +205,7 @@ class UserDevice(models.Model):
     class DeviceTypeChoices(models.TextChoices):
         ANDROID = 'Android', 'Android'
         IOS = 'iOS', 'iOS'
+        WEB = 'Web', 'Web'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
@@ -230,3 +231,36 @@ class UserDevice(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.device_name or self.device_type}"
+
+
+class SystemSetting(models.Model):
+    key = models.CharField(max_length=100, primary_key=True)
+    value = models.TextField()
+    description = models.CharField(max_length=255, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'system_settings'
+        verbose_name = 'System Setting'
+        verbose_name_plural = 'System Settings'
+
+    def __str__(self):
+        return f"{self.key}: {self.value}"
+
+    @classmethod
+    def get_setting(cls, key, default=None):
+        try:
+            setting = cls.objects.filter(key=key).first()
+            if setting is not None:
+                return setting.value
+        except Exception:
+            pass
+        return default
+
+    @classmethod
+    def set_setting(cls, key, value, description=None):
+        obj, _ = cls.objects.update_or_create(
+            key=key,
+            defaults={'value': str(value), 'description': description}
+        )
+        return obj

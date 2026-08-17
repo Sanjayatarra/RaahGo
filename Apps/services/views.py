@@ -10,6 +10,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from .models import Service
 from .serializers import ServiceSerializer
+from users.models import SystemSetting
 
 INDIA_BBOX = '68.1,6.5,97.4,35.5'
 
@@ -17,23 +18,46 @@ INDIA_BBOX = '68.1,6.5,97.4,35.5'
 @cache_page(60 * 60 * 24)
 def tile_proxy_view(request, z, x, y):
     """
-    Backend Map Tile Proxy API
-    Fetches map tiles server-side with caching and serves them to frontend.
+    Backend Dynamic Map Tile Proxy API
+    Fetches map tiles dynamically based on SystemSetting ('maps_provider': 'google' vs 'openstreetmap' vs 'cartodb').
     URL: /api/v1/services/tiles/<z>/<x>/<y>.png
     """
-    subdomain = random.choice(['a', 'b', 'c'])
-    osm_tile_url = f"https://{subdomain}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-    headers = {
-        'User-Agent': 'RaahGo-Map-Service/1.0 (https://raahgo.com; contact@raahgo.com)'
-    }
-    print("efrgth",osm_tile_url)
+    provider = (SystemSetting.get_setting('maps_provider') or 'openstreetmap').lower()
+
+    if 'google' in provider:
+        tile_url = f"https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://maps.google.com/'
+        }
+    elif 'carto' in provider:
+        tile_url = f"https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+        headers = {
+            'User-Agent': 'RaahGo-Map-Service/1.0 (https://raahgo.com; contact@raahgo.com)'
+        }
+    else:
+        # Default OpenStreetMap
+        subdomain = random.choice(['a', 'b', 'c'])
+        tile_url = f"https://{subdomain}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        headers = {
+            'User-Agent': 'RaahGo-Map-Service/1.0 (https://raahgo.com; contact@raahgo.com)'
+        }
+
     try:
-        resp = requests.get(osm_tile_url, headers=headers, timeout=5)
+        resp = requests.get(tile_url, headers=headers, timeout=5)
         if resp.status_code == 200:
             response = HttpResponse(resp.content, content_type=resp.headers.get('Content-Type', 'image/png'))
             response['Cache-Control'] = 'public, max-age=86400'
             return response
         else:
+            # Fallback to OpenStreetMap
+            subdomain = random.choice(['a', 'b', 'c'])
+            fallback_url = f"https://{subdomain}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            fallback_resp = requests.get(fallback_url, headers={'User-Agent': 'RaahGo-Map-Fallback/1.0'}, timeout=5)
+            if fallback_resp.status_code == 200:
+                response = HttpResponse(fallback_resp.content, content_type='image/png')
+                response['Cache-Control'] = 'public, max-age=86400'
+                return response
             return HttpResponse(status=resp.status_code)
     except Exception as e:
         print(f"[Tile Proxy Error]: {e}")
@@ -55,11 +79,40 @@ class ServiceViewSet(viewsets.ModelViewSet):
     serializer_class = ServiceSerializer
     permission_classes = [AllowAny]
 
+    # Map & Global App Configuration Endpoint
+    @action(detail=False, methods=['get'], url_path='config', permission_classes=[AllowAny])
+    def map_config(self, request):
+        provider = (SystemSetting.get_setting('maps_provider') or 'openstreetmap').lower()
+        api_key = SystemSetting.get_setting('maps_api_key') or ''
+        radius = float(SystemSetting.get_setting('location_suggestion_radius_km') or 50)
+        app_name = SystemSetting.get_setting('app_name') or 'RaahGo'
+        support_email = SystemSetting.get_setting('support_email') or 'support@raahgo.in'
+        support_phone = SystemSetting.get_setting('support_phone') or '+91 1800-XXX-XXXX'
+        track_interval = int(SystemSetting.get_setting('track_interval') or 10)
+        cashback_enabled = str(SystemSetting.get_setting('cashback_enabled', 'true')).lower() == 'true'
+
+        return Response({
+            'app_name': app_name,
+            'support_email': support_email,
+            'support_phone': support_phone,
+            'maps_provider': provider,
+            'maps_api_key': api_key,
+            'location_suggestion_radius_km': radius,
+            'track_interval': track_interval,
+            'cashback_enabled': cashback_enabled,
+            'tile_url': '/api/v1/services/tiles/{z}/{x}/{y}.png',
+        }, status=status.HTTP_200_OK)
+
     # 1. Backend Autocomplete Location Search API Endpoint (India Only, Proximity Biased)
     @action(detail=False, methods=['get'], url_path='location/search', permission_classes=[AllowAny])
     def location_search(self, request):
         query = request.query_params.get('q', '').strip()
         if not query or len(query) < 1:
+            return Response([], status=status.HTTP_200_OK)
+
+        # Check geocoding_enabled setting from Admin Settings
+        geocoding_enabled = str(SystemSetting.get_setting('geocoding_enabled', 'true')).lower() == 'true'
+        if not geocoding_enabled:
             return Response([], status=status.HTTP_200_OK)
 
         user_lat = request.query_params.get('lat')
@@ -108,11 +161,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
                         except Exception:
                             pass
 
-                    # max_radius km restriction
-                    radius_str = os.getenv('LOCATION_SUGGESTION_RADIUS_KM', '50')
+                    # max_radius km restriction from Database SystemSetting
+                    radius_str = SystemSetting.get_setting('location_suggestion_radius_km') or SystemSetting.get_setting('LOCATION_SUGGESTION_RADIUS_KM') or os.getenv('LOCATION_SUGGESTION_RADIUS_KM', '50')
                     try:
                         max_radius = float(radius_str)
-                    except ValueError:
+                    except (ValueError, TypeError):
                         max_radius = 50.0
 
                     if user_lat and user_lon and dist_km > max_radius:
@@ -187,11 +240,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
                             except Exception:
                                 pass
 
-                        # max_radius km restriction
-                        radius_str = os.getenv('LOCATION_SUGGESTION_RADIUS_KM', '50')
+                        # max_radius km restriction from Database SystemSetting
+                        radius_str = SystemSetting.get_setting('location_suggestion_radius_km') or SystemSetting.get_setting('LOCATION_SUGGESTION_RADIUS_KM') or os.getenv('LOCATION_SUGGESTION_RADIUS_KM', '50')
                         try:
                             max_radius = float(radius_str)
-                        except ValueError:
+                        except (ValueError, TypeError):
                             max_radius = 50.0
 
                         if user_lat and user_lon and dist_km > max_radius:

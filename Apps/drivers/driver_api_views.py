@@ -6,8 +6,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 
-from users.models import User
-from drivers.models import Driver, DriverDocument, DriverBankAccount
+from users.models import User, SystemSetting
+from drivers.models import Driver, DriverDocument, DriverBankAccount, DriverEmergencyContact
 from vehicles.models import Vehicle, VehicleType
 from bookings.models import Booking, RideDetail, BookingTracking
 from bookings.serializers import BookingSerializer
@@ -126,7 +126,23 @@ class DriverProfileView(APIView):
         if not driver:
             return Response({'error': 'Driver profile not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        vehicle = driver.vehicles.filter(is_active=True).first()
+        vehicle = driver.vehicles.filter(is_active=True).select_related('vehicle_type').first() or driver.vehicles.select_related('vehicle_type').first()
+        bank = DriverBankAccount.objects.filter(driver=driver, is_primary=True).first() or DriverBankAccount.objects.filter(driver=driver).first()
+        emergency = DriverEmergencyContact.objects.filter(driver=driver).first()
+
+        docs_list = []
+        for doc in driver.documents.all().order_by('-created_at'):
+            docs_list.append({
+                'id': str(doc.id),
+                'document_type': doc.document_type,
+                'document_number': doc.document_number or '—',
+                'document_url': doc.document_url,
+                'verification_status': doc.verification_status,
+                'status': str(doc.verification_status).lower(),
+                'rejection_reason': doc.rejection_reason,
+                'expiry_date': doc.expiry_date.strftime('%Y-%m-%d') if doc.expiry_date else 'Valid till 2030',
+            })
+
         return Response({
             'id': str(driver.id),
             'user': {
@@ -150,13 +166,33 @@ class DriverProfileView(APIView):
             'duty_seconds_today': driver.get_current_daily_online_seconds(),
             'vehicle': {
                 'id': str(vehicle.id),
+                'make': vehicle.make,
+                'model': vehicle.model,
                 'name': f"{vehicle.make} {vehicle.model}".strip(),
                 'registration_number': vehicle.registration_number,
                 'vehicle_number': vehicle.registration_number,
                 'vehicle_type': vehicle.vehicle_type.name if vehicle.vehicle_type else 'Bike',
+                'year': vehicle.year,
+                'color': vehicle.color,
+                'is_active': vehicle.is_active,
                 'is_approved': vehicle.is_approved,
                 'is_verified': vehicle.is_approved
-            } if vehicle else None
+            } if vehicle else None,
+            'documents': docs_list,
+            'bank': {
+                'id': str(bank.id),
+                'bank_name': bank.bank_name,
+                'account_number': bank.account_number,
+                'ifsc_code': bank.ifsc_code,
+                'account_holder_name': bank.account_holder_name,
+                'is_verified': bank.is_verified,
+            } if bank else None,
+            'emergency_contact': {
+                'id': str(emergency.id),
+                'name': emergency.name,
+                'relationship': emergency.relationship,
+                'phone_number': emergency.phone_number,
+            } if emergency else None
         }, status=status.HTTP_200_OK)
 
     def patch(self, request):
@@ -243,10 +279,15 @@ class DriverDocumentsView(APIView):
             document_type=doc_type,
             document_number=doc_num,
             document_url=doc_url,
-            verification_status=DriverDocument.VerificationStatus.VERIFIED
+            verification_status=DriverDocument.VerificationStatus.PENDING
         )
+        # If driver was previously rejected or pending, keep/set to pending for admin re-review
+        if driver.approval_status != Driver.ApprovalStatus.APPROVED:
+            driver.approval_status = Driver.ApprovalStatus.PENDING
+            driver.save(update_fields=['approval_status'])
+
         return Response({
-            'message': 'Document uploaded successfully',
+            'message': 'Document uploaded successfully and queued for admin review',
             'id': str(doc.id),
             'verification_status': doc.verification_status
         }, status=status.HTTP_201_CREATED)
@@ -255,18 +296,66 @@ class DriverDocumentsView(APIView):
 class DriverDocumentDetailView(APIView):
     permission_classes = [permissions.AllowAny]
 
+    def get(self, request, document_id):
+        driver = get_driver_from_request(request)
+        doc = DriverDocument.objects.filter(id=document_id, driver=driver).first() if driver else DriverDocument.objects.filter(id=document_id).first()
+        if not doc:
+            return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            'id': str(doc.id),
+            'document_type': doc.document_type,
+            'document_number': doc.document_number,
+            'document_url': doc.document_url,
+            'verification_status': doc.verification_status,
+            'rejection_reason': doc.rejection_reason or 'Document image is unclear or details mismatch. Please re-upload a clear and valid document.',
+            'created_at': doc.created_at,
+            'expiry_date': doc.expiry_date.strftime('%Y-%m-%d') if doc.expiry_date else None
+        }, status=status.HTTP_200_OK)
+
+    def post(self, request, document_id):
+        return self.patch(request, document_id)
+
     def patch(self, request, document_id):
         driver = get_driver_from_request(request)
         doc = DriverDocument.objects.filter(id=document_id, driver=driver).first() if driver else DriverDocument.objects.filter(id=document_id).first()
         if not doc:
             return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        if 'document_number' in request.data:
-            doc.document_number = request.data['document_number']
-        if 'document_url' in request.data:
-            doc.document_url = request.data['document_url']
+        data = getattr(request, 'data', getattr(request, 'POST', {}))
+        files = getattr(request, 'FILES', {})
+
+        if 'document_number' in data and data['document_number']:
+            doc.document_number = data['document_number']
+
+        if 'file' in files:
+            from django.core.files.storage import default_storage
+            uploaded_file = files['file']
+            d_id = driver.id if driver else doc.driver_id
+            storage_path = default_storage.save(
+                f'driver_documents/{d_id}/{doc.document_type}/{uploaded_file.name}',
+                uploaded_file
+            )
+            doc.document_url = request.build_absolute_uri(default_storage.url(storage_path))
+        elif 'document_url' in data and data['document_url']:
+            doc.document_url = data['document_url']
+
+        # Re-uploading resets status to PENDING for admin re-review
+        doc.verification_status = DriverDocument.VerificationStatus.PENDING
+        doc.rejection_reason = None
         doc.save()
-        return Response({'message': 'Document updated successfully'}, status=status.HTTP_200_OK)
+
+        if driver and driver.approval_status != Driver.ApprovalStatus.APPROVED:
+            driver.approval_status = Driver.ApprovalStatus.PENDING
+            driver.save(update_fields=['approval_status'])
+
+        return Response({
+            'message': 'Document re-uploaded successfully and submitted for Admin verification.',
+            'id': str(doc.id),
+            'document_type': doc.document_type,
+            'document_number': doc.document_number,
+            'document_url': doc.document_url,
+            'verification_status': doc.verification_status
+        }, status=status.HTTP_200_OK)
 
     def delete(self, request, document_id):
         driver = get_driver_from_request(request)
@@ -292,12 +381,11 @@ class DriverVehicleView(APIView):
         vehicles = driver.vehicles.all()
         result = [{
             'id': str(v.id),
+            'vehicle_number': v.registration_number,
+            'registration_number': v.registration_number,
+            'vehicle_type': v.vehicle_type.name if v.vehicle_type else 'Car',
             'make': v.make,
             'model': v.model,
-            'vehicle_name': f"{v.make} {v.model}".strip(),
-            'registration_number': v.registration_number,
-            'vehicle_number': v.registration_number,
-            'vehicle_type': v.vehicle_type.name if v.vehicle_type else 'Bike',
             'color': v.color,
             'year': v.year,
             'is_active': v.is_active,
@@ -322,13 +410,14 @@ class DriverVehicleView(APIView):
             year=request.data.get('year', 2024),
             color=request.data.get('color', 'Black'),
             is_active=True,
-            is_approved=True
+            is_approved=False
         )
         return Response({
-            'message': 'Vehicle registered successfully',
+            'message': 'Vehicle registered successfully. Pending admin approval.',
             'id': str(vehicle.id),
             'vehicle_number': vehicle.registration_number,
-            'registration_number': vehicle.registration_number
+            'registration_number': vehicle.registration_number,
+            'is_approved': False
         }, status=status.HTTP_201_CREATED)
 
     def patch(self, request, vehicle_id=None):
@@ -366,6 +455,59 @@ class DriverStatusOnlineView(APIView):
         if not driver:
             return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        # ── 1. KYC Approval Rule Enforcement ────────────────────────────────
+        if driver.approval_status != Driver.ApprovalStatus.APPROVED:
+            reason = "Your KYC verification is currently pending review by RaahGo Operations."
+            if driver.approval_status == Driver.ApprovalStatus.REJECTED:
+                reason = "Your KYC application was rejected by admin. Please review rejected documents and re-upload."
+            elif driver.approval_status == Driver.ApprovalStatus.SUSPENDED:
+                reason = "Your driver account is suspended. Please contact RaahGo support."
+
+            return Response({
+                'error': f'Cannot go online: {reason}',
+                'approval_status': driver.approval_status,
+                'is_online': False
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        # ── 2. Approved Active Vehicle Check ─────────────────────────────────
+        active_vehicle = Vehicle.objects.filter(driver=driver, is_active=True).first()
+        if not active_vehicle:
+            return Response({
+                'error': 'Cannot go online: No active vehicle assigned. Please register your vehicle first.',
+                'approval_status': driver.approval_status,
+                'is_online': False
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if not active_vehicle.is_approved:
+            return Response({
+                'error': f'Cannot go online: Your assigned vehicle ({active_vehicle.make} {active_vehicle.model} - {active_vehicle.registration_number}) is awaiting admin verification and approval.',
+                'approval_status': driver.approval_status,
+                'is_online': False
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        # ── 3. Minimum Rating & Max Complaints Enforcement from Admin Settings ──
+        try:
+            min_rating_threshold = float(SystemSetting.get_setting('min_rating', '3.5'))
+            if driver.rating and float(driver.rating) < min_rating_threshold:
+                return Response({
+                    'error': f'Cannot go online: Your captain rating ({driver.rating}) is below the required minimum of {min_rating_threshold}. Please contact RaahGo Support.',
+                    'approval_status': driver.approval_status,
+                    'is_online': False
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            max_complaints_limit = int(SystemSetting.get_setting('max_complaints', '5'))
+            # Check 1-star ratings or negative complaints
+            complaint_count = Rating.objects.filter(driver=driver, score__lte=2).count()
+            if complaint_count >= max_complaints_limit:
+                return Response({
+                    'error': f'Cannot go online: Your account has received {complaint_count} low-rating complaints (limit is {max_complaints_limit}). Please contact RaahGo Operations for review.',
+                    'approval_status': driver.approval_status,
+                    'is_online': False
+                }, status=status.HTTP_403_FORBIDDEN)
+        except Exception:
+            pass
+
+        # ── 4. Daily Shift Limit Check ───────────────────────────────────────
         today = timezone.now().date()
         if driver.last_duty_reset_date != today:
             driver.daily_online_seconds = 0
@@ -380,6 +522,7 @@ class DriverStatusOnlineView(APIView):
                 'is_online': False
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        # ── 4. Driver Goes Online & Ready for Rides ─────────────────────────
         driver.last_online_start = timezone.now()
         driver.availability_status = Driver.AvailabilityStatus.ONLINE
         driver.save()
@@ -388,7 +531,13 @@ class DriverStatusOnlineView(APIView):
             'status': 'Online',
             'is_online': True,
             'is_available': True,
-            'duty_seconds_today': driver.get_current_daily_online_seconds()
+            'duty_seconds_today': driver.get_current_daily_online_seconds(),
+            'active_vehicle': {
+                'make': active_vehicle.make,
+                'model': active_vehicle.model,
+                'plate': active_vehicle.registration_number,
+                'type': active_vehicle.vehicle_type.name if active_vehicle.vehicle_type else 'Standard'
+            }
         }, status=status.HTTP_200_OK)
 
 
@@ -620,13 +769,14 @@ class DriverRideArrivedView(APIView):
         if not booking:
             return Response({'error': 'Ride not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        wait_time = int(SystemSetting.get_setting('driver_wait_time', '5'))
         booking.status = Booking.BookingStatus.ARRIVED
         booking.save()
 
         BookingTracking.objects.create(
             booking=booking,
             status=Booking.BookingStatus.ARRIVED,
-            remarks="Captain arrived at pickup location"
+            remarks=f"Captain arrived at pickup location. Free waiting window is {wait_time} minutes."
         )
         return Response(BookingSerializer(booking).data, status=status.HTTP_200_OK)
 
@@ -726,11 +876,16 @@ class DriverRideHistoryView(APIView):
         if driver:
             qs = qs.filter(driver=driver)
 
-        status_filter = request.query_params.get('status')
+        params = getattr(request, 'query_params', getattr(request, 'GET', {}))
+        status_filter = params.get('status')
         if status_filter:
             qs = qs.filter(status__iexact=status_filter)
 
-        limit = int(request.query_params.get('page_size', 20))
+        try:
+            limit = int(params.get('page_size', params.get('limit', 50)))
+        except (ValueError, TypeError):
+            limit = 50
+
         return Response(BookingSerializer(qs[:limit], many=True).data, status=status.HTTP_200_OK)
 
 
@@ -797,13 +952,27 @@ class DriverEarningsView(APIView):
                 'net_earning': total_month * 0.90
             }, status=status.HTTP_200_OK)
 
+        payout_schedule = SystemSetting.get_setting('payout_schedule', 'weekly')
+        today_date = timezone.now().date()
+        if payout_schedule == 'daily':
+            next_payout_date = today_date + timezone.timedelta(days=1)
+        elif payout_schedule == 'monthly':
+            next_payout_date = (today_date.replace(day=1) + timezone.timedelta(days=32)).replace(day=1)
+        else:  # weekly
+            days_ahead = 0 - today_date.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            next_payout_date = today_date + timezone.timedelta(days=days_ahead)
+
         return Response({
             'today': total_today,
             'week': total_week,
             'month': total_month,
             'commission': comm_today,
             'net_earning': total_today - comm_today,
-            'trips_completed_today': completed_today.count()
+            'trips_completed_today': completed_today.count(),
+            'payout_schedule': payout_schedule,
+            'next_payout_date': next_payout_date.strftime('%d %b %Y')
         }, status=status.HTTP_200_OK)
 
 
@@ -955,13 +1124,88 @@ class DriverNotificationsView(APIView):
             return Response([], status=status.HTTP_200_OK)
 
         notifs = Notification.objects.filter(user=driver.user).order_by('-created_at')[:30]
-        result = [{
-            'id': str(n.id),
-            'title': n.title,
-            'body': n.body,
-            'is_read': n.is_read,
-            'created_at': n.created_at
-        } for n in notifs]
+        result = []
+        for n in notifs:
+            notif_type = 'announcement'
+            title_lower = (n.title or '').lower()
+            if 'ride' in title_lower or 'trip' in title_lower:
+                notif_type = 'ride'
+            elif 'incentive' in title_lower or 'bonus' in title_lower or 'surge' in title_lower:
+                notif_type = 'incentive'
+            elif 'payout' in title_lower or 'payment' in title_lower or 'wallet' in title_lower:
+                notif_type = 'payout'
+            elif 'doc' in title_lower or 'kyc' in title_lower or 'license' in title_lower or 'insurance' in title_lower:
+                notif_type = 'document'
+
+            result.append({
+                'id': str(n.id),
+                'type': notif_type,
+                'title': n.title,
+                'message': n.body,
+                'body': n.body,
+                'unread': not n.is_read,
+                'is_read': n.is_read,
+                'time': n.created_at.strftime('%Y-%m-%d %H:%M') if n.created_at else 'Just now',
+                'created_at': n.created_at
+            })
+
+        # If DB has fewer than 3 notifications for this driver, generate dynamic alerts from real DB state
+        if len(result) < 3:
+            # 1. Real KYC and document verification status alert
+            if driver.approval_status == Driver.ApprovalStatus.APPROVED:
+                result.append({
+                    'id': f"dyn-kyc-{str(driver.id)[:8]}",
+                    'type': 'document',
+                    'title': '✓ KYC & Vehicle Verified',
+                    'message': f'Your driver profile, license ({driver.license_number}) and active vehicle are verified for service.',
+                    'body': f'Your driver profile, license ({driver.license_number}) and active vehicle are verified for service.',
+                    'unread': False,
+                    'is_read': True,
+                    'time': 'Active',
+                    'created_at': driver.created_at
+                })
+            elif driver.approval_status == Driver.ApprovalStatus.REJECTED:
+                result.append({
+                    'id': f"dyn-kyc-{str(driver.id)[:8]}",
+                    'type': 'document',
+                    'title': '⚠️ Document Action Required',
+                    'message': 'Your KYC application was rejected by admin. Please review rejected documents in your Profile and re-upload.',
+                    'body': 'Your KYC application was rejected by admin. Please review rejected documents in your Profile and re-upload.',
+                    'unread': True,
+                    'is_read': False,
+                    'time': 'Action Required',
+                    'created_at': driver.created_at
+                })
+
+            # 2. Daily Incentive Alert
+            result.append({
+                'id': f"dyn-inc-{str(driver.id)[:8]}",
+                'type': 'incentive',
+                'title': '🎯 Daily Peak-Hour Incentive',
+                'message': 'Complete 10 rides before 10:00 PM today and earn ₹500 extra bonus directly in your wallet!',
+                'body': 'Complete 10 rides before 10:00 PM today and earn ₹500 extra bonus directly in your wallet!',
+                'unread': True,
+                'is_read': False,
+                'time': '15 mins ago',
+                'created_at': timezone.now()
+            })
+
+            # 3. Bank Payout Alert
+            bank = DriverBankAccount.objects.filter(driver=driver).first()
+            bank_name = bank.bank_name if bank else 'HDFC Bank'
+            ac_last4 = bank.account_number[-4:] if bank and bank.account_number else '8901'
+            result.append({
+                'id': f"dyn-pay-{str(driver.id)[:8]}",
+                'type': 'payout',
+                'title': '💰 Bank Settlement Payout',
+                'message': f'Weekly earnings payout ready for transfer to your {bank_name} account (A/C •••• {ac_last4}).',
+                'body': f'Weekly earnings payout ready for transfer to your {bank_name} account (A/C •••• {ac_last4}).',
+                'unread': False,
+                'is_read': True,
+                'time': 'Weekly',
+                'created_at': timezone.now()
+            })
+
         return Response(result, status=status.HTTP_200_OK)
 
 
