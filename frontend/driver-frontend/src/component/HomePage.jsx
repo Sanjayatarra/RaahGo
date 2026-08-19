@@ -170,6 +170,48 @@ export default function HomePage({ user, onLogout }) {
     };
   }, [isOnline, captainLocation.lat, captainLocation.lng, activeAcceptedRide, isMuted, driverProfile?.id]);
 
+  // Live monitoring for Active Ride (detects if Customer cancels the ride in real-time)
+  useEffect(() => {
+    let pollActiveRideInterval = null;
+
+    if (activeAcceptedRide?.id) {
+      pollActiveRideInterval = setInterval(() => {
+        const checkUrl = `/api/v1/driver/rides/requests/${activeAcceptedRide.id}/`;
+        safeAuthFetch(checkUrl)
+          .then((res) => res.json())
+          .then((rideData) => {
+            if (rideData) {
+              const rideStatus = String(rideData.status || '').toUpperCase();
+              if (rideStatus === 'CANCELLED') {
+                // Silently stop all alerts and sounds immediately
+                stopIncomingRideRingtone();
+                setActiveAcceptedRide(null);
+                setEnteredPin(['', '', '', '']);
+                setActiveTab('home');
+                fetchBackendData();
+              } else if (rideStatus === 'COMPLETED' && String(activeAcceptedRide.status).toUpperCase() !== 'COMPLETED') {
+                stopIncomingRideRingtone();
+                setActiveAcceptedRide(null);
+                setEnteredPin(['', '', '', '']);
+                setActiveTab('home');
+                fetchBackendData();
+              } else if (rideData.status && rideData.status !== activeAcceptedRide.status) {
+                // Sync status changes (e.g. Arrived, In Trip)
+                setActiveAcceptedRide((prev) => (prev ? { ...prev, ...rideData } : rideData));
+              }
+            }
+          })
+          .catch((err) => {
+            console.log('Active ride status sync notice:', err);
+          });
+      }, 2500);
+    }
+
+    return () => {
+      if (pollActiveRideInterval) clearInterval(pollActiveRideInterval);
+    };
+  }, [activeAcceptedRide?.id, activeAcceptedRide?.status, activeAcceptedRide?.booking_number]);
+
   // 5-Minute Periodic Driver GPS Location Update Timer (/api/v1/driver/location/)
   useEffect(() => {
     let gpsInterval = null;
@@ -274,6 +316,50 @@ export default function HomePage({ user, onLogout }) {
         }
       } catch (err) {
         console.log('Start trip notice:', err);
+      }
+    }
+  };
+
+  // Arrived at Pickup API handler
+  const handleArrivedAtPickup = async () => {
+    if (activeAcceptedRide?.id) {
+      try {
+        const res = await fetchWithAuth(`/api/v1/driver/rides/${activeAcceptedRide.id}/arrived/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setActiveAcceptedRide(data);
+          showAlert('You have arrived at pickup. Customer has been notified. Please ask for 4-digit start PIN.', 'Arrived at Pickup', 'info');
+        } else {
+          setActiveAcceptedRide((prev) => ({ ...prev, status: 'ARRIVED' }));
+        }
+      } catch (err) {
+        console.log('Arrived at pickup notice:', err);
+        setActiveAcceptedRide((prev) => ({ ...prev, status: 'ARRIVED' }));
+      }
+    }
+  };
+
+  // Cancel Ride API handler
+  const handleCancelRide = async (reason) => {
+    stopIncomingRideRingtone();
+    if (activeAcceptedRide?.id) {
+      try {
+        await fetchWithAuth(`/api/v1/driver/rides/${activeAcceptedRide.id}/cancel/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: reason || 'Captain cancelled' })
+        });
+        setActiveAcceptedRide(null);
+        setEnteredPin(['', '', '', '']);
+        setActiveTab('home');
+        fetchBackendData();
+      } catch (err) {
+        console.log('Cancel ride notice:', err);
+        setActiveAcceptedRide(null);
+        setActiveTab('home');
       }
     }
   };
@@ -445,6 +531,42 @@ export default function HomePage({ user, onLogout }) {
         {/* ── 1. HOME TAB ── */}
         {activeTab === 'home' && (
           <div className="px-3 sm:px-4 py-4 space-y-4">
+            
+            {/* Active Ride Quick Navigation Banner (Clean & Colorful) */}
+            {activeAcceptedRide && (
+              <div
+                onClick={() => setActiveTab('rides')}
+                className="p-4 rounded-3xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white shadow-lg shadow-emerald-600/30 cursor-pointer hover:brightness-105 transition-all flex items-center justify-between gap-3 animate-in slide-in-from-top-2 border border-emerald-400"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-white text-emerald-700 flex items-center justify-center font-black shadow-md shrink-0">
+                    <Navigation className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-md bg-white/20 text-white text-[10px] font-black uppercase tracking-wider">
+                        Live Trip Active
+                      </span>
+                      <span className="text-xs text-emerald-100 font-mono font-bold">
+                        #{activeAcceptedRide.booking_number || activeAcceptedRide.id?.slice(0, 8).toUpperCase()}
+                      </span>
+                    </div>
+                    <p className="text-xs font-bold text-white mt-1 truncate max-w-[220px] sm:max-w-md">
+                      📍 {activeAcceptedRide.pickup_address || 'To Customer Pickup'}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="px-3.5 py-2 rounded-xl bg-[#FFC000] text-black font-extrabold text-xs shrink-0 flex items-center gap-1 shadow-md"
+                >
+                  <span>Open Trip</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Online Status & Toggle Card */}
             <div className={`p-4 sm:p-5 rounded-3xl border shadow-sm transition-all relative overflow-hidden ${
               isOnline
@@ -475,21 +597,28 @@ export default function HomePage({ user, onLogout }) {
                 </div>
               </div>
 
-              {/* Big Online / Offline Button */}
-              <div className="mt-4 pt-3 border-t border-gray-100">
-                <button
-                  type="button"
-                  onClick={handleToggleOnline}
-                  className={`w-full py-3.5 sm:py-4 rounded-2xl font-black text-sm sm:text-base tracking-wider uppercase transition-all shadow-md flex items-center justify-center gap-2.5 active:scale-[0.99] ${
-                    isOnline
-                      ? 'bg-black text-white hover:bg-gray-800 shadow-gray-400/30'
-                      : 'bg-[#34C759] text-white hover:bg-[#2EB84E] shadow-emerald-500/30'
-                  }`}
-                >
-                  <Power className="w-5 h-5" />
-                  <span>{isOnline ? 'GO OFFLINE' : 'GO ONLINE'}</span>
-                </button>
-              </div>
+              {/* Show GO ONLINE button only if currently offline */}
+              {!isOnline && (
+                <div className="mt-4 pt-3 border-t border-gray-100">
+                  {(!user?.is_verified && driverProfile?.approval_status !== 'Approved') && (
+                    <div className="mb-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="block font-bold">Account Verification Pending</strong>
+                        <span>Your account is not verified yet. Please complete your profile KYC documents to start earning.</span>
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleToggleOnline}
+                    className="w-full py-3.5 sm:py-4 rounded-2xl font-black text-sm sm:text-base tracking-wider uppercase transition-all shadow-md flex items-center justify-center gap-2.5 active:scale-[0.99] cursor-pointer bg-[#34C759] text-white hover:bg-[#2EB84E] shadow-emerald-500/30"
+                  >
+                    <Power className="w-5 h-5" />
+                    <span>GO ONLINE</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Quick Metrics Row */}
@@ -629,14 +758,17 @@ export default function HomePage({ user, onLogout }) {
           </div>
         )}
 
-        {/* ── 2. RIDES TAB ── */}
+        {/* ── 2. RIDES TAB (Active Live Trip & History) ── */}
         {activeTab === 'rides' && (
           <DriverRidesTab
             activeRide={activeAcceptedRide}
+            captainLocation={captainLocation}
             allRides={allRides}
             completedRides={completedBookings}
+            onArrivedAtPickup={handleArrivedAtPickup}
             onStartRideWithPin={handleVerifyPinAndStartTrip}
             onCompleteRide={handleCompleteTrip}
+            onCancelRide={handleCancelRide}
             enteredPin={enteredPin}
             setEnteredPin={setEnteredPin}
             pinError={pinError}
@@ -675,55 +807,135 @@ export default function HomePage({ user, onLogout }) {
       </main>
 
       {/* Floating Incoming Ride Overlay Modal (Over any screen when incoming ride arrives) */}
-      {liveBookings.length > 0 && !activeAcceptedRide && isOnline && (
-        <div className="fixed inset-x-3 bottom-20 sm:bottom-24 z-50 max-w-md mx-auto animate-in slide-in-from-bottom-5 duration-300">
-          <div className="bg-black text-white rounded-3xl p-5 shadow-2xl border border-amber-400/50 space-y-4 ring-4 ring-[#FFC000]/20">
-            <div className="flex items-center justify-between border-b border-gray-800 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#FFC000] animate-ping" />
-                <span className="text-xs font-black uppercase tracking-wider text-[#FFC000]">
-                  🔥 New Incoming Request
-                </span>
-              </div>
-              <span className="text-lg font-black text-white">
-                ₹{liveBookings[0].fare || liveBookings[0].total_fare || 180}
-              </span>
-            </div>
+      {liveBookings.length > 0 && !activeAcceptedRide && isOnline && (() => {
+        const req = liveBookings[0];
+        const pLat = parseFloat(req.pickup_latitude);
+        const pLng = parseFloat(req.pickup_longitude);
+        const dLat = parseFloat(req.dropoff_latitude);
+        const dLng = parseFloat(req.dropoff_longitude);
+        const cLat = captainLocation?.lat || 28.4415;
+        const cLng = captainLocation?.lng || 77.0395;
 
-            <div className="space-y-2 text-xs">
-              <div className="flex items-start gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 mt-1 shrink-0" />
-                <p className="text-gray-200 font-semibold truncate">
-                  {liveBookings[0].pickup_address || liveBookings[0].pickup || 'Near Sector 29 Market'}
-                </p>
-              </div>
-              <div className="flex items-start gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-red-400 mt-1 shrink-0" />
-                <p className="text-gray-200 font-semibold truncate">
-                  {liveBookings[0].dropoff_address || liveBookings[0].dropoff || 'Cyber City Building 10'}
-                </p>
-              </div>
-            </div>
+        // Haversine calculation
+        const calcDist = (lat1, lon1, lat2, lon2) => {
+          if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+          const R = 6371;
+          const dL = ((parseFloat(lat2) - parseFloat(lat1)) * Math.PI) / 180;
+          const dN = ((parseFloat(lon2) - parseFloat(lon1)) * Math.PI) / 180;
+          const a =
+            Math.sin(dL / 2) * Math.sin(dL / 2) +
+            Math.cos((parseFloat(lat1) * Math.PI) / 180) *
+              Math.cos((parseFloat(lat2) * Math.PI) / 180) *
+              Math.sin(dN / 2) *
+              Math.sin(dN / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          return Number((R * c).toFixed(1));
+        };
 
-            <div className="flex items-center gap-2.5 pt-1">
-              <button
-                type="button"
-                onClick={() => handleDeclineRide(liveBookings[0].id)}
-                className="flex-1 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold rounded-xl text-xs sm:text-sm transition-colors"
-              >
-                Decline
-              </button>
-              <button
-                type="button"
-                onClick={() => handleAcceptRide(liveBookings[0].id)}
-                className="flex-2 py-3.5 bg-[#FFC000] hover:bg-[#E5AC00] text-black font-black rounded-xl text-sm transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
-              >
-                <Check className="w-4 h-4" /> Accept Ride
-              </button>
+        // Distance from Captain location to Customer Pickup
+        const rawPickupDist = (pLat && pLng)
+          ? calcDist(cLat, cLng, pLat, pLng)
+          : (req.pickup_distance_km || (req.pickup_distance ? parseFloat(req.pickup_distance) : 0.8));
+        const pickupDistLabel = rawPickupDist < 0.3 ? 'Nearby (<300m)' : `${rawPickupDist} km away`;
+
+        // Distance from Captain location to Dropoff Destination
+        const rawDropDist = (dLat && dLng)
+          ? calcDist(cLat, cLng, dLat, dLng)
+          : (req.drop_distance_km || (req.drop_distance_from_captain ? parseFloat(req.drop_distance_from_captain) : ((rawPickupDist || 0.8) + 5.2)));
+        const dropDistLabel = `${rawDropDist} km drop`;
+
+        const bookingShortId = req.booking_number || (req.id ? String(req.id).slice(0, 8).toUpperCase() : 'RGS-RIDE');
+        const fareAmt = req.fare || req.total_fare || 180;
+        const vType = req.vehicle_type || req.vehicle_type_name || 'Standard Ride';
+
+        return (
+          <div className="fixed inset-x-3 bottom-20 sm:bottom-24 z-50 max-w-md mx-auto animate-in slide-in-from-bottom-5 duration-300">
+            <div className="bg-white rounded-3xl p-4 sm:p-5 shadow-2xl border-2 border-[#FFC000] space-y-3.5 ring-4 ring-[#FFC000]/25">
+              
+              {/* Header: Badge + Clean Fare */}
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-[#FFC000] text-black flex items-center justify-center font-black text-lg shadow-sm">
+                    🔥
+                  </div>
+                  <div>
+                    <span className="text-xs font-black uppercase tracking-wider text-amber-600 block leading-tight">
+                      New Ride Request
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <span className="text-2xl font-black text-emerald-700 block leading-none">
+                    ₹{fareAmt}
+                  </span>
+                  <span className="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mt-0.5 block">
+                    Cash / Online
+                  </span>
+                </div>
+              </div>
+
+              {/* Colorful Route Cards */}
+              <div className="space-y-2 text-xs">
+                {/* 1. Pickup Location + Distance from Captain */}
+                <div className="flex items-center justify-between gap-2.5 p-3 bg-emerald-50/90 rounded-2xl border border-emerald-200">
+                  <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                    <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 mt-0.5 shrink-0 ring-4 ring-emerald-200" />
+                    <div className="min-w-0">
+                      <span className="text-[10px] font-black uppercase text-emerald-800 tracking-wider block">
+                        Pickup Location
+                      </span>
+                      <p className="text-gray-900 font-bold truncate text-xs mt-0.5">
+                        {req.pickup_address || req.pickup || 'Customer Pickup Point'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="shrink-0 px-2.5 py-1 rounded-xl bg-emerald-600 text-white font-black text-[11px] shadow-xs whitespace-nowrap">
+                    {pickupDistLabel}
+                  </span>
+                </div>
+
+                {/* 2. Destination Dropoff + Distance from Captain */}
+                <div className="flex items-center justify-between gap-2.5 p-3 bg-rose-50/90 rounded-2xl border border-rose-200">
+                  <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                    <div className="w-3.5 h-3.5 rounded-full bg-rose-500 mt-0.5 shrink-0 ring-4 ring-rose-200" />
+                    <div className="min-w-0">
+                      <span className="text-[10px] font-black uppercase text-rose-800 tracking-wider block">
+                        Drop Destination
+                      </span>
+                      <p className="text-gray-900 font-bold truncate text-xs mt-0.5">
+                        {req.dropoff_address || req.dropoff || 'Customer Destination'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="shrink-0 px-2.5 py-1 rounded-xl bg-rose-600 text-white font-black text-[11px] shadow-xs whitespace-nowrap" title="Distance from your location to destination">
+                    {dropDistLabel}
+                  </span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleDeclineRide(req.id)}
+                  className="flex-1 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-extrabold rounded-2xl text-xs sm:text-sm transition-all border border-gray-200 cursor-pointer active:scale-98"
+                >
+                  Decline
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAcceptRide(req.id)}
+                  className="flex-2 py-3.5 bg-gradient-to-r from-[#FFC000] via-[#FFB800] to-[#FFAA00] hover:brightness-105 text-black font-black rounded-2xl text-sm sm:text-base transition-all shadow-lg shadow-[#FFC000]/40 active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Check className="w-5 h-5 stroke-[3]" />
+                  <span>Accept Ride</span>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 5-Tab Driver Bottom Navigation Bar */}
       <DriverBottomNav

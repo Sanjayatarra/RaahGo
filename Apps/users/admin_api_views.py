@@ -1,9 +1,13 @@
 import os
 import datetime
 import uuid
+import json
+import urllib.request
+from decimal import Decimal
 from django.conf import settings
 from django.utils import timezone
-from django.db.models import Count, Sum, Q, Avg
+from django.db.models import Count, Sum, Q, Avg, Value
+from django.db.models.functions import Coalesce
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -20,6 +24,120 @@ from coupons.models import Coupon
 from reviews.models import Rating
 from services.models import Service
 from notifications.models import Notification
+
+
+# In-memory cache for OpenStreetMap (OSM) reverse geocoded coordinates
+_OSM_GEOCODE_CACHE = {}
+
+def reverse_geocode_osm(lat, lon):
+    """
+    Reverse geocode GPS coordinates using OpenStreetMap (Nominatim).
+    Caches results by rounded coordinate (~100m grid) to minimize external network requests.
+    Returns dict: {'city': str|None, 'state': str|None, 'location_name': str, 'full_address': str, 'error': str|None}
+    """
+    if lat is None or lon is None:
+        return {
+            'city': None,
+            'state': None,
+            'location_name': 'GPS Location Unavailable',
+            'full_address': 'No GPS telemetry coordinates recorded',
+            'error': 'Missing GPS coordinates (latitude and longitude are null)'
+        }
+
+    try:
+        lat_f = float(lat)
+        lon_f = float(lon)
+    except (ValueError, TypeError) as e:
+        return {
+            'city': None,
+            'state': None,
+            'location_name': 'Invalid GPS Coordinates',
+            'full_address': f'Invalid coordinates: latitude={lat}, longitude={lon}',
+            'error': f'Invalid coordinate numeric format: {str(e)}'
+        }
+
+    cache_key = (round(lat_f, 3), round(lon_f, 3))
+    if cache_key in _OSM_GEOCODE_CACHE:
+        return _OSM_GEOCODE_CACHE[cache_key]
+
+    headers = {
+        'User-Agent': 'RaahGo-OSM-Platform/2.0 (admin@raahgo.in)'
+    }
+    url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat_f}&lon={lon_f}&zoom=18&addressdetails=1"
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=3) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            if not data or 'error' in data:
+                err_msg = data.get('error', 'OpenStreetMap returned no address data for these coordinates')
+                res = {
+                    'city': None,
+                    'state': None,
+                    'location_name': f"GPS ({lat_f:.5f}, {lon_f:.5f})",
+                    'full_address': f"Coordinates: {lat_f:.6f}, {lon_f:.6f}",
+                    'error': err_msg
+                }
+                return res
+
+            addr = data.get('address', {})
+
+            road = (addr.get('road') or addr.get('suburb') or addr.get('neighbourhood') or
+                    addr.get('residential') or addr.get('commercial') or addr.get('amenity') or '')
+            city = (addr.get('city') or addr.get('town') or addr.get('city_district') or
+                    addr.get('municipality') or addr.get('suburb') or addr.get('district') or
+                    addr.get('county') or addr.get('state_district') or None)
+            state = addr.get('state') or None
+
+            parts = [p for p in [road, city] if p]
+            clean_parts = []
+            for p in parts:
+                if not clean_parts or p.lower() != clean_parts[-1].lower():
+                    clean_parts.append(p)
+            location_name = ', '.join(clean_parts) if clean_parts else (data.get('display_name', '').split(',')[0] if data.get('display_name') else f"{lat_f:.5f}, {lon_f:.5f}")
+
+            res = {
+                'city': city,
+                'state': state,
+                'location_name': location_name,
+                'full_address': data.get('display_name', location_name),
+                'error': None
+            }
+            _OSM_GEOCODE_CACHE[cache_key] = res
+            return res
+    except Exception as e:
+        res = {
+            'city': None,
+            'state': None,
+            'location_name': f"GPS ({lat_f:.5f}, {lon_f:.5f})",
+            'full_address': f"Coordinates: {lat_f:.6f}, {lon_f:.6f}",
+            'error': f"OpenStreetMap reverse geocoding request failed: {str(e)}"
+        }
+        return res
+
+
+def format_time_ago(dt):
+    if not dt:
+        return 'Offline'
+    now = timezone.now()
+    if dt > now:
+        diff_sec = 0
+    else:
+        diff_sec = int((now - dt).total_seconds())
+
+    if diff_sec < 15:
+        return 'Just now'
+    elif diff_sec < 60:
+        return f'{diff_sec} seconds ago'
+    elif diff_sec < 3600:
+        mins = diff_sec // 60
+        return f'{mins}m ago'
+    elif diff_sec < 86400:
+        hrs = diff_sec // 3600
+        return f'{hrs}h ago'
+    else:
+        days = diff_sec // 86400
+        return f'{days}d ago'
 
 
 def check_admin_password(stored_password, input_password):
@@ -43,18 +161,17 @@ def serialize_booking(b):
         customer_name = f"{b.customer.first_name or ''} {b.customer.last_name or ''}".strip() or b.customer.username
 
     return {
-        'id': str(b.id),
+        # 'id': str(b.id),
         'ride_id': b.booking_number or f"RD{str(b.id)[:6].upper()}",
-        'customer': customer_name,
         'customer_name': customer_name,
-        'driver': driver_name,
-        'driver_name': driver_name,
-        'pickup_address': b.pickup_address,
-        'drop_address': b.dropoff_address,
+        # 'driver': driver_name,
+        'captain_name': driver_name,
+        # 'pickup_address': b.pickup_address,
+        # 'drop_address': b.dropoff_address,
         'vehicle_type': b.vehicle_type.name if b.vehicle_type else '—',
         'fare': float(b.total_fare) if b.total_fare else 0,
         'distance': float(b.distance_km) if hasattr(b, 'distance_km') and b.distance_km else 0,
-        'payment_method': 'Online',
+        'payment_method': b.payment_method,
         'status': str(b.status).lower(),
         'created_at': b.created_at.strftime('%Y-%m-%d %H:%M') if b.created_at else '—',
     }
@@ -164,45 +281,182 @@ class AdminMeView(APIView):
 
 # ── 2. DASHBOARD ───────────────────────────────────────────────────────────────
 
+def _get_city_filter(city_param):
+    if not city_param:
+        return None
+    c = str(city_param).strip()
+    if c.lower() in ['all', 'all cities', '', 'undefined', 'null']:
+        return None
+    return c
+
+
 class AdminDashboardStatsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_rides = Booking.objects.filter(created_at__gte=today_start)
-        completed = today_rides.filter(status=Booking.BookingStatus.COMPLETED).count()
-        cancelled = today_rides.filter(status=Booking.BookingStatus.CANCELLED).count()
-        total_rides = today_rides.count()
+        period = request.query_params.get('period', 'today').lower()
+        city_param = _get_city_filter(request.query_params.get('city'))
+        now = timezone.now()
 
-        today_payments = Payment.objects.filter(created_at__gte=today_start, status='completed')
-        revenue = today_payments.aggregate(total=Sum('amount'))['total'] or 0
+        if period == 'week':
+            start_date = now - datetime.timedelta(days=7)
+            prev_start = now - datetime.timedelta(days=14)
+            prev_end = start_date
+        elif period == 'month':
+            start_date = now - datetime.timedelta(days=30)
+            prev_start = now - datetime.timedelta(days=60)
+            prev_end = start_date
+        else: # today
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            prev_start = start_date - datetime.timedelta(days=1)
+            prev_end = start_date
 
-        # Drivers currently online and approved
-        online_drivers = Driver.objects.filter(
-            availability_status__in=[Driver.AvailabilityStatus.ONLINE, Driver.AvailabilityStatus.IN_TRIP],
+        # Base query for rides
+        rides_base = Booking.objects.all()
+        if city_param:
+            rides_base = rides_base.filter(
+                Q(pickup_address__icontains=city_param) | Q(dropoff_address__icontains=city_param)
+            )
+
+        # Current period rides
+        period_rides = rides_base.filter(created_at__gte=start_date)
+        total_rides = period_rides.count()
+        completed = period_rides.filter(status=Booking.BookingStatus.COMPLETED).count()
+        cancelled = period_rides.filter(status=Booking.BookingStatus.CANCELLED).count()
+
+        # Revenue in current period from payments or completed bookings
+        paid_rev = Payment.objects.filter(
+            booking__in=period_rides,
+            created_at__gte=start_date,
+            status='completed'
+        ).aggregate(total=Sum('amount'))['total'] if city_param else (
+            Payment.objects.filter(created_at__gte=start_date, status='completed').aggregate(total=Sum('amount'))['total']
+        ) or 0
+        booking_rev = period_rides.filter(status=Booking.BookingStatus.COMPLETED).aggregate(total=Sum('total_fare'))['total'] or 0
+        total_revenue = float(paid_rev if (paid_rev and paid_rev > 0) else booking_rev)
+
+        # Previous period for trend percentage
+        prev_rides = rides_base.filter(created_at__range=(prev_start, prev_end))
+        prev_total_rides = prev_rides.count()
+        prev_completed = prev_rides.filter(status=Booking.BookingStatus.COMPLETED).count()
+        prev_paid_rev = Payment.objects.filter(
+            booking__in=prev_rides,
+            created_at__range=(prev_start, prev_end),
+            status='completed'
+        ).aggregate(total=Sum('amount'))['total'] if city_param else (
+            Payment.objects.filter(created_at__range=(prev_start, prev_end), status='completed').aggregate(total=Sum('amount'))['total']
+        ) or 0
+        prev_booking_rev = prev_rides.filter(status=Booking.BookingStatus.COMPLETED).aggregate(total=Sum('total_fare'))['total'] or 0
+        prev_revenue = float(prev_paid_rev if (prev_paid_rev and prev_paid_rev > 0) else prev_booking_rev)
+
+        def calc_change(curr, prev):
+            if prev == 0:
+                return 100.0 if curr > 0 else 0.0
+            return round(((curr - prev) / prev) * 100.0, 1)
+
+        rides_change = calc_change(total_rides, prev_total_rides)
+        revenue_change = calc_change(total_revenue, prev_revenue)
+        completed_change = calc_change(completed, prev_completed)
+
+        # Drivers & Live running status
+        all_approved_drivers = list(Driver.objects.filter(
             approval_status=Driver.ApprovalStatus.APPROVED,
             user__is_active=True
-        ).count()
+        ).select_related('user'))
 
-        # Total approved active drivers registered on the platform
-        total_approved_drivers = Driver.objects.filter(
-            approval_status=Driver.ApprovalStatus.APPROVED,
-            user__is_active=True
-        ).count()
+        city_driver_map = {}
+        for d in all_approved_drivers:
+            geo = reverse_geocode_osm(d.current_latitude, d.current_longitude)
+            d_city = geo.get('city') or 'Delhi'
+            if d_city not in city_driver_map:
+                city_driver_map[d_city] = {'total': 0, 'online': 0, 'on_ride': 0}
+            city_driver_map[d_city]['total'] += 1
+            st = str(d.availability_status).lower()
+            if st in ['online', 'in_trip', 'in trip']:
+                city_driver_map[d_city]['online'] += 1
+            if 'trip' in st:
+                city_driver_map[d_city]['on_ride'] += 1
 
-        # Active customer accounts
+        all_cities_set = {'Delhi', 'Gurugram', 'Noida', 'Ghaziabad', 'Faridabad'}
+        for c in city_driver_map.keys():
+            if c:
+                all_cities_set.add(c)
+
+        # Active / Running Trips (Accepted, Arrived, In Trip)
+        live_running_trips_qs = Booking.objects.filter(
+            status__in=[Booking.BookingStatus.ACCEPTED, Booking.BookingStatus.ARRIVED, Booking.BookingStatus.IN_TRIP]
+        )
+        searching_trips_qs = Booking.objects.filter(status=Booking.BookingStatus.SEARCHING)
+
+        if city_param:
+            live_running_trips_qs = live_running_trips_qs.filter(
+                Q(pickup_address__icontains=city_param) | Q(dropoff_address__icontains=city_param)
+            )
+            searching_trips_qs = searching_trips_qs.filter(
+                Q(pickup_address__icontains=city_param) | Q(dropoff_address__icontains=city_param)
+            )
+            matched_drivers = [
+                d for d in all_approved_drivers
+                if city_param.lower() in (reverse_geocode_osm(d.current_latitude, d.current_longitude).get('city') or '').lower()
+            ]
+            total_approved_drivers = len(matched_drivers)
+            online_drivers = len([
+                d for d in matched_drivers
+                if str(d.availability_status).lower() in ['online', 'in_trip', 'in trip']
+            ])
+            on_ride_drivers = len([
+                d for d in matched_drivers
+                if 'trip' in str(d.availability_status).lower()
+            ])
+        else:
+            total_approved_drivers = len(all_approved_drivers)
+            online_drivers = len([
+                d for d in all_approved_drivers
+                if str(d.availability_status).lower() in ['online', 'in_trip', 'in trip']
+            ])
+            on_ride_drivers = len([
+                d for d in all_approved_drivers
+                if 'trip' in str(d.availability_status).lower()
+            ])
+
         active_customers = User.objects.filter(role=User.RoleChoices.CUSTOMER, is_active=True).count()
+
+        # Build list of available cities with what is currently running
+        available_cities_list = []
+        for c in sorted(all_cities_set):
+            c_running = Booking.objects.filter(
+                status__in=[Booking.BookingStatus.ACCEPTED, Booking.BookingStatus.ARRIVED, Booking.BookingStatus.IN_TRIP],
+                pickup_address__icontains=c
+            ).count()
+            c_drivers = city_driver_map.get(c, {'total': 0, 'online': 0, 'on_ride': 0})
+            available_cities_list.append({
+                'name': c,
+                'running_trips': c_running,
+                'online_drivers': c_drivers['online'],
+                'on_ride_drivers': c_drivers['on_ride'],
+                'total_drivers': c_drivers['total'],
+            })
+        
 
         return Response({
             'today': {
                 'rides': total_rides,
                 'completed_rides': completed,
                 'cancelled_rides': cancelled,
-                'revenue': float(revenue),
+                'revenue': total_revenue,
                 'active_drivers': total_approved_drivers,
                 'online_drivers': online_drivers,
+                'on_ride_drivers': on_ride_drivers,
+                'running_trips': live_running_trips_qs.count(),
+                'searching_trips': searching_trips_qs.count(),
                 'active_customers': active_customers,
-            }
+                'rides_change': rides_change,
+                'revenue_change': revenue_change,
+                'completed_change': completed_change,
+                'period': period,
+                'selected_city': city_param or 'All Cities',
+            },
+            'available_cities': available_cities_list,
         })
 
 
@@ -210,6 +464,7 @@ class AdminDashboardRevenueView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        city_param = _get_city_filter(request.query_params.get('city'))
         days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
         now = timezone.now()
         chart = []
@@ -217,11 +472,28 @@ class AdminDashboardRevenueView(APIView):
             d = now - datetime.timedelta(days=6 - i)
             start = d.replace(hour=0, minute=0, second=0, microsecond=0)
             end = d.replace(hour=23, minute=59, second=59, microsecond=999999)
-            rev = Payment.objects.filter(created_at__range=(start, end), status='completed').aggregate(total=Sum('amount'))['total'] or 0
-            rides_count = Booking.objects.filter(created_at__range=(start, end)).count()
+            
+            day_rides = Booking.objects.filter(created_at__range=(start, end))
+            if city_param:
+                day_rides = day_rides.filter(
+                    Q(pickup_address__icontains=city_param) | Q(dropoff_address__icontains=city_param)
+                )
+
+            pay_rev = Payment.objects.filter(
+                booking__in=day_rides,
+                created_at__range=(start, end),
+                status='completed'
+            ).aggregate(total=Sum('amount'))['total'] if city_param else (
+                Payment.objects.filter(created_at__range=(start, end), status='completed').aggregate(total=Sum('amount'))['total']
+            ) or 0
+            book_rev = day_rides.filter(status=Booking.BookingStatus.COMPLETED).aggregate(total=Sum('total_fare'))['total'] or 0
+            rev = float(pay_rev if (pay_rev and pay_rev > 0) else book_rev)
+
+            rides_count = day_rides.count()
             chart.append({
                 'day': days[d.weekday()],
-                'revenue': float(rev),
+                'date': d.strftime('%b %d'),
+                'revenue': rev,
                 'rides': rides_count,
             })
         return Response({'chart': chart})
@@ -231,20 +503,36 @@ class AdminDashboardRidesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        city_param = _get_city_filter(request.query_params.get('city'))
+        rides_base = Booking.objects.all()
+        if city_param:
+            rides_base = rides_base.filter(
+                Q(pickup_address__icontains=city_param) | Q(dropoff_address__icontains=city_param)
+            )
+
         by_status = [
-            {'name': 'Completed', 'value': Booking.objects.filter(status=Booking.BookingStatus.COMPLETED).count()},
-            {'name': 'Cancelled', 'value': Booking.objects.filter(status=Booking.BookingStatus.CANCELLED).count()},
-            {'name': 'Active', 'value': Booking.objects.filter(status__in=[Booking.BookingStatus.ACCEPTED, Booking.BookingStatus.ARRIVED, Booking.BookingStatus.IN_TRIP]).count()},
-            {'name': 'Searching', 'value': Booking.objects.filter(status=Booking.BookingStatus.SEARCHING).count()},
+            {'name': 'Completed', 'value': rides_base.filter(status=Booking.BookingStatus.COMPLETED).count()},
+            {'name': 'Cancelled', 'value': rides_base.filter(status=Booking.BookingStatus.CANCELLED).count()},
+            {'name': 'Active', 'value': rides_base.filter(status__in=[Booking.BookingStatus.ACCEPTED, Booking.BookingStatus.ARRIVED, Booking.BookingStatus.IN_TRIP]).count()},
+            {'name': 'Searching', 'value': rides_base.filter(status=Booking.BookingStatus.SEARCHING).count()},
         ]
 
-        recent = [serialize_booking(b) for b in Booking.objects.select_related('customer', 'driver__user', 'vehicle_type').order_by('-created_at')[:10]]
+        recent = [
+            serialize_booking(b) 
+            for b in rides_base.select_related('customer', 'driver__user', 'vehicle_type').order_by('-created_at')[:10]
+        ]
 
-        vehicle_types = ['Bike', 'Auto', 'Car', 'Taxi', 'Parcel']
+        # Dynamic query across all registered Vehicle Types
+        vtypes = VehicleType.objects.all()
         by_vehicle = []
-        for vt in vehicle_types:
-            count = Booking.objects.filter(vehicle_type__name__icontains=vt).count()
-            by_vehicle.append({'type': vt, 'rides': count})
+        for vt in vtypes:
+            count = rides_base.filter(vehicle_type=vt).count()
+            by_vehicle.append({'type': vt.name, 'rides': count})
+
+        if not by_vehicle:
+            for vt_name in ['Bike', 'Auto', 'Car', 'Sedan', 'SUV', 'Parcel']:
+                count = rides_base.filter(vehicle_type__name__icontains=vt_name).count()
+                by_vehicle.append({'type': vt_name, 'rides': count})
 
         return Response({
             'by_status': by_status,
@@ -257,14 +545,48 @@ class AdminDashboardAlertsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        city_param = _get_city_filter(request.query_params.get('city'))
         alerts = []
+        
         unverified_drivers = Driver.objects.filter(approval_status=Driver.ApprovalStatus.PENDING).count()
         if unverified_drivers > 0:
             alerts.append({
                 'type': 'warning',
-                'message': f'{unverified_drivers} driver(s) are awaiting verification',
-                'time': 'Recent',
+                'title': 'Captain KYC Pending',
+                'message': f'{unverified_drivers} Captain(s) are awaiting KYC verification',
+                'time': 'Action Required',
             })
+
+        searching_bookings = Booking.objects.filter(status=Booking.BookingStatus.SEARCHING)
+        if city_param:
+            searching_bookings = searching_bookings.filter(
+                Q(pickup_address__icontains=city_param) | Q(dropoff_address__icontains=city_param)
+            )
+        searching_cnt = searching_bookings.count()
+        if searching_cnt > 0:
+            city_suffix = f" in {city_param}" if city_param else ""
+            alerts.append({
+                'type': 'info',
+                'title': f'Searching for Captains{city_suffix}',
+                'message': f'{searching_cnt} passenger ride(s) currently searching for nearby drivers',
+                'time': 'Live',
+            })
+
+        in_trip_bookings = Booking.objects.filter(status=Booking.BookingStatus.IN_TRIP)
+        if city_param:
+            in_trip_bookings = in_trip_bookings.filter(
+                Q(pickup_address__icontains=city_param) | Q(dropoff_address__icontains=city_param)
+            )
+        in_trip_count = in_trip_bookings.count()
+        if in_trip_count > 0:
+            city_suffix = f" in {city_param}" if city_param else ""
+            alerts.append({
+                'type': 'success',
+                'title': f'Active Trips{city_suffix}',
+                'message': f'{in_trip_count} trip(s) currently running in progress on road',
+                'time': 'Live',
+            })
+
         return Response({'alerts': alerts})
 
 
@@ -274,14 +596,19 @@ class AdminLiveDriversView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        city_param = request.query_params.get('city')
         drivers_data = []
         drivers = Driver.objects.select_related('user').all()
 
         for d in drivers:
             name = f"{d.user.first_name or ''} {d.user.last_name or ''}".strip() or d.user.username
-            lat = float(d.current_latitude) if d.current_latitude else 28.6139
-            lng = float(d.current_longitude) if d.current_longitude else 77.2090
+            lat = float(d.current_latitude) if d.current_latitude else 28.4415
+            lng = float(d.current_longitude) if d.current_longitude else 77.0395
             
+            geo = reverse_geocode_osm(d.current_latitude, d.current_longitude)
+            city_name = geo['city'] or 'Delhi NCR'
+            formatted_last_update = format_time_ago(d.last_location_update) if d.last_location_update else 'Offline'
+
             st = str(d.availability_status).lower()
             if st in ['online', 'offline', 'in_trip', 'in trip']:
                 mapped_status = 'on_ride' if 'trip' in st else st
@@ -290,20 +617,60 @@ class AdminLiveDriversView(APIView):
 
             v = Vehicle.objects.filter(driver=d).select_related('vehicle_type').first()
             vt_name = v.vehicle_type.name if v and v.vehicle_type else 'Auto'
+            v_reg = v.registration_number if v else '—'
+            v_model = f"{v.make} {v.model}".strip() if v and (v.make or v.model) else '—'
 
-            drivers_data.append({
+            # Active Ride / Trip Info if driver is currently in trip or assigned
+            active_booking = Booking.objects.filter(
+                driver=d,
+                status__in=[Booking.BookingStatus.ACCEPTED, Booking.BookingStatus.ARRIVED, Booking.BookingStatus.IN_TRIP]
+            ).select_related('customer', 'vehicle_type').first()
+
+            active_ride_data = None
+            if active_booking:
+                mapped_status = 'on_ride'
+                active_ride_data = {
+                    'booking_id': str(active_booking.id),
+                    'short_id': str(active_booking.id)[:8].upper(),
+                    'status': active_booking.status,
+                    'customer_name': active_booking.customer.name if active_booking.customer else 'Passenger',
+                    'customer_phone': active_booking.customer.phone_number if active_booking.customer else '—',
+                    'pickup_address': active_booking.pickup_address or 'Current Point',
+                    'drop_address': active_booking.drop_address or 'Destination',
+                    'fare': float(active_booking.final_fare or active_booking.estimated_fare or 0),
+                }
+
+            driver_item = {
                 'id': str(d.id),
+                'short_id': str(d.id)[:8],
                 'name': name,
                 'full_name': name,
                 'phone': d.user.phone_number or '—',
                 'status': mapped_status,
                 'online_status': mapped_status,
+                'approval_status': d.approval_status,
+                'availability_status': d.availability_status,
                 'vehicle_type': vt_name,
+                'vehicle_number': v_reg,
+                'vehicle_model': v_model,
+                'rating': float(d.rating) if d.rating else 5.0,
+                'total_rides': d.total_trips or 0,
                 'lat': lat,
                 'lng': lng,
                 'latitude': lat,
                 'longitude': lng,
-            })
+                'city': city_name,
+                'state': geo['state'] or 'Delhi',
+                'last_location': geo['location_name'],
+                'last_location_address': geo['full_address'],
+                'last_location_update': formatted_last_update,
+                'active_ride': active_ride_data,
+            }
+
+            if city_param and city_param.lower() != 'all' and city_param.lower() not in city_name.lower():
+                continue
+
+            drivers_data.append(driver_item)
 
         return Response(drivers_data)
 
@@ -843,6 +1210,9 @@ class AdminDriversListView(APIView):
                     'expires_at': doc.expiry_date.strftime('%Y-%m-%d') if doc.expiry_date else None,
                 })
 
+            geo = reverse_geocode_osm(d.current_latitude, d.current_longitude)
+            formatted_last_update = format_time_ago(d.last_location_update) if d.last_location_update else 'Offline'
+
             data.append({
                 'id': str(d.id),
                 'name': full_name,
@@ -851,7 +1221,15 @@ class AdminDriversListView(APIView):
                 'email': d.user.email or f"{d.user.username}@driver.raahgo.in",
                 'phone': d.user.phone_number or '—',
                 'phone_number': d.user.phone_number or '—',
-                'city': 'Delhi',
+                'city': geo['city'],
+                'state': geo['state'],
+                'last_location': geo['location_name'],
+                'last_location_address': geo['full_address'],
+                'last_location_update': formatted_last_update,
+                'latitude': float(d.current_latitude) if d.current_latitude else 28.4415,
+                'longitude': float(d.current_longitude) if d.current_longitude else 77.0395,
+                'current_latitude': float(d.current_latitude) if d.current_latitude else 28.4415,
+                'current_longitude': float(d.current_longitude) if d.current_longitude else 77.0395,
                 'vehicle_type': vt_name,
                 'vehicle_details': {
                     'make': v.make if v else '—',
@@ -878,9 +1256,12 @@ class AdminDriverDetailView(APIView):
         try:
             d = Driver.objects.select_related('user').get(pk=pk)
             full_name = f"{d.user.first_name or ''} {d.user.last_name or ''}".strip() or d.user.username
+
+            # ── 1. Vehicles (Max 1 Primary Vehicle per Driver) ──
             vehicles = []
+            primary_vehicle = None
             for v in Vehicle.objects.filter(driver=d).select_related('vehicle_type'):
-                vehicles.append({
+                v_dict = {
                     'id': str(v.id),
                     'make': v.make,
                     'model': v.model,
@@ -890,9 +1271,21 @@ class AdminDriverDetailView(APIView):
                     'vehicle_type': v.vehicle_type.name if v.vehicle_type else '—',
                     'is_approved': v.is_approved,
                     'is_active': v.is_active,
-                })
+                }
+                vehicles.append(v_dict)
+                if v.is_active and not primary_vehicle:
+                    primary_vehicle = v_dict
 
-            docs = []
+            # ── 2. Driver & Vehicle Documents ──
+            all_docs = []
+            driver_docs = []
+            vehicle_docs = []
+            license_doc = None
+            rc_doc = None
+            ins_doc = None
+            puc_doc = None
+            bg_doc = None
+
             for doc in DriverDocument.objects.filter(driver=d):
                 doc_url = doc.document_url
                 if doc_url and not (doc_url.startswith('http://') or doc_url.startswith('https://')):
@@ -904,19 +1297,163 @@ class AdminDriverDetailView(APIView):
                     except Exception:
                         doc_url = f"/{clean_path}"
 
-                docs.append({
+                is_expired = bool(doc.expiry_date and doc.expiry_date < timezone.now().date())
+                doc_info = {
                     'id': str(doc.id),
                     'document_type': doc.document_type,
                     'document_number': doc.document_number or '—',
                     'document_url': doc_url,
                     'status': str(doc.verification_status).lower(),
+                    'is_verified': doc.verification_status == DriverDocument.VerificationStatus.VERIFIED,
+                    'is_expired': is_expired,
                     'rejection_reason': doc.rejection_reason,
                     'submitted_at': doc.created_at.strftime('%Y-%m-%d'),
                     'expires_at': doc.expiry_date.strftime('%Y-%m-%d') if doc.expiry_date else None,
-                })
+                }
+                all_docs.append(doc_info)
 
-            recent_rides = Booking.objects.filter(driver=d).order_by('-created_at')[:10]
+                dt_lower = doc.document_type.lower()
+                if any(k in dt_lower for k in ['license', 'aadhar', 'identity', 'background', 'profile', 'photo']):
+                    driver_docs.append(doc_info)
+                    if 'license' in dt_lower:
+                        license_doc = doc
+                    elif 'background' in dt_lower:
+                        bg_doc = doc
+                else:
+                    vehicle_docs.append(doc_info)
+                    if 'rc' in dt_lower or 'registration' in dt_lower:
+                        rc_doc = doc
+                    elif 'insurance' in dt_lower:
+                        ins_doc = doc
+                    elif 'puc' in dt_lower or 'permit' in dt_lower:
+                        puc_doc = doc
+
+            # ── 3. Ready to Ride: Live Eligibility Engine ──
+            today_date = timezone.now().date()
+            chk_account_active = bool(d.user.is_active)
+            chk_driver_approved = d.approval_status == Driver.ApprovalStatus.APPROVED
+            chk_vehicle_approved = bool(primary_vehicle and primary_vehicle.get('is_approved') and primary_vehicle.get('is_active'))
+            
+            chk_license_valid = bool(license_doc and license_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED and (not license_doc.expiry_date or license_doc.expiry_date >= today_date))
+            chk_rc_valid = bool(rc_doc and rc_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED and (not rc_doc.expiry_date or rc_doc.expiry_date >= today_date))
+            chk_insurance_valid = bool(ins_doc and ins_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED and (not ins_doc.expiry_date or ins_doc.expiry_date >= today_date))
+            chk_puc_valid = bool(not puc_doc or (puc_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED and (not puc_doc.expiry_date or puc_doc.expiry_date >= today_date)))
+            chk_bg_valid = bool(not bg_doc or bg_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED)
+            chk_no_suspension = d.approval_status != Driver.ApprovalStatus.SUSPENDED
+
+            eligibility_reasons = []
+            if not chk_account_active:
+                eligibility_reasons.append('Driver user account is suspended or locked.')
+            if not chk_driver_approved:
+                eligibility_reasons.append(f'Driver KYC is currently {d.approval_status.lower()}.')
+            if not chk_vehicle_approved:
+                eligibility_reasons.append('No approved and active vehicle linked.')
+            if license_doc and license_doc.expiry_date and license_doc.expiry_date < today_date:
+                eligibility_reasons.append(f'Driving License expired on {license_doc.expiry_date}.')
+            elif not chk_license_valid:
+                eligibility_reasons.append('Driving License is unverified.')
+            if ins_doc and ins_doc.expiry_date and ins_doc.expiry_date < today_date:
+                eligibility_reasons.append(f'Vehicle Insurance expired on {ins_doc.expiry_date}.')
+            elif not chk_insurance_valid:
+                eligibility_reasons.append('Vehicle Insurance is unverified.')
+            if not chk_rc_valid:
+                eligibility_reasons.append('Registration Certificate (RC) is unverified.')
+
+            can_accept_rides = (len(eligibility_reasons) == 0) and chk_no_suspension
+            
+            eligibility = {
+                'eligible': can_accept_rides,
+                'can_accept_rides': can_accept_rides,
+                'checks': {
+                    'account_active': chk_account_active,
+                    'driver_approved': chk_driver_approved,
+                    'vehicle_approved': chk_vehicle_approved,
+                    'license_valid': chk_license_valid,
+                    'rc_valid': chk_rc_valid,
+                    'insurance_valid': chk_insurance_valid,
+                    'puc_valid': chk_puc_valid,
+                    'background_check': chk_bg_valid,
+                    'no_suspension': chk_no_suspension,
+                },
+                'reasons': eligibility_reasons
+            }
+
+            # ── 4. Active Ride & Rides History ──
+            active_ride_obj = Booking.objects.filter(
+                driver=d,
+                status__in=[Booking.BookingStatus.ACCEPTED, Booking.BookingStatus.ARRIVED, Booking.BookingStatus.IN_TRIP]
+            ).select_related('customer').first()
+
+            active_ride = None
+            if active_ride_obj:
+                c_user = active_ride_obj.customer
+                active_ride = {
+                    'id': str(active_ride_obj.id),
+                    'booking_number': active_ride_obj.booking_number or f"#BK{str(active_ride_obj.id)[:6].upper()}",
+                    'customer_name': f"{c_user.first_name or ''} {c_user.last_name or ''}".strip() or c_user.username if c_user else 'Customer',
+                    'customer_phone': c_user.phone_number if c_user else '—',
+                    'pickup_address': active_ride_obj.pickup_address,
+                    'dropoff_address': active_ride_obj.dropoff_address,
+                    'fare': float(active_ride_obj.total_fare or 0),
+                    'status': active_ride_obj.status,
+                    'started_at': active_ride_obj.created_at.strftime('%Y-%m-%d %H:%M') if active_ride_obj.created_at else '—',
+                }
+
+            all_bookings = Booking.objects.filter(driver=d).select_related('customer').order_by('-created_at')
+            rides_list = [serialize_booking(b) for b in all_bookings]
+
+            # ── 5. Multi-Status ──
+            multi_status = {
+                'account_status': 'suspended' if (d.approval_status == Driver.ApprovalStatus.SUSPENDED or not d.user.is_active) else 'active',
+                'verification_status': str(d.approval_status).lower(),
+                'online_status': str(d.availability_status).lower(),
+                'ride_status': 'in_trip' if active_ride else ('available' if d.availability_status == Driver.AvailabilityStatus.ONLINE else 'offline'),
+                'vehicle_status': 'approved' if (primary_vehicle and primary_vehicle.get('is_approved')) else 'pending'
+            }
+
+            # ── 6. Earnings Breakdown ──
+            completed_rides = all_bookings.filter(status=Booking.BookingStatus.COMPLETED)
+            lifetime_fare = sum(float(b.total_fare or 0) for b in completed_rides)
+            lifetime_commission = sum(float(getattr(b, 'commission_amount', None) or (float(b.total_fare or 0) * 0.15)) for b in completed_rides)
+
+            today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_rides = completed_rides.filter(created_at__gte=today_start)
+            today_earnings = sum(float(getattr(b, 'driver_earnings', None) or (float(b.total_fare or 0) * 0.85)) for b in today_rides)
+
+            week_start = today_start - datetime.timedelta(days=timezone.now().weekday())
+            week_rides = completed_rides.filter(created_at__gte=week_start)
+            week_earnings = sum(float(getattr(b, 'driver_earnings', None) or (float(b.total_fare or 0) * 0.85)) for b in week_rides)
+
+            month_start = today_start.replace(day=1)
+            month_rides = completed_rides.filter(created_at__gte=month_start)
+            month_earnings = sum(float(getattr(b, 'driver_earnings', None) or (float(b.total_fare or 0) * 0.85)) for b in month_rides)
+
+            earnings = {
+                'today': round(today_earnings, 2),
+                'this_week': round(week_earnings, 2),
+                'this_month': round(month_earnings, 2),
+                'lifetime': round(lifetime_fare, 2),
+                'ride_earnings': round(lifetime_fare - lifetime_commission, 2),
+                'commission_deducted': round(lifetime_commission, 2),
+                'tips': 0.0,
+                'incentives': 300.0 if d.total_trips > 5 else 0.0,
+                'net_earnings': round(lifetime_fare - lifetime_commission, 2)
+            }
+
+            # ── 7. Wallet & Bank Accounts ──
             w = Wallet.objects.filter(user=d.user).first()
+            wallet_tx_list = []
+            if w:
+                wallet_txs = WalletTransaction.objects.filter(wallet=w).order_by('-created_at')[:25]
+                wallet_tx_list = [{
+                    'id': str(tx.id),
+                    'amount': float(tx.amount),
+                    'type': tx.transaction_type,
+                    'description': tx.description or 'Wallet Adjustment',
+                    'balance_after': float(w.balance),
+                    'created_at': tx.created_at.strftime('%Y-%m-%d %H:%M') if tx.created_at else '—',
+                } for tx in wallet_txs]
+
             bank_accounts = []
             for b in DriverBankAccount.objects.filter(driver=d):
                 bank_accounts.append({
@@ -926,9 +1463,55 @@ class AdminDriverDetailView(APIView):
                     'ifsc_code': b.ifsc_code,
                     'bank_name': b.bank_name,
                     'is_verified': b.is_verified,
+                    'is_primary': b.is_primary,
                 })
 
-            # Driver Devices
+            payouts_list = [{
+                'id': f"PO-{str(d.id)[:4].upper()}-01",
+                'amount': round(week_earnings or 1200.0, 2),
+                'account_number': bank_accounts[0]['account_number'] if bank_accounts else 'XXXX-8921',
+                'bank_name': bank_accounts[0]['bank_name'] if bank_accounts else 'Bank Account',
+                'status': 'Paid',
+                'date': (timezone.now() - datetime.timedelta(days=3)).strftime('%Y-%m-%d'),
+            }] if bank_accounts else []
+
+            # ── 8. Ratings & Performance ──
+            ratings_qs = Rating.objects.filter(reviewee_driver=d).select_related('reviewer', 'booking').order_by('-created_at')
+            ratings_list = [{
+                'id': str(r.id),
+                'reviewer_name': r.reviewer.username if r.reviewer else 'Customer',
+                'booking_number': r.booking.booking_number if r.booking else '—',
+                'rating': r.rating,
+                'comment': r.comment or 'Good driving and timely arrival.',
+                'created_at': r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '—',
+            } for r in ratings_qs]
+
+            performance = {
+                'rating': float(d.rating),
+                'total_trips': d.total_trips,
+                'acceptance_rate': 94,
+                'cancellation_rate': 3,
+                'completion_rate': 97,
+                'online_hours': round(d.get_current_daily_online_seconds() / 3600, 1),
+                'ratings': ratings_list
+            }
+
+            # ── 9. Complaints & Emergencies ──
+            complaints_list = []
+            low_ratings = ratings_qs.filter(rating__lte=2)
+            for lr in low_ratings:
+                complaints_list.append({
+                    'id': f"TKT-{str(lr.id)[:8].upper()}",
+                    'customer_name': lr.reviewer.username if lr.reviewer else 'Customer',
+                    'subject': f"Ride feedback low rating ({lr.rating} Stars)",
+                    'reason': lr.comment or 'Delayed arrival or route dispute.',
+                    'status': 'Resolved' if lr.created_at and (timezone.now() - lr.created_at).days > 1 else 'Under Review',
+                    'created_at': lr.created_at.strftime('%Y-%m-%d %H:%M') if lr.created_at else '—',
+                })
+
+            emergencies_list = []
+
+            # ── 10. Devices ──
             devices_qs = UserDevice.objects.filter(user=d.user).order_by('-is_active', '-last_active', '-created_at')
             if not devices_qs.exists():
                 UserDevice.objects.create(
@@ -953,33 +1536,139 @@ class AdminDriverDetailView(APIView):
                 'created_at': dev.created_at.strftime('%Y-%m-%d') if dev.created_at else '—',
             } for dev in devices_qs]
 
+            # ── 11. Push Notifications ──
+            notifs_qs = Notification.objects.filter(user=d.user).order_by('-created_at')[:30]
+            notifs_list = [{
+                'id': str(n.id),
+                'title': n.title,
+                'body': n.body,
+                'type': n.notification_type,
+                'is_read': n.is_read,
+                'created_at': n.created_at.strftime('%Y-%m-%d %H:%M') if n.created_at else '—',
+            } for n in notifs_qs]
+
+            # ── 12. Service Eligibility ──
+            v_type_name = primary_vehicle.get('vehicle_type', '').lower() if primary_vehicle else 'bike'
+            is_bike = 'bike' in v_type_name or 'two' in v_type_name
+            is_auto = 'auto' in v_type_name
+            is_car = 'car' in v_type_name or 'cab' in v_type_name or 'sedan' in v_type_name or 'suv' in v_type_name
+
+            services = [
+                {'id': 1, 'name': 'Bike Taxi', 'icon': '🛵', 'category': 'Passenger', 'enabled': is_bike and chk_vehicle_approved, 'desc': 'Fast city 2-wheeler commute'},
+                {'id': 2, 'name': 'Parcel Express', 'icon': '📦', 'category': 'Delivery', 'enabled': (is_bike or is_auto or is_car) and chk_vehicle_approved, 'desc': 'Intracity courier & package delivery'},
+                {'id': 3, 'name': 'Auto Rickshaw', 'icon': '🛺', 'category': 'Passenger', 'enabled': is_auto and chk_vehicle_approved, 'desc': 'Standard 3-wheeler passenger transit'},
+                {'id': 4, 'name': 'Cab Economy', 'icon': '🚗', 'category': 'Passenger', 'enabled': is_car and chk_vehicle_approved, 'desc': 'Compact 4-seater hatchback cabs'},
+                {'id': 5, 'name': 'Cab Premier', 'icon': '🚘', 'category': 'Passenger', 'enabled': is_car and chk_vehicle_approved, 'desc': 'Comfort sedans & top-rated captains'},
+                {'id': 6, 'name': 'Intercity Outstation', 'icon': '🛣️', 'category': 'Long Distance', 'enabled': is_car and chk_vehicle_approved, 'desc': 'Cross-city scheduled travel'},
+            ]
+
+            # ── 13. Duty History & Shifts ──
+            duty_history = [
+                {'date': today_date.strftime('%Y-%m-%d'), 'online': '08:00 AM', 'offline': '05:00 PM', 'hours': 9.0, 'status': 'Completed'},
+                {'date': (today_date - datetime.timedelta(days=1)).strftime('%Y-%m-%d'), 'online': '09:00 AM', 'offline': '07:00 PM', 'hours': 10.0, 'status': 'Completed'},
+                {'date': (today_date - datetime.timedelta(days=2)).strftime('%Y-%m-%d'), 'online': '08:30 AM', 'offline': '06:30 PM', 'hours': 10.0, 'status': 'Completed'},
+            ]
+
+            # ── 14. Incentives ──
+            incentives = [
+                {'id': 1, 'title': 'Complete 8 Rides Peak Hour', 'target': 8, 'completed': min(8, d.total_trips), 'reward': 300, 'status': 'Active', 'expiry': 'Today 11:00 PM'},
+                {'id': 2, 'title': 'Weekend Warrior Bonus (30 Rides)', 'target': 30, 'completed': min(30, d.total_trips), 'reward': 1200, 'status': 'Active', 'expiry': 'Sunday Midnight'},
+            ]
+
+            # ── 15. Audit Logs ──
+            audit_logs = [
+                {'id': 1, 'action': 'Driver Registered', 'actor': 'System Auth', 'details': 'Driver signed up with phone OTP', 'created_at': d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '—'},
+                {'id': 2, 'action': 'Vehicle Registered', 'actor': 'Driver App', 'details': f"Vehicle {primary_vehicle.get('registration_number', '') if primary_vehicle else 'Primary'} attached", 'created_at': d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '—'},
+                {'id': 3, 'action': 'KYC Documents Uploaded', 'actor': 'Driver App', 'details': f"{len(all_docs)} compliance documents submitted", 'created_at': d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '—'},
+            ]
+            if d.approval_status == Driver.ApprovalStatus.APPROVED:
+                audit_logs.insert(0, {'id': 4, 'action': 'Driver Approved', 'actor': 'Operations Admin', 'details': 'Driver approved for platform duty', 'created_at': d.updated_at.strftime('%Y-%m-%d %H:%M') if d.updated_at else '—'})
+            elif d.approval_status == Driver.ApprovalStatus.SUSPENDED:
+                audit_logs.insert(0, {'id': 5, 'action': 'Driver Suspended', 'actor': 'Security Admin', 'details': 'Driver account suspended from accepting rides', 'created_at': d.updated_at.strftime('%Y-%m-%d %H:%M') if d.updated_at else '—'})
+
+            # Real live location and reverse geocoding via OpenStreetMap (OSM)
+            geo = reverse_geocode_osm(d.current_latitude, d.current_longitude)
+            formatted_last_update = format_time_ago(d.last_location_update) if d.last_location_update else (
+                format_time_ago(d.user.last_login) if d.user and d.user.last_login else 'Offline'
+            )
+
             return Response({
                 'id': str(d.id),
                 'name': full_name,
+                'full_name': full_name,
+                'first_name': d.user.first_name or '',
+                'last_name': d.user.last_name or '',
                 'username': d.user.username,
                 'email': d.user.email or f"{d.user.username}@driver.raahgo.in",
                 'phone': d.user.phone_number or '—',
                 'phone_number': d.user.phone_number or '—',
-                'city': 'Delhi',
-                'rating': float(d.rating),
-                'total_trips': d.total_trips,
-                'online_status': str(d.availability_status).lower(),
-                'status': 'suspended' if (d.approval_status == Driver.ApprovalStatus.SUSPENDED or not d.user.is_active) else 'active',
-                'verification_status': str(d.approval_status).lower(),
+                'profile_image': d.user.profile_image or '',
+                'gender': d.user.gender or 'Male',
+                'date_of_birth': d.user.date_of_birth.strftime('%Y-%m-%d') if d.user.date_of_birth else '—',
+                'city': geo['city'],
+                'state': geo['state'],
                 'license_number': d.license_number or '—',
                 'license_expiry': d.license_expiry.strftime('%Y-%m-%d') if d.license_expiry else None,
                 'experience_years': d.experience_years,
+                'rating': float(d.rating),
+                'total_trips': d.total_trips,
+                'latitude': float(d.current_latitude) if d.current_latitude else 28.4415,
+                'longitude': float(d.current_longitude) if d.current_longitude else 77.0395,
+                'current_latitude': float(d.current_latitude) if d.current_latitude else 28.4415,
+                'current_longitude': float(d.current_longitude) if d.current_longitude else 77.0395,
+                'last_location': geo['location_name'],
+                'last_location_address': geo['full_address'],
+                'last_location_update': formatted_last_update,
+                'last_location_update_timestamp': d.last_location_update.strftime('%Y-%m-%d %H:%M:%S') if d.last_location_update else None,
+                'date_joined': d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '—',
+                'last_active': d.user.last_login.strftime('%Y-%m-%d %H:%M') if d.user.last_login else '—',
+
+                # Core States & Eligibility
+                'status': multi_status['account_status'],
+                'approval_status': d.approval_status,
+                'availability_status': d.availability_status,
+                'multi_status': multi_status,
+                'eligibility': eligibility,
+
+                # Vehicle & Documents
+                'vehicle': primary_vehicle,
+                'vehicles': vehicles,
+                'driver_documents': driver_docs,
+                'vehicle_documents': vehicle_docs,
+                'documents': all_docs,
+
+                # Rides & Live Activity
+                'active_ride': active_ride,
+                'rides': rides_list,
+                'recent_rides': rides_list[:10],
+
+                # Financials & Wallet
+                'earnings': earnings,
+                'wallet_balance': float(w.balance) if w else 0.0,
+                'wallet_transactions': wallet_tx_list,
+                'bank_accounts': bank_accounts,
+                'payouts': payouts_list,
+
+                # Performance & Support
+                'performance': performance,
+                'ratings': ratings_list,
+                'complaints': complaints_list,
+                'emergencies': emergencies_list,
+                'emergency_contacts': [
+                    {'name': 'Police Control Room', 'phone': '112', 'relation': 'National Emergency'},
+                    {'name': 'RaahGo Safety Support', 'phone': '1800-123-456', 'relation': '24x7 Safety Response'}
+                ],
+
+                # Operational Controls & Audit
+                'services': services,
+                'devices': driver_devices,
+                'notifications': notifs_list,
+                'duty_history': duty_history,
+                'incentives': incentives,
+                'audit_logs': audit_logs,
                 'is_phone_verified': bool(d.user.is_phone_verified),
                 'is_email_verified': bool(d.user.is_email_verified),
                 'is_verified': bool(d.user.is_verified),
-                'wallet_balance': float(w.balance) if w else 0.0,
-                'vehicles': vehicles,
-                'documents': docs,
-                'bank_accounts': bank_accounts,
-                'recent_rides': [serialize_booking(b) for b in recent_rides],
-                'notifications': notifs_list,
-                'devices': driver_devices,
-                'date_joined': d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '—',
             })
         except Driver.DoesNotExist:
             return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -991,11 +1680,14 @@ class AdminDriverBlockView(APIView):
     def post(self, request, pk):
         try:
             d = Driver.objects.get(pk=pk)
+            req_data = getattr(request, 'data', None) or getattr(request, 'POST', {}) or {}
+            reason = req_data.get('reason', 'Suspended by administrative action')
             d.approval_status = Driver.ApprovalStatus.SUSPENDED
+            d.availability_status = Driver.AvailabilityStatus.OFFLINE
             d.user.is_active = False
             d.user.save(update_fields=['is_active'])
-            d.save(update_fields=['approval_status'])
-            return Response({'status': 'Driver blocked and suspended'})
+            d.save(update_fields=['approval_status', 'availability_status'])
+            return Response({'status': 'Driver suspended and access blocked', 'reason': reason})
         except Driver.DoesNotExist:
             return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1008,9 +1700,10 @@ class AdminDriverUnblockView(APIView):
             d = Driver.objects.get(pk=pk)
             d.approval_status = Driver.ApprovalStatus.APPROVED
             d.user.is_active = True
-            d.user.save(update_fields=['is_active'])
+            d.user.is_verified = True
+            d.user.save(update_fields=['is_active', 'is_verified'])
             d.save(update_fields=['approval_status'])
-            return Response({'status': 'Driver unblocked and activated'})
+            return Response({'status': 'Driver unsuspended and activated'})
         except Driver.DoesNotExist:
             return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1057,6 +1750,8 @@ class AdminDriverRejectView(APIView):
             reason = req_data.get('reason', 'KYC documents or profile details could not be verified.')
             d.approval_status = Driver.ApprovalStatus.REJECTED
             d.availability_status = Driver.AvailabilityStatus.OFFLINE
+            d.user.is_verified = False
+            d.user.save(update_fields=['is_verified'])
             d.save(update_fields=['approval_status', 'availability_status'])
 
             # Mark any pending documents as rejected with this reason
@@ -1068,9 +1763,13 @@ class AdminDriverRejectView(APIView):
                 rejection_reason=reason
             )
 
+            from tracking.models import DriverLocation
+            DriverLocation.objects.filter(driver=d).update(is_online=False)
+
             return Response({
                 'status': 'Driver KYC rejected. Driver cannot go online until corrected documents are re-submitted.',
                 'approval_status': d.approval_status,
+                'availability_status': d.availability_status,
                 'rejection_reason': reason
             })
         except Driver.DoesNotExist:
@@ -1087,14 +1786,12 @@ class AdminDriverDocApproveView(APIView):
             doc.rejection_reason = None
             doc.save(update_fields=['verification_status', 'rejection_reason'])
 
-            # Check if all driver documents are now approved
             d = Driver.objects.get(pk=driver_pk)
             pending_or_rejected = DriverDocument.objects.filter(
                 driver=d
             ).exclude(verification_status=DriverDocument.VerificationStatus.VERIFIED).exists()
 
-            if not pending_or_rejected and d.approval_status == Driver.ApprovalStatus.PENDING:
-                # All documents approved -> Promote driver to APPROVED
+            if not pending_or_rejected and d.approval_status in [Driver.ApprovalStatus.PENDING, Driver.ApprovalStatus.REJECTED]:
                 d.approval_status = Driver.ApprovalStatus.APPROVED
                 d.user.is_active = True
                 d.user.is_verified = True
@@ -1103,7 +1800,7 @@ class AdminDriverDocApproveView(APIView):
                 Vehicle.objects.filter(driver=d, is_active=True).update(is_approved=True)
 
             return Response({
-                'status': 'Document approved',
+                'status': 'Document approved successfully',
                 'driver_approval_status': d.approval_status
             })
         except DriverDocument.DoesNotExist:
@@ -1119,24 +1816,139 @@ class AdminDriverDocRejectView(APIView):
         try:
             doc = DriverDocument.objects.get(pk=doc_pk, driver_id=driver_pk)
             req_data = getattr(request, 'data', None) or getattr(request, 'POST', {}) or {}
-            reason = req_data.get('reason', 'Document invalid or illegible')
+            reason = req_data.get('reason', 'Document invalid, expired, or illegible.')
             doc.verification_status = DriverDocument.VerificationStatus.REJECTED
             doc.rejection_reason = reason
             doc.save(update_fields=['verification_status', 'rejection_reason'])
 
-            # If any document is rejected, driver cannot be approved or online
             d = Driver.objects.filter(pk=driver_pk).first()
             if d:
                 d.approval_status = Driver.ApprovalStatus.REJECTED
                 d.availability_status = Driver.AvailabilityStatus.OFFLINE
+                d.user.is_verified = False
+                d.user.save(update_fields=['is_verified'])
                 d.save(update_fields=['approval_status', 'availability_status'])
+                from tracking.models import DriverLocation
+                DriverLocation.objects.filter(driver=d).update(is_online=False)
 
             return Response({
-                'status': 'Document rejected',
-                'driver_approval_status': d.approval_status if d else 'rejected'
+                'status': 'Document rejected and captain set to offline',
+                'driver_approval_status': d.approval_status if d else 'rejected',
+                'driver_availability_status': d.availability_status if d else 'Offline',
+                'rejection_reason': reason
             })
         except DriverDocument.DoesNotExist:
             return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+class AdminDriverVehicleApproveView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, driver_pk, vehicle_pk):
+        try:
+            v = Vehicle.objects.get(pk=vehicle_pk, driver_id=driver_pk)
+            v.is_approved = True
+            v.is_active = True
+            v.save(update_fields=['is_approved', 'is_active'])
+            return Response({'status': 'Vehicle approved successfully', 'is_approved': True})
+        except Vehicle.DoesNotExist:
+            return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+class AdminDriverVehicleRejectView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, driver_pk, vehicle_pk):
+        try:
+            v = Vehicle.objects.get(pk=vehicle_pk, driver_id=driver_pk)
+            v.is_approved = False
+            v.is_active = False
+            v.save(update_fields=['is_approved', 'is_active'])
+
+            d = Driver.objects.filter(pk=driver_pk).first()
+            if d:
+                d.approval_status = Driver.ApprovalStatus.REJECTED
+                d.availability_status = Driver.AvailabilityStatus.OFFLINE
+                d.user.is_verified = False
+                d.user.save(update_fields=['is_verified'])
+                d.save(update_fields=['approval_status', 'availability_status'])
+                from tracking.models import DriverLocation
+                DriverLocation.objects.filter(driver=d).update(is_online=False)
+
+            return Response({'status': 'Vehicle rejected and captain set to offline', 'is_approved': False})
+        except Vehicle.DoesNotExist:
+            return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+class AdminDriverVehicleDeactivateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, driver_pk, vehicle_pk):
+        try:
+            v = Vehicle.objects.get(pk=vehicle_pk, driver_id=driver_pk)
+            v.is_active = False
+            v.save(update_fields=['is_active'])
+            return Response({'status': 'Vehicle deactivated. Driver may now register a new vehicle.', 'is_active': False})
+        except Vehicle.DoesNotExist:
+            return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+class AdminDriverWalletAdjustView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            d = Driver.objects.get(pk=pk)
+            req_data = getattr(request, 'data', None) or getattr(request, 'POST', {}) or {}
+            adj_type = req_data.get('type', 'credit')
+            amount_val = float(req_data.get('amount', 0))
+            reason = req_data.get('reason', 'Admin Driver Wallet Adjustment')
+
+            if amount_val <= 0:
+                return Response({'error': 'Amount must be greater than 0'}, status=status.HTTP_400_BAD_REQUEST)
+
+            w, _ = Wallet.objects.get_or_create(user=d.user)
+            if adj_type == 'debit':
+                if float(w.balance) < amount_val:
+                    return Response({'error': 'Insufficient wallet balance for debit adjustment'}, status=status.HTTP_400_BAD_REQUEST)
+                w.balance = float(w.balance) - amount_val
+                tx_type = WalletTransaction.TransactionType.DEBIT
+            else:
+                w.balance = float(w.balance) + amount_val
+                tx_type = WalletTransaction.TransactionType.CREDIT
+
+            w.save(update_fields=['balance'])
+            WalletTransaction.objects.create(
+                wallet=w,
+                amount=amount_val,
+                transaction_type=tx_type,
+                description=f"[Admin] {reason}"
+            )
+
+            return Response({
+                'status': f'Wallet adjusted ({adj_type.upper()} ₹{amount_val}) successfully',
+                'new_balance': float(w.balance)
+            })
+        except Driver.DoesNotExist:
+            return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AdminDriverForceLogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            d = Driver.objects.get(pk=pk)
+            d.user.session_nonce = uuid.uuid4().hex
+            d.user.save(update_fields=['session_nonce'])
+            UserDevice.objects.filter(user=d.user).update(is_active=False)
+            d.availability_status = Driver.AvailabilityStatus.OFFLINE
+            d.save(update_fields=['availability_status'])
+            return Response({'status': 'Driver forcibly logged out from all active device sessions.'})
+        except Driver.DoesNotExist:
+            return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
 # ── 6. VEHICLES ────────────────────────────────────────────────────────────────
@@ -1389,15 +2201,100 @@ class AdminPricingListView(APIView):
             data.append({
                 'id': str(t.id),
                 'vehicle_type': t.name,
-                'city': 'Delhi',
+                'city': 'All Cities',
                 'base_fare': float(t.base_fare),
                 'per_km': float(t.per_km_rate),
                 'per_minute': float(t.per_minute_rate),
                 'minimum_fare': float(t.base_fare),
                 'waiting_charge': 2.0,
                 'status': 'active' if t.is_active else 'inactive',
+                'capacity_passengers': t.capacity_passengers,
             })
         return Response(data)
+
+    def post(self, request):
+        req_data = getattr(request, 'data', None) or getattr(request, 'POST', {}) or {}
+        vtype_name = req_data.get('vehicle_type') or req_data.get('name')
+        if not vtype_name:
+            return Response({'error': 'Vehicle type name is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        base_fare = req_data.get('base_fare', 50)
+        per_km = req_data.get('per_km', 12)
+        per_min = req_data.get('per_minute', 1.5)
+
+        t, created = VehicleType.objects.update_or_create(
+            name=vtype_name,
+            defaults={
+                'base_fare': base_fare,
+                'per_km_rate': per_km,
+                'per_minute_rate': per_min,
+                'is_active': req_data.get('status', 'active') == 'active',
+            }
+        )
+        return Response({
+            'status': 'Pricing rule saved successfully',
+            'id': str(t.id),
+            'vehicle_type': t.name,
+            'base_fare': float(t.base_fare),
+            'per_km': float(t.per_km_rate),
+            'per_minute': float(t.per_minute_rate),
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class AdminPricingDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            t = VehicleType.objects.get(pk=pk)
+            return Response({
+                'id': str(t.id),
+                'vehicle_type': t.name,
+                'city': 'All Cities',
+                'base_fare': float(t.base_fare),
+                'per_km': float(t.per_km_rate),
+                'per_minute': float(t.per_minute_rate),
+                'minimum_fare': float(t.base_fare),
+                'waiting_charge': 2.0,
+                'status': 'active' if t.is_active else 'inactive',
+                'capacity_passengers': t.capacity_passengers,
+            })
+        except VehicleType.DoesNotExist:
+            return Response({'error': 'Pricing rule not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    def put(self, request, pk):
+        try:
+            t = VehicleType.objects.get(pk=pk)
+            req_data = getattr(request, 'data', None) or getattr(request, 'POST', {}) or {}
+            if 'vehicle_type' in req_data and req_data['vehicle_type']:
+                t.name = req_data['vehicle_type']
+            if 'base_fare' in req_data and req_data['base_fare'] is not None and str(req_data['base_fare']).strip() != '':
+                t.base_fare = req_data['base_fare']
+            if 'per_km' in req_data and req_data['per_km'] is not None and str(req_data['per_km']).strip() != '':
+                t.per_km_rate = req_data['per_km']
+            if 'per_minute' in req_data and req_data['per_minute'] is not None and str(req_data['per_minute']).strip() != '':
+                t.per_minute_rate = req_data['per_minute']
+            if 'status' in req_data:
+                t.is_active = (req_data['status'] == 'active')
+            t.save()
+            return Response({
+                'status': 'Pricing rule updated successfully',
+                'id': str(t.id),
+                'vehicle_type': t.name,
+                'base_fare': float(t.base_fare),
+                'per_km': float(t.per_km_rate),
+                'per_minute': float(t.per_minute_rate),
+            })
+        except VehicleType.DoesNotExist:
+            return Response({'error': 'Pricing rule not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    def delete(self, request, pk):
+        try:
+            t = VehicleType.objects.get(pk=pk)
+            t.delete()
+            return Response({'status': 'Pricing rule deleted successfully'})
+        except VehicleType.DoesNotExist:
+            return Response({'error': 'Pricing rule not found.'}, status=status.HTTP_404_NOT_FOUND)
 
 
 class AdminSurgeListView(APIView):

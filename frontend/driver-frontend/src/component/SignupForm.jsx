@@ -124,13 +124,14 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
         return false;
       }
     } else {
-      if (!emailAddress.trim()) {
+      const cleanEmail = emailAddress.trim();
+      if (!cleanEmail) {
         setError('Please enter your Gmail / Email address');
         return false;
       }
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(emailAddress)) {
-        setError('Please enter a valid email address');
+      const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+      if (!emailRegex.test(cleanEmail)) {
+        setError("Please enter a valid email address (e.g. rahul@gmail.com). Missing '@' or domain.");
         return false;
       }
     }
@@ -178,9 +179,14 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
   const handleVerifyOtp = async (otpCode) => {
     setError('');
     const cleanTarget = authMethod === 'mobile' ? mobileNumber.replace(/\D/g, '') : emailAddress.trim();
+    const nameTrimmed = name.trim();
+    const parts = nameTrimmed.split(' ');
+    const firstName = parts[0] || '';
+    const lastName = parts.slice(1).join(' ') || '';
+
     const payload = authMethod === 'mobile'
-      ? { phone_number: cleanTarget, otp: otpCode, role: 'Driver' }
-      : { email: cleanTarget, otp: otpCode, role: 'Driver' };
+      ? { phone_number: cleanTarget, otp: otpCode, role: 'Driver', full_name: nameTrimmed, first_name: firstName, last_name: lastName }
+      : { email: cleanTarget, otp: otpCode, role: 'Driver', full_name: nameTrimmed, first_name: firstName, last_name: lastName };
 
     try {
       const response = await fetch('/api/v1/driver/auth/verify-otp/', {
@@ -206,7 +212,9 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
         if (onSuccess) {
           onSuccess({
             type: 'signup',
-            name,
+            name: nameTrimmed,
+            first_name: firstName,
+            last_name: lastName,
             identifier,
             authMethod,
             otp: otpCode,

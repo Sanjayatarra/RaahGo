@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MapPin, Navigation, Car, ShieldCheck, Clock, Search, ArrowRight, ArrowLeft, Star,
@@ -243,12 +243,12 @@ export default function HomePage({ user, onLogout }) {
     }
   }, [pickupCoords, sheetHeight]);
 
-  // Fetch history when tab is switched to activity
+  // Fetch history on mount and when tab is switched to activity
   useEffect(() => {
-    if (activeTab === 'activity' && user) {
+    if (user) {
       fetchRideHistory();
     }
-  }, [activeTab, user]);
+  }, [user, activeTab]);
 
   const fetchRideHistory = async () => {
     setIsLoadingHistory(true);
@@ -265,6 +265,61 @@ export default function HomePage({ user, onLogout }) {
       setIsLoadingHistory(false);
     }
   };
+
+  // Dynamic last 3 recent unique destination rides
+  const recentRides = useMemo(() => {
+    if (!rideHistory || rideHistory.length === 0) {
+      return [
+        {
+          id: 'mock-1',
+          title: 'Cyber City Building 10',
+          subtitle: 'DLF Phase 2, Gurugram',
+          fullAddress: 'Cyber City Building 10, DLF Phase 2, Gurugram, Haryana'
+        },
+        {
+          id: 'mock-2',
+          title: 'City Center Mall',
+          subtitle: 'MG Road, Sector 28',
+          fullAddress: 'City Center Mall, MG Road, Sector 28, Gurugram'
+        },
+        {
+          id: 'mock-3',
+          title: 'Huda City Metro Station',
+          subtitle: 'Sector 29, Gurugram',
+          fullAddress: 'Huda City Metro Station, Sector 29, Gurugram'
+        }
+      ];
+    }
+
+    const seen = new Set();
+    const list = [];
+    for (const r of rideHistory) {
+      const drop = r.dropoff_address || r.dropoff;
+      if (drop && !seen.has(drop.trim())) {
+        seen.add(drop.trim());
+        const parts = drop.split(',');
+        const title = parts[0]?.trim() || drop;
+        const subtitle = parts.slice(1, 3).join(',')?.trim() || parts.slice(1).join(',')?.trim() || 'Saved Destination';
+        list.push({
+          id: r.id,
+          title,
+          subtitle,
+          fullAddress: drop,
+          dropCoords: r.dropoff_latitude && r.dropoff_longitude ? {
+            lat: parseFloat(r.dropoff_latitude),
+            lng: parseFloat(r.dropoff_longitude)
+          } : null,
+          pickupAddress: r.pickup_address || r.pickup,
+          pickupCoords: r.pickup_latitude && r.pickup_longitude ? {
+            lat: parseFloat(r.pickup_latitude),
+            lng: parseFloat(r.pickup_longitude)
+          } : null
+        });
+        if (list.length >= 3) break;
+      }
+    }
+    return list;
+  }, [rideHistory]);
 
   const fetchSuggestions = async (query, type) => {
     if (!query || query.length < 3) {
@@ -443,27 +498,39 @@ export default function HomePage({ user, onLogout }) {
                   <span className="text-base sm:text-lg font-extrabold text-gray-900">Where do you want to go?</span>
                 </div>
 
-                {/* Recent Locations (Mock) */}
-                <div className="space-y-3 px-2">
-                  <div className="flex items-center gap-4 cursor-pointer hover:bg-emerald-50/40 p-2 rounded-2xl transition-colors" onClick={() => navigate('/book-ride', { state: { prefillDest: 'City Center Mall, MG Road, Sector 28' } })}>
-                    <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
-                      <Clock className="w-4 h-4 text-gray-500" />
+                {/* Recent Locations (Last 3 Recent Rides Max) */}
+                {recentRides.length > 0 && (
+                  <div className="space-y-1.5 px-1">
+                    <div className="flex items-center justify-between px-1 mb-0.5">
+                      <span className="text-[11px] font-black text-gray-400 uppercase tracking-wider">
+                        Recent Trips ({recentRides.length})
+                      </span>
                     </div>
-                    <div className="flex-1 min-w-0 border-b border-gray-100 pb-2">
-                      <p className="font-bold text-gray-900 text-sm">City Center Mall</p>
-                      <p className="text-xs text-gray-500 font-medium truncate">MG Road, Sector 28</p>
-                    </div>
+                    {recentRides.map((ride, idx) => (
+                      <div
+                        key={ride.id || idx}
+                        className="flex items-center gap-3.5 cursor-pointer hover:bg-emerald-50/60 p-2.5 rounded-2xl transition-all border border-transparent hover:border-emerald-200/60 active:scale-[0.99]"
+                        onClick={() => navigate('/book-ride', {
+                          state: {
+                            prefillDest: ride.fullAddress,
+                            prefillDrop: ride.fullAddress,
+                            dropCoords: ride.dropCoords,
+                            prefillPickup: ride.pickupAddress,
+                            pickupCoords: ride.pickupCoords
+                          }
+                        })}
+                      >
+                        <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center shrink-0 border border-gray-200/60 text-gray-600">
+                          <Clock className="w-4 h-4 text-emerald-600" />
+                        </div>
+                        <div className="flex-1 min-w-0 border-b border-gray-100/80 pb-1.5">
+                          <p className="font-bold text-gray-900 text-sm truncate">{ride.title}</p>
+                          <p className="text-xs text-gray-500 font-medium truncate mt-0.5">{ride.subtitle}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex items-center gap-4 cursor-pointer hover:bg-emerald-50/40 p-2 rounded-2xl transition-colors" onClick={() => navigate('/book-ride', { state: { prefillDest: 'Tech Park DLF, Cyber City, Phase 2' } })}>
-                    <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
-                      <Clock className="w-4 h-4 text-gray-500" />
-                    </div>
-                    <div className="flex-1 min-w-0 border-b border-gray-100 pb-2">
-                      <p className="font-bold text-gray-900 text-sm">Tech Park DLF</p>
-                      <p className="text-xs text-gray-500 font-medium truncate">Cyber City, Phase 2</p>
-                    </div>
-                  </div>
-                </div>
+                )}
 
                 {/* Services Section */}
                 <div className="pt-1">

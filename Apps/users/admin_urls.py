@@ -35,10 +35,15 @@ urlpatterns = [
     path('drivers/<uuid:pk>/unblock/', admin_api_views.AdminDriverUnblockView.as_view(), name='admin-driver-unblock'),
     path('drivers/<uuid:pk>/suspend/', admin_api_views.AdminDriverBlockView.as_view(), name='admin-driver-suspend'),
     path('drivers/<uuid:pk>/unsuspend/', admin_api_views.AdminDriverUnblockView.as_view(), name='admin-driver-unsuspend'),
+    path('drivers/<uuid:pk>/force-logout/', admin_api_views.AdminDriverForceLogoutView.as_view(), name='admin-driver-force-logout'),
+    path('drivers/<uuid:pk>/wallet/adjust/', admin_api_views.AdminDriverWalletAdjustView.as_view(), name='admin-driver-wallet-adjust'),
     path('drivers/<uuid:pk>/notifications/send/', admin_api_views.AdminDriverNotificationView.as_view(), name='admin-driver-notification-send'),
     path('drivers/<uuid:pk>/devices/<str:device_id>/logout/', admin_api_views.AdminDriverDeviceLogoutView.as_view(), name='admin-driver-device-logout'),
     path('drivers/<uuid:driver_pk>/documents/<uuid:doc_pk>/approve/', admin_api_views.AdminDriverDocApproveView.as_view(), name='admin-driver-doc-approve'),
     path('drivers/<uuid:driver_pk>/documents/<uuid:doc_pk>/reject/', admin_api_views.AdminDriverDocRejectView.as_view(), name='admin-driver-doc-reject'),
+    path('drivers/<uuid:driver_pk>/vehicles/<uuid:vehicle_pk>/approve/', admin_api_views.AdminDriverVehicleApproveView.as_view(), name='admin-driver-vehicle-approve'),
+    path('drivers/<uuid:driver_pk>/vehicles/<uuid:vehicle_pk>/reject/', admin_api_views.AdminDriverVehicleRejectView.as_view(), name='admin-driver-vehicle-reject'),
+    path('drivers/<uuid:driver_pk>/vehicles/<uuid:vehicle_pk>/deactivate/', admin_api_views.AdminDriverVehicleDeactivateView.as_view(), name='admin-driver-vehicle-deactivate'),
 
     # ── 6. Vehicles ───────────────────────────────────────────
     path('vehicles/', admin_api_views.AdminVehiclesListView.as_view(), name='admin-vehicles-list'),
@@ -53,6 +58,7 @@ urlpatterns = [
 
     # ── 8. Pricing & Surge ────────────────────────────────────
     path('pricing/', admin_api_views.AdminPricingListView.as_view(), name='admin-pricing-list'),
+    path('pricing/<uuid:pk>/', admin_api_views.AdminPricingDetailView.as_view(), name='admin-pricing-detail'),
     path('surge/', admin_api_views.AdminSurgeListView.as_view(), name='admin-surge-list'),
 
     # ── 9. Payments, Payouts, Earnings & Wallets ──────────────

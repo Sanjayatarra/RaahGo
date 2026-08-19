@@ -20,6 +20,10 @@ class Booking(models.Model):
         PAID = 'Paid', 'Paid'
         REFUNDED = 'Refunded', 'Refunded'
         FAILED = 'Failed', 'Failed'
+    class PaymentMethod(models.TextChoices):
+        COD = 'COD', 'Cash'
+        ONLINE = 'Online', 'Online Payment'
+        RAAHGO_WALLET = 'RaahGo Wallet', 'RaahGo Wallet'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     booking_number = models.CharField(max_length=30, unique=True)
@@ -62,6 +66,11 @@ class Booking(models.Model):
     tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
     total_fare = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_method = models.CharField(
+        max_length=20,
+        choices=PaymentMethod.choices,
+        default=PaymentMethod.COD
+    )
     payment_status = models.CharField(
         max_length=20,
         choices=PaymentStatus.choices,

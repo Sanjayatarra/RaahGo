@@ -49,6 +49,7 @@ export default function BookRidePage({ user, onLogout }) {
   const [destError, setDestError] = useState('');
   const [selectedRide, setSelectedRide] = useState(initialRide);
   const [showFares, setShowFares] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('COD'); // 'COD' | 'Online' | 'RaahGo Wallet'
   const [isBooking, setIsBooking] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [activeBookingData, setActiveBookingData] = useState(null);
@@ -481,6 +482,7 @@ export default function BookRidePage({ user, onLogout }) {
         pickupCoords,
         destCoords,
         calculatedRouteInfo,
+        paymentMethod,
         notes
       };
       localStorage.setItem('pending_booking', JSON.stringify(pendingBooking));
@@ -531,6 +533,7 @@ export default function BookRidePage({ user, onLogout }) {
       estimated_duration_mins: Math.round(calculatedRouteInfo?.durationMins || (distClean * 2)),
       base_fare: fareNum,
       total_fare: fareNum,
+      payment_method: paymentMethod,
       notes_for_driver: notes,
       status: 'Searching'
     };
@@ -847,7 +850,7 @@ export default function BookRidePage({ user, onLogout }) {
                     </div>
                   </div>
                   <div className="bg-emerald-500 text-white font-black text-xl px-4 py-1.5 rounded-xl tracking-widest shadow-sm font-mono">
-                    {activeBookingData.otp || activeBookingData.start_otp || '4821'}
+                    {activeBookingData.otp || activeBookingData.ride_pin }
                   </div>
                 </div>
 
@@ -1287,6 +1290,54 @@ export default function BookRidePage({ user, onLogout }) {
                           </div>
                         );
                       })}
+                    </div>
+
+                    {/* Payment Method Selection */}
+                    <div className="space-y-2 pt-2 border-t border-gray-100">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-black text-gray-800 uppercase tracking-wider block">
+                          Payment Method
+                        </label>
+                        <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                          {paymentMethod === 'COD' ? '💵 Cash' : paymentMethod === 'Online' ? '💳 Online / UPI' : '👛 RaahGo Wallet'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { id: 'COD', label: 'Cash', icon: '💵', desc: 'Pay captain direct' },
+                          { id: 'Online', label: 'Online / UPI', icon: '💳', desc: 'UPI / Cards / Net' },
+                          { id: 'RaahGo Wallet', label: 'Wallet', icon: '👛', desc: 'RaahGo Balance' },
+                        ].map((pm) => {
+                          const isSelected = paymentMethod === pm.id;
+                          return (
+                            <button
+                              key={pm.id}
+                              type="button"
+                              onClick={() => setPaymentMethod(pm.id)}
+                              className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                                isSelected
+                                  ? 'border-2 border-[#16A34A] bg-[#EEF8F2] shadow-xs'
+                                  : 'bg-white border-gray-200 hover:border-gray-300'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-lg">{pm.icon}</span>
+                                {isSelected && (
+                                  <span className="w-2 h-2 rounded-full bg-[#16A34A]" />
+                                )}
+                              </div>
+                              <div className="mt-1">
+                                <span className="font-extrabold text-xs text-gray-900 block leading-tight">
+                                  {pm.label}
+                                </span>
+                                <span className="text-[10px] text-gray-500 block leading-tight mt-0.5">
+                                  {pm.desc}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     <button

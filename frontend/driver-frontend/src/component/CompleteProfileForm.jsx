@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Phone, KeyRound, User, Car, Upload, CreditCard, ShieldCheck, CheckCircle2,
-  FileText, ArrowRight, ArrowLeft, Check, Sparkles, AlertCircle, Clock, Award, Power, RefreshCw
+  FileText, ArrowRight, ArrowLeft, Check, Sparkles, AlertCircle, Clock, Award, Power, RefreshCw, MapPin
 } from 'lucide-react';
 
 const formatPhone = (val) => {
@@ -28,18 +28,36 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
   // Backend API vehicle types
   const [backendVehicleTypes, setBackendVehicleTypes] = useState([]);
   const [completedSteps, setCompletedSteps] = useState(new Set());
+  const [isVerified, setIsVerified] = useState(() => {
+    return Boolean(initialData?.user?.is_verified || initialData?.is_verified || false);
+  });
+  const [approvalStatus, setApprovalStatus] = useState(() => {
+    return initialData?.driver?.approval_status || initialData?.approval_status || 'Pending';
+  });
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
 
   // Fetch initial profile & vehicle types from Django Backend API
   React.useEffect(() => {
     const fetchBackendProfile = async () => {
       try {
         const token = localStorage.getItem('driver_access_token');
-        const userPhone = initialData?.identifier && !initialData.identifier.includes('@') ? initialData.identifier.replace(/\D/g, '') : '';
-        const userEmail = initialData?.identifier && initialData.identifier.includes('@') ? initialData.identifier : '';
+        const savedUserStr = localStorage.getItem('raahgo_driver_user');
+        const savedUser = savedUserStr ? JSON.parse(savedUserStr) : null;
+
+        const rawPhone = initialData?.identifier && !initialData.identifier.includes('@')
+          ? initialData.identifier
+          : (savedUser?.identifier && !savedUser.identifier.includes('@') ? savedUser.identifier : (savedUser?.phone_number || savedUser?.user?.phone_number || phone || ''));
+        const userPhone = rawPhone.replace(/\D/g, '');
+
+        const userEmail = (initialData?.identifier && initialData.identifier.includes('@')
+          ? initialData.identifier
+          : (savedUser?.identifier?.includes('@') ? savedUser.identifier : (savedUser?.email || savedUser?.user?.email || email || ''))).trim();
 
         let queryUrl = '/api/v1/drivers/profile/';
-        if (userPhone) queryUrl += `?phone_number=${userPhone}`;
-        else if (userEmail) queryUrl += `?email=${userEmail}`;
+        const params = new URLSearchParams();
+        if (userPhone) params.append('phone_number', userPhone);
+        if (userEmail) params.append('email', userEmail);
+        if (params.toString()) queryUrl += `?${params.toString()}`;
 
         const res = await fetch(queryUrl, {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {}
@@ -49,6 +67,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
           const data = await res.json();
           const u = data.user;
           if (u) {
+            if (u.is_verified !== undefined) setIsVerified(Boolean(u.is_verified));
             if (u.first_name) setFirstName(u.first_name);
             if (u.last_name) setLastName(u.last_name);
             if (u.username) setUsername(u.username);
@@ -57,16 +76,28 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
             if (u.gender) setGender(u.gender);
             if (u.date_of_birth) setDob(u.date_of_birth);
           }
+          if (data.approval_status) {
+            setApprovalStatus(data.approval_status);
+            if (data.approval_status === 'Approved') setIsVerified(true);
+          }
           if (data.vehicle) {
-            setVehicleCategory(data.vehicle.category || '');
+            setVehicleCategory(data.vehicle.category || 'Sedan');
             setVehicleNumber(data.vehicle.number || '');
             setVehicleModel(data.vehicle.model || '');
+            if (data.vehicle.fuel_type) setFuelType(data.vehicle.fuel_type);
           }
           if (data.documents) {
             setDocuments((previous) => {
               const next = { ...previous };
               Object.entries(data.documents).forEach(([key, document]) => {
-                next[key] = { uploaded: true, name: document.name, url: document.url };
+                if (next[key]) {
+                  next[key] = {
+                    uploaded: true,
+                    name: document.name || key,
+                    url: document.url,
+                    status: document.status || 'Pending'
+                  };
+                }
               });
               return next;
             });
@@ -82,7 +113,21 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
             setEmergencyRelation(data.emergency_contact.relationship || '');
             setEmergencyPhone(formatPhone(data.emergency_contact.phone_number || ''));
           }
-          setCompletedSteps(new Set(data.completed_steps || []));
+          if (data.terms_accepted) {
+            setTermsAgreed({
+              partnerAgreement: true,
+              safetyPolicy: true,
+              zeroTolerance: true
+            });
+          }
+          if (data.completed_steps && data.completed_steps.length > 0) {
+            setCompletedSteps(new Set(data.completed_steps));
+            const maxStep = Math.max(...data.completed_steps);
+            const targetStep = Math.min(maxStep + 1, 11);
+            if (targetStep >= 3) {
+              setCurrentStep(targetStep);
+            }
+          }
         }
       } catch (err) {
         console.log('Backend profile fetch note:', err);
@@ -108,15 +153,70 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
     fetchVehicleTypes();
   }, []);
 
+  const checkVerificationStatus = async () => {
+    setIsCheckingStatus(true);
+    try {
+      const token = localStorage.getItem('driver_access_token');
+      const userPhone = phone.replace(/\D/g, '') || (initialData?.identifier && !initialData.identifier.includes('@') ? initialData.identifier.replace(/\D/g, '') : '');
+      const userEmail = email || (initialData?.identifier && initialData.identifier.includes('@') ? initialData.identifier : '');
+
+      let queryUrl = '/api/v1/drivers/profile/';
+      if (userPhone) queryUrl += `?phone_number=${userPhone}`;
+      else if (userEmail) queryUrl += `?email=${userEmail}`;
+
+      const res = await fetch(queryUrl, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user?.is_verified !== undefined) {
+          setIsVerified(Boolean(data.user.is_verified));
+        }
+        if (data.approval_status) {
+          setApprovalStatus(data.approval_status);
+          if (data.approval_status === 'Approved') setIsVerified(true);
+        }
+      }
+    } catch (err) {
+      console.log('Verification status check error:', err);
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
+  const isAccountApproved = isVerified || approvalStatus === 'Approved';
+
+  // Auto-poll approval status every 4 seconds when on Step 10 or Step 11
+  useEffect(() => {
+    if (currentStep === 10 || currentStep === 11) {
+      if (!isAccountApproved) {
+        checkVerificationStatus();
+        const timer = setInterval(() => {
+          checkVerificationStatus();
+        }, 4000);
+        return () => clearInterval(timer);
+      }
+    }
+  }, [currentStep, isAccountApproved]);
+
   const [formError, setFormError] = useState('');
   const [basicDetailErrors, setBasicDetailErrors] = useState({});
   const [emergencyErrors, setEmergencyErrors] = useState({});
 
   // Step 3: Basic Details
-  const [firstName, setFirstName] = useState(initialData?.name?.split(' ')[0] || '');
-  const [lastName, setLastName] = useState(initialData?.name?.split(' ').slice(1).join(' ') || '');
+  const [firstName, setFirstName] = useState(
+    initialData?.first_name || (initialData?.name ? initialData.name.trim().split(' ')[0] : '')
+  );
+  const [lastName, setLastName] = useState(
+    initialData?.last_name || (initialData?.name ? initialData.name.trim().split(' ').slice(1).join(' ') : '')
+  );
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState(initialData?.identifier && initialData.identifier.includes('@') ? initialData.identifier : '');
+  const [email, setEmail] = useState(
+    initialData?.identifier && initialData.identifier.includes('@')
+      ? initialData.identifier
+      : (initialData?.email || '')
+  );
   const [gender, setGender] = useState('Male');
   const [dob, setDob] = useState('');
 
@@ -152,10 +252,35 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
 
   // Step 9: Terms & Conditions
   const [termsAgreed, setTermsAgreed] = useState({
-    partnerAgreement: false,
-    safetyPolicy: false,
-    zeroTolerance: false
+    partnerAgreement: true,
+    safetyPolicy: true,
+    zeroTolerance: true
   });
+
+  // GPS Location State & Silent Coordinates Capture on Step 9 Next Button
+  const [gpsLocation, setGpsLocation] = useState(null);
+
+  const getGpsCoordinatesAsync = () => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve(null);
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          resolve({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+          });
+        },
+        (err) => {
+          console.log('GPS detection notice:', err.message);
+          resolve(null);
+        },
+        { enableHighAccuracy: true, timeout: 3500, maximumAge: 0 }
+      );
+    });
+  };
 
   const stepsList = [
     { id: 1, title: 'Mobile Number', icon: Phone },
@@ -308,31 +433,50 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
     }
   };
 
-  const saveStepToBackend = async (stepNum) => {
+  const [isSavingStep, setIsSavingStep] = useState(false);
+
+  const saveStepToBackend = async (stepNum, customCoords = null) => {
+    setIsSavingStep(true);
+    setFormError('');
     const cleanPhone = phone.replace(/\D/g, '');
-    const payload = {
+    let payload = {
       step: stepNum,
       phone_number: cleanPhone,
-      email,
-      first_name: firstName,
-      last_name: lastName,
-      username,
-      gender,
-      date_of_birth: dob,
-      selected_services: selectedServices,
-      vehicle_category: vehicleCategory,
-      vehicle_number: vehicleNumber,
-      vehicle_model: vehicleModel,
-      fuel_type: fuelType,
-      account_holder_name: accountHolder,
-      bank_name: bankName,
-      account_number: accountNumber,
-      ifsc_code: ifscCode,
-      upi_id: upiId,
-      emergency_name: emergencyName,
-      emergency_relation: emergencyRelation,
-      emergency_phone: emergencyPhone
     };
+    if (email) payload.email = email;
+
+    if (stepNum === 3) {
+      payload.first_name = firstName;
+      payload.last_name = lastName;
+      payload.username = username;
+      payload.gender = gender;
+      payload.date_of_birth = dob;
+      payload.email = email;
+    } else if (stepNum === 4) {
+      payload.selected_services = selectedServices;
+    } else if (stepNum === 5) {
+      payload.vehicle_category = vehicleCategory;
+      payload.vehicle_number = vehicleNumber;
+      payload.vehicle_model = vehicleModel;
+      payload.fuel_type = fuelType;
+    } else if (stepNum === 7) {
+      payload.account_holder_name = accountHolder;
+      payload.bank_name = bankName;
+      payload.account_number = accountNumber;
+      payload.ifsc_code = ifscCode;
+      payload.upi_id = upiId;
+    } else if (stepNum === 8) {
+      payload.emergency_name = emergencyName;
+      payload.emergency_relation = emergencyRelation;
+      payload.emergency_phone = emergencyPhone;
+    } else if (stepNum === 9) {
+      payload.terms_agreed = termsAgreed;
+      const coords = customCoords || gpsLocation;
+      if (coords?.latitude && coords?.longitude) {
+        payload.latitude = coords.latitude;
+        payload.longitude = coords.longitude;
+      }
+    }
 
     try {
       const isDocumentStep = stepNum === 6;
@@ -340,10 +484,9 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
       let headers;
       if (isDocumentStep) {
         body = new FormData();
-        Object.entries(payload).forEach(([key, value]) => {
-          if (Array.isArray(value)) body.append(key, JSON.stringify(value));
-          else if (value !== null && value !== undefined) body.append(key, value);
-        });
+        body.append('step', 6);
+        body.append('phone_number', cleanPhone);
+        if (email) body.append('email', email);
         Object.entries(documents).forEach(([key, document]) => {
           if (document.file) body.append(`document_${key}`, document.file);
         });
@@ -359,20 +502,23 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setFormError(data.error || 'Unable to save this step. Please try again.');
+        setFormError(data.error || 'Unable to save this step. Please check your inputs.');
         return false;
       }
-      console.log(`[Django Backend API Step ${stepNum} Saved]:`, data);
+      console.log(`[Django Backend API Step ${stepNum} Chunk Saved]:`, data);
       setCompletedSteps((previous) => new Set([...previous, stepNum]));
       return true;
     } catch (err) {
       setFormError('Unable to connect to the server. Please try again.');
       return false;
+    } finally {
+      setIsSavingStep(false);
     }
   };
 
   const handleNext = async () => {
     setFormError('');
+    if (isSavingStep) return;
 
     if (currentStep === 1) {
       const clean = phone.replace(/\D/g, '');
@@ -382,8 +528,10 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
       }
       const ok = await triggerSendOtp();
       if (ok) {
-        await saveStepToBackend(1);
-        setCurrentStep(2);
+        const saved = await saveStepToBackend(1);
+        if (saved) {
+          setCurrentStep(2);
+        }
       }
       return;
     }
@@ -396,8 +544,10 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
           return;
         }
       }
-      await saveStepToBackend(2);
-      setCurrentStep(3);
+      const saved = await saveStepToBackend(2);
+      if (saved) {
+        setCurrentStep(3);
+      }
       return;
     }
 
@@ -405,7 +555,15 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
       const errors = {};
       if (!firstName.trim()) errors.firstName = 'First name is required.';
       if (!lastName.trim()) errors.lastName = 'Last name is required.';
-      if (!email.trim()) errors.email = 'Email address is required.';
+      const cleanEmail = email.trim();
+      if (!cleanEmail) {
+        errors.email = 'Email address is required.';
+      } else {
+        const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+        if (!emailRegex.test(cleanEmail)) {
+          errors.email = "Please enter a valid email address (e.g. rahul@gmail.com). Missing '@' or domain.";
+        }
+      }
       if (!dob) errors.dob = 'Date of birth is required.';
       setBasicDetailErrors(errors);
       if (Object.keys(errors).length > 0) {
@@ -461,9 +619,22 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
       }
     }
 
-    // Save step data to Django Backend API on every step!
-    const saved = await saveStepToBackend(currentStep);
-    if (!saved) return;
+    // On Step 9, detect live GPS coordinates on Next Step click simultaneously
+    let detectedCoords = null;
+    if (currentStep === 9) {
+      setIsSavingStep(true);
+      detectedCoords = await getGpsCoordinatesAsync();
+      if (detectedCoords) {
+        setGpsLocation(detectedCoords);
+      }
+    }
+
+    // STRICT: Only advance if the backend API returns success (HTTP 200)
+    const saved = await saveStepToBackend(currentStep, detectedCoords);
+    if (!saved) {
+      // Backend returned error (e.g. duplicate vehicle, invalid email, etc.), STAY on current step!
+      return;
+    }
 
     if (currentStep < 12) {
       setCurrentStep((prev) => prev + 1);
@@ -480,26 +651,12 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
 
   const handleFinalGoOnline = async () => {
     setIsSavingDb(true);
+    const cleanPhone = phone.replace(/\D/g, '');
     const payload = {
-      phone_number: phone.replace(/\D/g, ''),
+      step: 12,
+      phone_number: cleanPhone,
       email,
-      first_name: firstName,
-      last_name: lastName,
-      username,
-      gender,
-      date_of_birth: dob,
-      vehicle_category: vehicleCategory,
-      vehicle_number: vehicleNumber,
-      vehicle_model: vehicleModel,
-      fuel_type: fuelType,
-      account_holder_name: accountHolder,
-      bank_name: bankName,
-      account_number: accountNumber,
-      ifsc_code: ifscCode,
-      upi_id: upiId,
-      emergency_name: emergencyName,
-      emergency_relation: emergencyRelation,
-      emergency_phone: emergencyPhone
+      is_online: true
     };
 
     try {
@@ -513,26 +670,36 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
         console.log('✅ Captain Data Saved to Django DB:', data);
         if (onComplete) {
           onComplete({
-            ...payload,
-            name: `${firstName} ${lastName}`,
+            name: `${firstName} ${lastName}`.trim() || 'Captain',
+            first_name: firstName,
+            last_name: lastName,
+            phone_number: cleanPhone,
+            email,
             profileCompleted: true,
-            user: data.user || payload
+            user: data.user || { first_name: firstName, last_name: lastName, is_verified: isVerified }
           });
         }
       } else {
         if (onComplete) {
           onComplete({
-            ...payload,
-            name: `${firstName} ${lastName}`,
+            name: `${firstName} ${lastName}`.trim() || 'Captain',
+            first_name: firstName,
+            last_name: lastName,
+            phone_number: cleanPhone,
+            email,
             profileCompleted: true
           });
         }
       }
     } catch (err) {
+      console.log('Final go online note:', err);
       if (onComplete) {
         onComplete({
-          ...payload,
-          name: `${firstName} ${lastName}`,
+          name: `${firstName} ${lastName}`.trim() || 'Captain',
+          first_name: firstName,
+          last_name: lastName,
+          phone_number: cleanPhone,
+          email,
           profileCompleted: true
         });
       }
@@ -647,14 +814,19 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                 <React.Fragment key={step.id}>
                   <div
                     onClick={() => {
-                      if (isCompleted && step.id >= 3) setCurrentStep(step.id);
+                      const maxCompleted = completedSteps.size > 0 ? Math.max(...completedSteps) : 3;
+                      if (step.id >= 3 && (isCompleted || completedSteps.has(step.id) || step.id <= maxCompleted + 1)) {
+                        setCurrentStep(step.id);
+                      }
                     }}
                     className={`flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200 ${
                       isCompleted
                         ? 'cursor-pointer hover:bg-[#2C2C2E] text-[#8E8E93]'
                         : isCurrent
-                        ? 'bg-[#FFC000] text-black font-extrabold shadow-md shadow-[#FFC000]/20'
-                        : 'text-[#636366] opacity-60'
+                        ? 'bg-[#FFC000] text-black font-extrabold shadow-md shadow-[#FFC000]/20 cursor-pointer'
+                        : step.id <= (completedSteps.size > 0 ? Math.max(...completedSteps) + 1 : 3)
+                        ? 'cursor-pointer hover:bg-[#2C2C2E] text-white'
+                        : 'text-[#636366] opacity-60 cursor-not-allowed'
                     }`}
                   >
                     <div
@@ -1202,44 +1374,85 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
               <div>
                 <h3 className="text-base sm:text-lg font-extrabold text-[#1C1C1E]">Admin Reviewing Your Profile</h3>
                 <p className="text-xs text-[#636366] max-w-sm mx-auto mt-1">
-                  RaahGo Operations team is verifying your uploaded Driving License and RC details. Expected response within 24 hours.
+                  RaahGo Operations team is verifying your uploaded Driving License, RC, Vehicle, and Bank details. Expected response within 24 hours.
                 </p>
               </div>
 
-              <div className="pt-2">
+              <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl max-w-sm mx-auto text-center space-y-3">
+                <div className="text-xs font-bold text-amber-800 flex items-center justify-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping inline-block"></span>
+                  <span>Status: Under Review (Pending Admin Response)</span>
+                </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    handleNext();
-                  }}
-                  className="px-4 sm:px-5 py-2.5 bg-[#34C759] text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer"
+                  onClick={checkVerificationStatus}
+                  disabled={isCheckingStatus}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white border border-amber-300 text-amber-900 text-xs font-bold hover:bg-amber-100 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
                 >
-                  ⚡ Simulate Instant Admin Approval
+                  <RefreshCw className={`w-3.5 h-3.5 ${isCheckingStatus ? 'animate-spin' : ''}`} />
+                  <span>{isCheckingStatus ? 'Checking Status...' : 'Check Approval Status'}</span>
                 </button>
               </div>
             </div>
           )}
 
-          {/* STEP 11: Approved */}
+          {/* STEP 11: Approved or Pending Verification */}
           {currentStep === 11 && (
             <div className="space-y-4 sm:space-y-5 text-center py-4 sm:py-6 animate-fade-in">
-              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#34C759]/20 text-[#34C759] flex items-center justify-center mx-auto border border-[#34C759]/40">
-                <Award className="w-7 h-7 sm:w-8 sm:h-8 text-[#34C759]" />
-              </div>
-              <div>
-                <span className="text-[11px] font-extrabold text-[#34C759] uppercase tracking-wider block mb-1">
-                  Verification Successful!
-                </span>
-                <h3 className="text-xl sm:text-2xl font-extrabold text-[#1C1C1E]">Congratulations, Captain {firstName}!</h3>
-                <p className="text-xs text-[#636366] max-w-sm mx-auto mt-1">
-                  Your profile and vehicle documents have been verified and approved by RaahGo Admin.
-                </p>
-              </div>
+              {isAccountApproved ? (
+                <>
+                  <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#34C759]/20 text-[#34C759] flex items-center justify-center mx-auto border border-[#34C759]/40">
+                    <Award className="w-7 h-7 sm:w-8 sm:h-8 text-[#34C759]" />
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-extrabold text-[#34C759] uppercase tracking-wider block mb-1">
+                      Verification Successful!
+                    </span>
+                    <h3 className="text-xl sm:text-2xl font-extrabold text-[#1C1C1E]">Congratulations, Captain {firstName || 'Partner'}!</h3>
+                    <p className="text-xs text-[#636366] max-w-sm mx-auto mt-1">
+                      Your profile and vehicle documents have been verified and approved by RaahGo Admin.
+                    </p>
+                  </div>
 
-              <div className="bg-[#FFF9E6] border border-[#FFC000] p-3.5 rounded-2xl max-w-xs mx-auto text-left">
-                <span className="text-[10px] uppercase font-extrabold text-[#8A6500] block">Captain ID</span>
-                <span className="text-sm sm:text-base font-black text-[#1C1C1E]">CPT-9042-DEL</span>
-              </div>
+                  <div className="bg-[#FFF9E6] border border-[#FFC000] p-3.5 rounded-2xl max-w-xs mx-auto text-left">
+                    <span className="text-[10px] uppercase font-extrabold text-[#8A6500] block">Captain ID</span>
+                    <span className="text-sm sm:text-base font-black text-[#1C1C1E]">
+                      CPT-{String(initialData?.user?.id || '9042').replace(/-/g, '').slice(0, 4).toUpperCase()}-DEL
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto border border-amber-300 animate-pulse">
+                    <Clock className="w-7 h-7 sm:w-8 sm:h-8 text-amber-600" />
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-extrabold text-amber-600 uppercase tracking-wider block mb-1">
+                      Verification in Progress
+                    </span>
+                    <h3 className="text-xl sm:text-2xl font-extrabold text-[#1C1C1E]">Please Wait For Admin Approval</h3>
+                    <p className="text-xs text-[#636366] max-w-sm mx-auto mt-1">
+                      Your profile documents are under review by RaahGo Admin. Please wait until your account is approved. You will be able to go online once approved.
+                    </p>
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl max-w-sm mx-auto text-center space-y-3">
+                    <div className="text-xs font-bold text-amber-800 flex items-center justify-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping inline-block"></span>
+                      <span>Status: Under Review (Pending Response)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={checkVerificationStatus}
+                      disabled={isCheckingStatus}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white border border-amber-300 text-amber-900 text-xs font-bold hover:bg-amber-100 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isCheckingStatus ? 'animate-spin' : ''}`} />
+                      <span>{isCheckingStatus ? 'Checking Status...' : 'Check Approval Status'}</span>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1294,10 +1507,32 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
             <button
               type="button"
               onClick={handleNext}
-              className="px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs bg-[#FFC000] hover:bg-[#e6ad00] text-black shadow-md shadow-[#FFC000]/20 flex items-center gap-1.5 sm:gap-2 cursor-pointer transition-transform active:scale-[0.99]"
+              disabled={isSavingStep || ((currentStep === 10 || currentStep === 11) && !isAccountApproved)}
+              className={`px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs flex items-center gap-1.5 sm:gap-2 transition-transform active:scale-[0.99] ${
+                isSavingStep || ((currentStep === 10 || currentStep === 11) && !isAccountApproved)
+                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed opacity-70'
+                  : 'bg-[#FFC000] hover:bg-[#e6ad00] text-black shadow-md shadow-[#FFC000]/20 cursor-pointer'
+              }`}
             >
-              <span>{currentStep === 11 ? 'Proceed to Go Online' : 'Next Step'}</span>
-              <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              {isSavingStep ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+                  <span>Saving Step...</span>
+                </>
+              ) : (
+                <>
+                  <span>
+                    {currentStep === 10 && !isAccountApproved
+                      ? 'Awaiting Admin Approval'
+                      : currentStep === 11
+                      ? isAccountApproved
+                        ? 'Proceed to Go Online'
+                        : 'Awaiting Admin Response'
+                      : 'Next Step'}
+                  </span>
+                  <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </>
+              )}
             </button>
           </div>
         )}

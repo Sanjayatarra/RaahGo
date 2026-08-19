@@ -2,12 +2,14 @@ import random
 import uuid
 from pathlib import Path
 from django.core.files.storage import default_storage
+from django.utils import timezone
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from users.models import User
 from users.serializers import UserSerializer
+from users.driver_auth_views import is_valid_email
 from .models import Driver, DriverDocument, DriverBankAccount, DriverEmergencyContact
 from .serializers import (
     DriverSerializer,
@@ -21,6 +23,7 @@ class DriverViewSet(viewsets.ModelViewSet):
     queryset = Driver.objects.all()
     serializer_class = DriverSerializer
     permission_classes = [permissions.AllowAny]
+    authentication_classes = []
 
     @action(detail=False, methods=['get'])
     def onboarding_profile(self, request):
@@ -30,14 +33,22 @@ class DriverViewSet(viewsets.ModelViewSet):
         user = users.filter(phone_number=phone_number).first() if phone_number else None
         if not user and email:
             user = users.filter(email__iexact=email).first()
-        if not user:
-            return Response({'error': 'Captain profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if not user and hasattr(request, 'user') and request.user and request.user.is_authenticated:
+            user = request.user
 
-        driver = Driver.objects.filter(user=user).first()
-        vehicle = driver.vehicles.select_related('vehicle_type').first() if driver else None
-        bank = driver.bank_accounts.filter(is_primary=True).first() if driver else None
-        emergency = driver.emergency_contacts.first() if driver else None
-        document_key_by_type = {
+        if not user:
+            # Fallback to the latest driver profile if querying locally
+            driver = Driver.objects.order_by('-updated_at').first()
+            if driver:
+                user = driver.user
+            else:
+                return Response({'error': 'Captain profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            driver = Driver.objects.filter(user=user).first()
+
+        vehicle = driver.vehicles.first() if driver else None
+
+        doc_type_mapping = {
             DriverDocument.DocumentType.LICENSE: 'license',
             DriverDocument.DocumentType.RC: 'rc',
             DriverDocument.DocumentType.INSURANCE: 'insurance',
@@ -45,34 +56,45 @@ class DriverViewSet(viewsets.ModelViewSet):
             DriverDocument.DocumentType.PERMIT: 'photo',
         }
         documents = {}
-        if driver:
-            for document in driver.documents.all():
-                key = document_key_by_type.get(document.document_type)
-                if key:
-                    documents[key] = {
-                        'name': Path(document.document_url).name,
-                        'url': document.document_url,
-                        'status': document.verification_status,
-                    }
+        for doc in (driver.documents.all() if driver else []):
+            key = doc_type_mapping.get(doc.document_type, doc.document_type.lower().replace(' ', '_'))
+            documents[key] = {
+                'id': str(doc.id),
+                'name': doc.document_type,
+                'url': doc.document_url,
+                'status': doc.verification_status,
+            }
 
-        completed_steps = []
-        if user.first_name and user.last_name and user.email and user.date_of_birth:
+        bank = DriverBankAccount.objects.filter(driver=driver).first() if driver else None
+        emergency = DriverEmergencyContact.objects.filter(driver=driver).first() if driver else None
+
+        completed_steps = [1, 2]
+        if user.first_name:
             completed_steps.append(3)
         if vehicle:
-            completed_steps.append(5)
-        if len(documents) == 5:
+            completed_steps.extend([4, 5])
+        if len(documents) >= 5 or ('license' in documents and 'rc' in documents):
             completed_steps.append(6)
-        if bank:
+        if bank and bank.account_number:
             completed_steps.append(7)
-        if emergency:
+        if emergency and emergency.phone_number:
             completed_steps.append(8)
+        if driver:
+            completed_steps.append(9)
+            completed_steps.append(10)
+        if driver and driver.approval_status == Driver.ApprovalStatus.APPROVED:
+            completed_steps.append(11)
 
         return Response({
             'user': UserSerializer(user).data,
+            'approval_status': driver.approval_status if driver else 'Pending',
+            'terms_accepted': driver.terms_accepted if driver else False,
+            'terms_accepted_at': driver.terms_accepted_at.strftime('%Y-%m-%d %H:%M:%S') if (driver and driver.terms_accepted_at) else None,
             'vehicle': {
-                'category': vehicle.vehicle_type.name,
-                'number': vehicle.registration_number,
-                'model': vehicle.model,
+                'category': vehicle.vehicle_type.name if vehicle and vehicle.vehicle_type else 'Sedan',
+                'number': vehicle.registration_number if vehicle else '',
+                'model': vehicle.model if vehicle else '',
+                'fuel_type': vehicle.color if vehicle else 'CNG + Petrol',
             } if vehicle else None,
             'documents': documents,
             'bank': DriverBankAccountSerializer(bank).data if bank else None,
@@ -82,44 +104,45 @@ class DriverViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def complete_captain_profile(self, request):
+        step_raw = request.data.get('step')
+        step = None
+        if step_raw is not None:
+            try:
+                step = int(step_raw)
+            except (ValueError, TypeError):
+                step = None
+
         phone_number = request.data.get('phone_number')
         email = request.data.get('email')
-        first_name = request.data.get('first_name', 'Captain')
-        last_name = request.data.get('last_name', '')
-        username = request.data.get('username')
-        gender = request.data.get('gender', 'Male')
-        date_of_birth = request.data.get('date_of_birth')
-
-        # Vehicle info
-        vehicle_number = request.data.get('vehicle_number')
-        vehicle_model = request.data.get('vehicle_model')
-        vehicle_category = request.data.get('vehicle_category')
-
-        # License info
-        license_number = request.data.get('license_number')
-
-        # Bank info
-        account_holder_name = request.data.get('account_holder_name', f"{first_name} {last_name}".strip())
-        account_number = request.data.get('account_number')
-        ifsc_code = request.data.get('ifsc_code')
-        bank_name = request.data.get('bank_name', 'HDFC Bank')
-
-        # Emergency Contact info
-        emergency_name = request.data.get('emergency_name')
-        emergency_relation = request.data.get('emergency_relation')
-        emergency_phone = request.data.get('emergency_phone')
-
         clean_phone = phone_number.replace(' ', '').replace('-', '') if phone_number else None
 
-        # 1. Get or create User safely
+        if email:
+            email = email.strip()
+            if not is_valid_email(email):
+                return Response(
+                    {'error': 'Please enter a valid email address format (e.g. name@gmail.com).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # 1. Resolve User and Driver
         user = None
         if clean_phone:
             user = User.objects.filter(phone_number=clean_phone, role=User.RoleChoices.DRIVER).first()
         if not user and email:
             user = User.objects.filter(email__iexact=email, role=User.RoleChoices.DRIVER).first()
+        if not user and hasattr(request, 'user') and request.user and request.user.is_authenticated:
+            user = request.user
 
         if not user:
-            base_uname = username or f"captain_{random.randint(1000, 9999)}"
+            first_name = request.data.get('first_name', '')
+            last_name = request.data.get('last_name', '')
+            full_name = request.data.get('full_name') or request.data.get('name')
+            if full_name and not (first_name or last_name):
+                parts = full_name.strip().split(' ', 1)
+                first_name = parts[0].strip()
+                last_name = parts[1].strip() if len(parts) > 1 else ''
+
+            base_uname = request.data.get('username') or f"captain_{random.randint(1000, 9999)}"
             final_uname = base_uname
             if User.objects.filter(username=final_uname, role=User.RoleChoices.DRIVER).exists():
                 final_uname = f"{base_uname}_{random.randint(100, 999)}"
@@ -129,147 +152,282 @@ class DriverViewSet(viewsets.ModelViewSet):
                 email=email if email and not User.objects.filter(email__iexact=email, role=User.RoleChoices.DRIVER).exists() else None,
                 phone_number=clean_phone if clean_phone and not User.objects.filter(phone_number=clean_phone, role=User.RoleChoices.DRIVER).exists() else None,
                 role=User.RoleChoices.DRIVER,
-                first_name=first_name,
-                last_name=last_name,
-                gender=gender,
-                date_of_birth=date_of_birth or None,
-                is_verified=True,
+                first_name=first_name or 'Captain',
+                last_name=last_name or '',
+                gender=request.data.get('gender', 'Male'),
+                date_of_birth=request.data.get('date_of_birth') or None,
+                is_verified=False,
                 is_phone_verified=True
             )
-        else:
-            user.role = User.RoleChoices.DRIVER
+
+        driver = Driver.objects.filter(user=user).first()
+        if not driver:
+            license_number = request.data.get('license_number') or f"DL-{random.randint(10000, 99999)}"
+            driver = Driver.objects.create(
+                user=user,
+                license_number=license_number,
+                approval_status=Driver.ApprovalStatus.PENDING,
+                availability_status=Driver.AvailabilityStatus.OFFLINE
+            )
+
+        # 2. Process Specific Step Chunk
+        # --- Step 3: Basic Details Chunk ---
+        if step == 3 or (step is None and (request.data.get('first_name') or request.data.get('full_name') or request.data.get('date_of_birth'))):
+            first_name = request.data.get('first_name')
+            last_name = request.data.get('last_name')
+            full_name = request.data.get('full_name') or request.data.get('name')
+            if full_name and not (first_name or last_name):
+                parts = full_name.strip().split(' ', 1)
+                first_name = parts[0].strip()
+                last_name = parts[1].strip() if len(parts) > 1 else ''
+
             if first_name: user.first_name = first_name
             if last_name: user.last_name = last_name
-            if gender: user.gender = gender
-            if date_of_birth: user.date_of_birth = date_of_birth
-            
-            # Safe username update (ignore if taken by another user)
+            if request.data.get('gender'): user.gender = request.data.get('gender')
+            if request.data.get('date_of_birth'): user.date_of_birth = request.data.get('date_of_birth')
+
+            username = request.data.get('username')
             if username and username != user.username:
                 if not User.objects.filter(username=username, role=User.RoleChoices.DRIVER).exclude(id=user.id).exists():
                     user.username = username
-            
-            # Safe email update (ignore if taken by another user)
+
             if email and email != user.email:
                 if not User.objects.filter(email__iexact=email, role=User.RoleChoices.DRIVER).exclude(id=user.id).exists():
                     user.email = email
 
-            user.is_verified = True
-            user.is_phone_verified = True
             user.save()
 
-        # 2. Get or create Driver record safely
-        driver = Driver.objects.filter(user=user).first()
-        if not driver:
-            final_lic = license_number or f"PENDING-{uuid.uuid4()}"
-            if license_number and Driver.objects.filter(license_number=final_lic).exists():
-                final_lic = f"DL-{random.randint(10000, 99999)}"
+        # --- Step 4: Service Selection Chunk ---
+        if step == 4:
+            # Service selection chunk acknowledged
+            pass
 
-            driver = Driver.objects.create(
-                user=user,
-                license_number=final_lic,
-                approval_status=Driver.ApprovalStatus.PENDING,
-                availability_status=Driver.AvailabilityStatus.OFFLINE
-            )
-        else:
-            if license_number:
-                driver.license_number = license_number
-            driver.save()
+        # --- Step 5: Vehicle Details Chunk ---
+        if step == 5 or (step is None and request.data.get('vehicle_number')):
+            vehicle_number = (request.data.get('vehicle_number') or '').strip().upper().replace(' ', '')
+            vehicle_category = request.data.get('vehicle_category')
+            vehicle_model = request.data.get('vehicle_model')
+            fuel_type = request.data.get('fuel_type') or ''
 
-        # Store actual multipart files and persist their storage URLs.
-        document_types = {
-            'document_license': DriverDocument.DocumentType.LICENSE,
-            'document_rc': DriverDocument.DocumentType.RC,
-            'document_insurance': DriverDocument.DocumentType.INSURANCE,
-            'document_aadhaar': DriverDocument.DocumentType.BACKGROUND_CHECK,
-            'document_photo': DriverDocument.DocumentType.PERMIT,
-        }
-        for field_name, document_type in document_types.items():
-            uploaded_file = request.FILES.get(field_name)
-            if not uploaded_file:
-                continue
-            extension = Path(uploaded_file.name).suffix.lower()
-            if extension not in {'.pdf', '.jpg', '.jpeg', '.png', '.webp'}:
-                return Response({'error': f'Unsupported file type for {field_name}.'}, status=status.HTTP_400_BAD_REQUEST)
-            if uploaded_file.size > 10 * 1024 * 1024:
-                return Response({'error': f'{field_name} must be 10 MB or smaller.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not vehicle_number:
+                return Response({'error': 'Please enter a valid vehicle registration number.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not vehicle_category:
+                return Response({'error': 'Please select a vehicle category.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            storage_path = default_storage.save(
-                f'driver_documents/{driver.id}/{document_type}/{uploaded_file.name}',
-                uploaded_file,
-            )
-            document_url = request.build_absolute_uri(default_storage.url(storage_path))
-            DriverDocument.objects.update_or_create(
-                driver=driver,
-                document_type=document_type,
-                defaults={
-                    'document_url': document_url,
-                    'verification_status': DriverDocument.VerificationStatus.PENDING,
-                },
-            )
-
-        # 3. Bank details
-        if account_number:
-            DriverBankAccount.objects.update_or_create(
-                driver=driver,
-                account_number=account_number,
-                defaults={
-                    'account_holder_name': account_holder_name or f"{user.first_name} {user.last_name}".strip(),
-                    'ifsc_code': ifsc_code or 'HDFC0001234',
-                    'bank_name': bank_name or 'HDFC Bank',
-                    'is_verified': True,
-                    'is_primary': True
-                }
-            )
-
-        # 4. Emergency contact
-        if emergency_name and emergency_phone:
-            DriverEmergencyContact.objects.update_or_create(
-                driver=driver,
-                name=emergency_name,
-                defaults={
-                    'relationship': emergency_relation or 'Family',
-                    'phone_number': emergency_phone
-                }
-            )
-
-        # 5. Vehicle details
-        if vehicle_number:
             from vehicles.models import Vehicle, VehicleType
-            vtype, _ = VehicleType.objects.get_or_create(
-                name=vehicle_category,
-                defaults={
-                    'base_fare': 50.00,
-                    'per_km_rate': 12.00,
-                    'per_minute_rate': 2.00
-                }
-            )
-            Vehicle.objects.update_or_create(
-                registration_number=vehicle_number,
-                defaults={
-                    'driver': driver,
-                    'vehicle_type': vtype,
-                    'make': 'Maruti',
-                    'model': vehicle_model or 'Swift Dzire',
-                    'year': 2022,
-                    'color': 'White',
-                    'is_approved': True,
-                    'is_active': True
-                }
-            )
+
+            # Check if this registration number is already registered to another driver
+            existing_veh = Vehicle.objects.filter(registration_number__iexact=vehicle_number).exclude(driver=driver).first()
+            if existing_veh:
+                return Response(
+                    {'error': f'Vehicle registration number "{vehicle_number}" is already registered to another Captain.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            vtype = VehicleType.objects.filter(name__iexact=vehicle_category).first() or VehicleType.objects.first()
+            if not vtype:
+                return Response({'error': f'Vehicle type "{vehicle_category}" is not configured in settings.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            make = vehicle_model.split(' ')[0] if vehicle_model and ' ' in vehicle_model else (vehicle_model or '')
+            model = ' '.join(vehicle_model.split(' ')[1:]) if vehicle_model and ' ' in vehicle_model else (vehicle_model or '')
+
+            try:
+                veh = Vehicle.objects.filter(driver=driver).first()
+                if not veh:
+                    veh = Vehicle.objects.filter(registration_number__iexact=vehicle_number).first()
+
+                if veh:
+                    veh.driver = driver
+                    veh.registration_number = vehicle_number
+                    veh.vehicle_type = vtype
+                    veh.make = make or 'Standard'
+                    veh.model = model or make or 'Standard'
+                    veh.color = fuel_type
+                    veh.year = 2024
+                    veh.is_active = False
+                    veh.is_approved = False
+                    veh.save()
+                    Vehicle.objects.filter(driver=driver).exclude(id=veh.id).delete()
+                else:
+                    Vehicle.objects.create(
+                        driver=driver,
+                        registration_number=vehicle_number,
+                        vehicle_type=vtype,
+                        make=make or 'Standard',
+                        model=model or make or 'Standard',
+                        color=fuel_type,
+                        year=2024,
+                        is_active=False,
+                        is_approved=False
+                    )
+            except Exception as e:
+                return Response({'error': f'Unable to save vehicle details: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # --- Step 6: Documents Upload Chunk ---
+        if step == 6 or (step is None and request.FILES):
+            document_types = {
+                'document_license': DriverDocument.DocumentType.LICENSE,
+                'document_rc': DriverDocument.DocumentType.RC,
+                'document_insurance': DriverDocument.DocumentType.INSURANCE,
+                'document_aadhaar': DriverDocument.DocumentType.BACKGROUND_CHECK,
+                'document_photo': DriverDocument.DocumentType.PERMIT,
+            }
+            for field_name, document_type in document_types.items():
+                uploaded_file = request.FILES.get(field_name)
+                if not uploaded_file:
+                    continue
+                extension = Path(uploaded_file.name).suffix.lower()
+                if extension not in {'.pdf', '.jpg', '.jpeg', '.png', '.webp'}:
+                    return Response({'error': f'Unsupported file type for {field_name}.'}, status=status.HTTP_400_BAD_REQUEST)
+                if uploaded_file.size > 10 * 1024 * 1024:
+                    return Response({'error': f'{field_name} must be 10 MB or smaller.'}, status=status.HTTP_400_BAD_REQUEST)
+
+                storage_path = default_storage.save(
+                    f'driver_documents/{driver.id}/{document_type}/{uploaded_file.name}',
+                    uploaded_file,
+                )
+                document_url = request.build_absolute_uri(default_storage.url(storage_path))
+                DriverDocument.objects.update_or_create(
+                    driver=driver,
+                    document_type=document_type,
+                    defaults={
+                        'document_url': document_url,
+                        'verification_status': DriverDocument.VerificationStatus.PENDING,
+                    },
+                )
+
+        # --- Step 7: Bank Details Chunk ---
+        if step == 7 or (step is None and request.data.get('account_number')):
+            account_number = request.data.get('account_number')
+            account_holder_name = request.data.get('account_holder_name') or f"{user.first_name} {user.last_name}".strip()
+            bank_name = request.data.get('bank_name')
+            ifsc_code = request.data.get('ifsc_code')
+
+            if account_number and bank_name and ifsc_code:
+                bank_acc = DriverBankAccount.objects.filter(driver=driver).first()
+                if bank_acc:
+                    bank_acc.account_number = account_number
+                    bank_acc.account_holder_name = account_holder_name
+                    bank_acc.ifsc_code = ifsc_code
+                    bank_acc.bank_name = bank_name
+                    bank_acc.is_verified = False
+                    bank_acc.is_primary = True
+                    bank_acc.save()
+                    DriverBankAccount.objects.filter(driver=driver).exclude(id=bank_acc.id).delete()
+                else:
+                    DriverBankAccount.objects.create(
+                        driver=driver,
+                        account_number=account_number,
+                        account_holder_name=account_holder_name,
+                        ifsc_code=ifsc_code,
+                        bank_name=bank_name,
+                        is_verified=False,
+                        is_primary=True
+                    )
+
+        # --- Step 8: Emergency Contact Chunk ---
+        if step == 8 or (step is None and (request.data.get('emergency_name') or request.data.get('emergency_phone'))):
+            emergency_name = request.data.get('emergency_name')
+            emergency_relation = request.data.get('emergency_relation')
+            emergency_phone = request.data.get('emergency_phone')
+
+            if emergency_name and emergency_phone:
+                contact = DriverEmergencyContact.objects.filter(driver=driver).first()
+                if contact:
+                    contact.name = emergency_name
+                    contact.relationship = emergency_relation or ''
+                    contact.phone_number = emergency_phone
+                    contact.save()
+                    DriverEmergencyContact.objects.filter(driver=driver).exclude(id=contact.id).delete()
+                else:
+                    DriverEmergencyContact.objects.create(
+                        driver=driver,
+                        name=emergency_name,
+                        relationship=emergency_relation or '',
+                        phone_number=emergency_phone
+                    )
+
+        # --- Step 9: Terms Accepted & GPS Location Capture Chunk ---
+        if step == 9 or request.data.get('terms_agreed'):
+            terms_agreed = request.data.get('terms_agreed')
+            all_agreed = False
+            if isinstance(terms_agreed, dict):
+                all_agreed = bool(
+                    terms_agreed.get('partnerAgreement') and
+                    terms_agreed.get('safetyPolicy') and
+                    terms_agreed.get('zeroTolerance')
+                )
+            elif terms_agreed is True or terms_agreed == 'true':
+                all_agreed = True
+
+            if step == 9 and not all_agreed:
+                return Response(
+                    {'error': 'Please accept all 3 partner terms and conditions before proceeding.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if all_agreed:
+                driver.terms_accepted = True
+                driver.terms_accepted_at = timezone.now()
+                driver.save(update_fields=['terms_accepted', 'terms_accepted_at'])
+                print(f"[TERMS ACCEPTED IN DB]: Driver {driver.id} agreed to all 3 conditions at {driver.terms_accepted_at}")
+
+        lat = request.data.get('latitude')
+        lon = request.data.get('longitude')
+        if lat is not None and lon is not None:
+            try:
+                lat_f = float(lat)
+                lon_f = float(lon)
+                driver.current_latitude = lat_f
+                driver.current_longitude = lon_f
+                driver.last_location_update = timezone.now()
+                driver.save(update_fields=['current_latitude', 'current_longitude', 'last_location_update'])
+
+                from tracking.models import DriverLocation
+                loc = DriverLocation.objects.filter(driver=driver).first()
+                if loc:
+                    loc.latitude = lat_f
+                    loc.longitude = lon_f
+                    loc.is_online = driver.availability_status == Driver.AvailabilityStatus.ONLINE
+                    loc.save()
+                    DriverLocation.objects.filter(driver=driver).exclude(id=loc.id).delete()
+                else:
+                    DriverLocation.objects.create(
+                        driver=driver,
+                        latitude=lat_f,
+                        longitude=lon_f,
+                        is_online=driver.availability_status == Driver.AvailabilityStatus.ONLINE
+                    )
+                print(f"[GPS LOCATION SAVED TO DB]: Lat={lat_f}, Lon={lon_f} for Driver ID={driver.id}")
+            except (ValueError, TypeError) as e:
+                print(f"GPS parsing note: {e}")
+
+        # --- Step 10: Admin Verification Chunk ---
+        if step == 10:
+            driver.approval_status = Driver.ApprovalStatus.PENDING
+            driver.save(update_fields=['approval_status'])
+
+        # --- Step 12: Final Launch Chunk ---
+        if step == 12:
+            if driver.approval_status == Driver.ApprovalStatus.APPROVED:
+                driver.availability_status = Driver.AvailabilityStatus.ONLINE
+                driver.save(update_fields=['availability_status'])
 
         print(f"\n==========================================")
-        print("[DJANGO BACKEND DRIVER SAVED TO DB]")
-        print(f"Captain User ID: {user.id}")
+        print(f"[DJANGO BACKEND CHUNK SAVED: Step {step}]")
+        print(f"Captain User: {user.first_name} {user.last_name} ({user.id})")
         print(f"Driver ID: {driver.id}")
         print(f"Phone: {user.phone_number}")
-        print(f"Vehicle: {vehicle_number}")
+        print(f"Approval Status: {driver.approval_status}")
         print(f"==========================================\n")
 
         return Response({
-            'status': 'Captain profile and driver details saved to database successfully.',
+            'status': f'Step {step} chunk saved successfully.',
+            'step': step,
             'driver_id': str(driver.id),
             'user_id': str(user.id),
             'user': UserSerializer(user).data,
+            'approval_status': driver.approval_status,
             'documents': DriverDocumentSerializer(driver.documents.all(), many=True).data,
         }, status=status.HTTP_200_OK)
 

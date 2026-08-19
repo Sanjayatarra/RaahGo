@@ -31,11 +31,11 @@ export default function Auth() {
         navigate('/home', { replace: true });
       }
     } else {
-      if (location.pathname === '/' || location.pathname === '/home') {
+      if (location.pathname === '/' || (location.pathname === '/home' && !pendingAuthData)) {
         navigate('/login', { replace: true });
       }
     }
-  }, [location.pathname, user, navigate]);
+  }, [location.pathname, user, pendingAuthData, navigate]);
 
   const handleAuthSuccess = (data) => {
     const initialName = data.name || (data.user?.first_name ? `${data.user.first_name} ${data.user.last_name || ''}`.trim() : (data.identifier?.includes('@') ? data.identifier.split('@')[0] : 'Captain'));
@@ -46,9 +46,15 @@ export default function Auth() {
     };
 
     setPendingAuthData(authData);
+    localStorage.setItem('raahgo_driver_user', JSON.stringify(authData));
+
+    // If signing up, do NOT open the home page; redirect user to complete profile first
+    if (data.type === 'signup') {
+      navigate('/complete-profile');
+      return;
+    }
 
     setUser(authData);
-    localStorage.setItem('raahgo_driver_user', JSON.stringify(authData));
     navigate('/home');
   };
 

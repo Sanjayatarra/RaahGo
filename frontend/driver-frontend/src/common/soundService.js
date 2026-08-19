@@ -5,30 +5,39 @@ let ringtoneInterval = null;
 let isRinging = false;
 
 const getAudioContext = () => {
-  if (!audioCtx) {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (AudioContextClass) {
-      audioCtx = new AudioContextClass();
+  try {
+    if (!audioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) {
+        audioCtx = new AudioContextClass();
+      }
     }
-  }
-  if (audioCtx && audioCtx.state === 'suspended') {
-    audioCtx.resume().catch(() => {});
-  }
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+  } catch (e) {}
   return audioCtx;
 };
 
 // Auto-unlock AudioContext on first user interaction
 if (typeof window !== 'undefined') {
   const unlockAudio = () => {
-    const ctx = getAudioContext();
-    if (ctx && ctx.state === 'suspended') {
-      ctx.resume();
-    }
+    try {
+      if (!audioCtx) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+          audioCtx = new AudioContextClass();
+        }
+      }
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+    } catch (e) {}
     window.removeEventListener('click', unlockAudio);
     window.removeEventListener('touchstart', unlockAudio);
   };
-  window.addEventListener('click', unlockAudio);
-  window.addEventListener('touchstart', unlockAudio);
+  window.addEventListener('click', unlockAudio, { once: true, passive: true });
+  window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
 }
 
 /**
@@ -67,10 +76,12 @@ const playChimeSequence = () => {
     osc.stop(now + start + dur + 0.05);
   });
 
-  // Device vibration for mobile devices
-  if (typeof navigator !== 'undefined' && navigator.vibrate) {
+  // Device vibration for mobile devices (only when user has interacted with page)
+  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
     try {
-      navigator.vibrate([300, 150, 300, 150, 400]);
+      if (!navigator.userActivation || navigator.userActivation.hasBeenActive) {
+        navigator.vibrate([300, 150, 300, 150, 400]);
+      }
     } catch (e) {}
   }
 };
@@ -104,9 +115,11 @@ export const stopIncomingRideRingtone = () => {
     clearInterval(ringtoneInterval);
     ringtoneInterval = null;
   }
-  if (typeof navigator !== 'undefined' && navigator.vibrate) {
+  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
     try {
-      navigator.vibrate(0);
+      if (!navigator.userActivation || navigator.userActivation.hasBeenActive) {
+        navigator.vibrate(0);
+      }
     } catch (e) {}
   }
 };

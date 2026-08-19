@@ -120,13 +120,14 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
         return false;
       }
     } else {
-      if (!emailAddress.trim()) {
+      const cleanEmail = emailAddress.trim();
+      if (!cleanEmail) {
         setError('Please enter your Gmail / Email address');
         return false;
       }
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(emailAddress)) {
-        setError('Please enter a valid email address');
+      const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+      if (!emailRegex.test(cleanEmail)) {
+        setError("Please enter a valid email address (e.g. rahul@gmail.com). Missing '@' or domain.");
         return false;
       }
     }

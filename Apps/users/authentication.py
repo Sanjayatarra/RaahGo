@@ -17,6 +17,11 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 # ── Nonce helpers ──────────────────────────────────────────────────────────────
 
+def generate_session_nonce() -> str:
+    """Generate a cryptographically secure 64-character hex nonce."""
+    return secrets.token_hex(32)
+
+
 def extract_device_info(request):
     """Parse User-Agent and custom headers from incoming request."""
     if not request:

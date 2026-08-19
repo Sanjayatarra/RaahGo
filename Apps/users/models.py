@@ -53,7 +53,7 @@ class User(models.Model):
         choices=RoleChoices.choices,
         default=RoleChoices.CUSTOMER
     )
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False)
     is_phone_verified = models.BooleanField(default=False)
     is_email_verified = models.BooleanField(default=False)

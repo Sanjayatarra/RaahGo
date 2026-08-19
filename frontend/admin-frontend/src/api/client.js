@@ -43,13 +43,13 @@ export const authAPI = {
 
 // ── DASHBOARD ────────────────────────────────────────────
 export const dashboardAPI = {
-  get: () => api.get('/api/admin/dashboard/'),
-  stats: () => api.get('/api/admin/dashboard/stats/'),
-  revenue: () => api.get('/api/admin/dashboard/revenue/'),
-  rides: () => api.get('/api/admin/dashboard/rides/'),
-  users: () => api.get('/api/admin/dashboard/users/'),
-  drivers: () => api.get('/api/admin/dashboard/drivers/'),
-  alerts: () => api.get('/api/admin/dashboard/alerts/'),
+  get: (params) => api.get('/api/admin/dashboard/', { params }),
+  stats: (params) => api.get('/api/admin/dashboard/stats/', { params }),
+  revenue: (params) => api.get('/api/admin/dashboard/revenue/', { params }),
+  rides: (params) => api.get('/api/admin/dashboard/rides/', { params }),
+  users: (params) => api.get('/api/admin/dashboard/users/', { params }),
+  drivers: (params) => api.get('/api/admin/dashboard/drivers/', { params }),
+  alerts: (params) => api.get('/api/admin/dashboard/alerts/', { params }),
 };
 
 // ── CUSTOMERS ────────────────────────────────────────────
@@ -91,6 +91,11 @@ export const driversAPI = {
   complaints: (id) => api.get(`/api/admin/drivers/${id}/complaints/`),
   sendNotification: (id, data) => api.post(`/api/admin/drivers/${id}/notifications/send/`, data),
   terminateDevice: (id, deviceId) => api.post(`/api/admin/drivers/${id}/devices/${deviceId}/logout/`),
+  forceLogout: (id) => api.post(`/api/admin/drivers/${id}/force-logout/`),
+  adjustWallet: (id, data) => api.post(`/api/admin/drivers/${id}/wallet/adjust/`, data),
+  approveVehicle: (id, vehicleId) => api.post(`/api/admin/drivers/${id}/vehicles/${vehicleId}/approve/`),
+  rejectVehicle: (id, vehicleId, data) => api.post(`/api/admin/drivers/${id}/vehicles/${vehicleId}/reject/`, data),
+  deactivateVehicle: (id, vehicleId) => api.post(`/api/admin/drivers/${id}/vehicles/${vehicleId}/deactivate/`),
   location: (id) => api.get(`/api/admin/drivers/${id}/location/`),
 };
 

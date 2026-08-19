@@ -42,6 +42,8 @@ class Driver(models.Model):
     daily_online_seconds = models.PositiveIntegerField(default=0)
     last_online_start = models.DateTimeField(null=True, blank=True)
     last_duty_reset_date = models.DateField(null=True, blank=True)
+    terms_accepted = models.BooleanField(default=False)
+    terms_accepted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

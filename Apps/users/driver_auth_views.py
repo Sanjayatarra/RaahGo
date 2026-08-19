@@ -1,10 +1,13 @@
 import random
+import re
 from django.utils import timezone
 from datetime import timedelta
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth.models import update_last_login
+from django.core.validators import validate_email
+from django.core.exceptions import ValidationError
 
 from .models import User, OTPVerification
 from .serializers import UserSerializer
@@ -13,6 +16,25 @@ from .authentication import issue_tokens_for_user
 
 # Fixed role for Driver API endpoints
 DRIVER_ROLE = User.RoleChoices.DRIVER
+
+
+def is_valid_email(email_str):
+    """
+    Validate that email has proper RFC structure with @ and valid top-level domain.
+    """
+    if not email_str or not isinstance(email_str, str):
+        return False
+    email_str = email_str.strip()
+    if '@' not in email_str or '.' not in email_str.split('@')[-1]:
+        return False
+    pattern = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+    if not re.match(pattern, email_str):
+        return False
+    try:
+        validate_email(email_str)
+        return True
+    except ValidationError:
+        return False
 
 
 class DriverSendOTPView(APIView):
@@ -28,6 +50,14 @@ class DriverSendOTPView(APIView):
 
         if not phone_number and not email:
             return Response({'error': 'Either phone_number or email is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if email:
+            email = email.strip()
+            if not is_valid_email(email):
+                return Response(
+                    {'error': 'Please enter a valid email address format (e.g. name@gmail.com).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         if purpose == 'Login':
             role_user = None
@@ -94,6 +124,14 @@ class DriverVerifyOTPView(APIView):
         if not (phone_number or email) or not otp_code:
             return Response({'error': 'Either phone_number or email, and OTP code are required'}, status=status.HTTP_400_BAD_REQUEST)
 
+        if email:
+            email = email.strip()
+            if not is_valid_email(email):
+                return Response(
+                    {'error': 'Please enter a valid email address format (e.g. name@gmail.com).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
         query = OTPVerification.objects.filter(
             is_verified=False,
             expires_at__gte=timezone.now()
@@ -109,6 +147,15 @@ class DriverVerifyOTPView(APIView):
             return Response({'error': 'Invalid or expired OTP'}, status=status.HTTP_400_BAD_REQUEST)
 
         otp_record.attempts += 1
+
+        full_name = request.data.get('full_name') or request.data.get('name')
+        first_name = request.data.get('first_name')
+        last_name = request.data.get('last_name')
+
+        if full_name and not (first_name or last_name):
+            parts = full_name.strip().split(' ', 1)
+            first_name = parts[0].strip()
+            last_name = parts[1].strip() if len(parts) > 1 else ''
 
         if otp_record.otp == otp_code:
             otp_record.is_verified = True
@@ -141,18 +188,38 @@ class DriverVerifyOTPView(APIView):
                     username=temp_username,
                     email=email if email else None,
                     phone_number=phone_number if phone_number else None,
+                    first_name=first_name or '',
+                    last_name=last_name or '',
                     role=DRIVER_ROLE,
-                    is_verified=True
+                    is_verified=False
                 )
             else:
                 user = role_user
+                if first_name and not user.first_name:
+                    user.first_name = first_name
+                if last_name and not user.last_name:
+                    user.last_name = last_name
 
             if email:
                 user.is_email_verified = True
             if phone_number:
                 user.is_phone_verified = True
-            user.is_verified = True
+            user.is_verified = False
             user.save()
+
+            # Ensure linked Driver record exists
+            try:
+                from drivers.models import Driver
+                Driver.objects.get_or_create(
+                    user=user,
+                    defaults={
+                        'license_number': f"DL{str(user.id).replace('-', '')[:8].upper()}",
+                        'approval_status': Driver.ApprovalStatus.PENDING,
+                        'availability_status': Driver.AvailabilityStatus.OFFLINE,
+                    }
+                )
+            except Exception:
+                pass
 
             tokens = issue_tokens_for_user(user, request)
 
@@ -178,6 +245,14 @@ class DriverSignupView(APIView):
 
         if not email and not phone_number:
             return Response({'error': 'Either email or phone_number is required for Driver signup.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if email:
+            email = email.strip()
+            if not is_valid_email(email):
+                return Response(
+                    {'error': 'Please enter a valid email address format (e.g. name@gmail.com).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         if email and User.objects.filter(email__iexact=email, role=DRIVER_ROLE, is_verified=True).exists():
             return Response({'error': 'Driver with this email already exists. Please log in.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -260,6 +335,15 @@ class DriverVerifySignupOTPView(APIView):
 
         otp_record.attempts += 1
 
+        full_name = request.data.get('full_name') or request.data.get('name')
+        first_name = request.data.get('first_name')
+        last_name = request.data.get('last_name')
+
+        if full_name and not (first_name or last_name):
+            parts = full_name.strip().split(' ', 1)
+            first_name = parts[0].strip()
+            last_name = parts[1].strip() if len(parts) > 1 else ''
+
         if otp_record.otp == otp_code:
             otp_record.is_verified = True
             otp_record.save()
@@ -268,8 +352,26 @@ class DriverVerifySignupOTPView(APIView):
                 user.is_email_verified = True
             if user.phone_number:
                 user.is_phone_verified = True
-            user.is_verified = True
+            if first_name:
+                user.first_name = first_name
+            if last_name:
+                user.last_name = last_name
+            user.is_verified = False
             user.save()
+
+            # Ensure linked Driver record exists
+            try:
+                from drivers.models import Driver
+                Driver.objects.get_or_create(
+                    user=user,
+                    defaults={
+                        'license_number': f"DL{str(user.id).replace('-', '')[:8].upper()}",
+                        'approval_status': Driver.ApprovalStatus.PENDING,
+                        'availability_status': Driver.AvailabilityStatus.OFFLINE,
+                    }
+                )
+            except Exception:
+                pass
 
             tokens = issue_tokens_for_user(user, request)
 
@@ -293,25 +395,42 @@ class DriverCompleteProfileView(APIView):
     """
     def post(self, request):
         user_id = request.data.get('user_id')
+        full_name = request.data.get('full_name') or request.data.get('name')
         first_name = request.data.get('first_name')
         last_name = request.data.get('last_name')
         email = request.data.get('email')
         phone_number = request.data.get('phone_number')
 
-        if not user_id:
-            return Response({'error': 'user_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if full_name and not (first_name or last_name):
+            parts = full_name.strip().split(' ', 1)
+            first_name = parts[0].strip()
+            last_name = parts[1].strip() if len(parts) > 1 else ''
 
-        user = User.objects.filter(id=user_id, role=DRIVER_ROLE).first()
+        if not user_id and hasattr(request, 'user') and request.user and request.user.is_authenticated:
+            user = request.user
+        elif user_id:
+            user = User.objects.filter(id=user_id, role=DRIVER_ROLE).first()
+        else:
+            user = None
+
         if not user:
             return Response({'error': 'Driver not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         if first_name: user.first_name = first_name
         if last_name: user.last_name = last_name
 
-        if email and not user.email:
-            if User.objects.filter(email__iexact=email, role=DRIVER_ROLE).exclude(id=user.id).exists():
-                return Response({'error': 'This email is already in use by another driver.'}, status=status.HTTP_400_BAD_REQUEST)
-            user.email = email
+        if email:
+            email = email.strip()
+            if not is_valid_email(email):
+                return Response({'error': 'Please enter a valid email address format (e.g. name@gmail.com).'}, status=status.HTTP_400_BAD_REQUEST)
+            if not user.email:
+                if User.objects.filter(email__iexact=email, role=DRIVER_ROLE).exclude(id=user.id).exists():
+                    return Response({'error': 'This email is already in use by another driver.'}, status=status.HTTP_400_BAD_REQUEST)
+                user.email = email
+            elif user.email.lower() != email.lower():
+                if User.objects.filter(email__iexact=email, role=DRIVER_ROLE).exclude(id=user.id).exists():
+                    return Response({'error': 'This email is already in use by another driver.'}, status=status.HTTP_400_BAD_REQUEST)
+                user.email = email
 
         if phone_number and not user.phone_number:
             if User.objects.filter(phone_number=phone_number, role=DRIVER_ROLE).exclude(id=user.id).exists():

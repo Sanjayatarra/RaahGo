@@ -105,18 +105,18 @@ export function DriverList() {
       <div style={{ display: 'flex', gap: 5 }}>
         <button
           className="btn btn-sm btn-ghost"
-          title="Open Driver Page"
+          title="Open Captain Page"
           onClick={() => navigate(`/drivers/${row.id}`)}
         >
           <Eye size={13} />
         </button>
         {row.status !== 'suspended' && (
-          <button className="btn btn-sm btn-danger" title="Block Driver" onClick={() => handleBlockDriver(row.id)}>
+          <button className="btn btn-sm btn-danger" title="Block Captain" onClick={() => handleBlockDriver(row.id)}>
             <Ban size={13} />
           </button>
         )}
         {row.status === 'suspended' && (
-          <button className="btn btn-sm btn-success" title="Unblock Driver" onClick={() => handleUnblockDriver(row.id)}>
+          <button className="btn btn-sm btn-success" title="Unblock Captain" onClick={() => handleUnblockDriver(row.id)}>
             <CheckCircle size={13} />
           </button>
         )}
@@ -133,17 +133,17 @@ export function DriverList() {
 
   return (
     <div>
-      <PageHeader title="Drivers" subtitle="Manage all registered drivers" breadcrumb={['Drivers', 'All Drivers']}>
+      <PageHeader title="Captain" subtitle="Manage all registered Captain" breadcrumb={['Captain', 'All Captain']}>
         <button className="btn btn-secondary btn-sm" onClick={() => window.print()}><Download size={14} /> Export</button>
       </PageHeader>
       <div className="grid-stat mb-24">
-        <StatCard label="Total Drivers"     value={drivers.length} icon={Users}         color="purple" />
-        <StatCard label="Active Drivers"    value={active}         icon={UserCheck}      color="green"  />
+        <StatCard label="Total Captain"     value={drivers.length} icon={Users}         color="purple" />
+        <StatCard label="Active Captain"    value={active}         icon={UserCheck}      color="green"  />
         <StatCard label="Pending Approval"  value={pending}        icon={Clock}          color="yellow" />
         <StatCard label="Suspended / Blocked" value={suspended}      icon={AlertTriangle}  color="pink"   />
       </div>
       <DataTable
-        title="All Drivers"
+        title="All Captain"
         columns={DRIVER_COLS}
         data={drivers}
         searchKeys={['name', 'full_name', 'phone', 'phone_number', 'city', 'username']}
@@ -242,8 +242,8 @@ export function PendingApprovals() {
 
   return (
     <div>
-      <PageHeader title="Pending Approvals" subtitle={`${pending.length} drivers waiting for approval`} breadcrumb={['Drivers', 'Pending Approval']} />
-      <DataTable title="Pending Drivers" columns={PEND_COLS} data={pending} searchKeys={['name', 'full_name', 'phone', 'city']} />
+      <PageHeader title="Pending Approvals" subtitle={`${pending.length} Captain waiting for approval`} breadcrumb={['Captain', 'Pending Approval']} />
+      <DataTable title="Pending Captain" columns={PEND_COLS} data={pending} searchKeys={['name', 'full_name', 'phone', 'city']} />
     </div>
   );
 }
@@ -323,7 +323,7 @@ export function DriverDocuments() {
 
   return (
     <div>
-      <PageHeader title="Driver Documents" subtitle="Verify and manage all driver documents" breadcrumb={['Drivers', 'Documents']} />
+      <PageHeader title="Captain Documents" subtitle="Verify and manage all Captain documents" breadcrumb={['Captain', 'Documents']} />
       <DataTable
         title="Documents"
         columns={DOC_COLS}
@@ -377,8 +377,8 @@ export function DriverEarnings() {
 
   return (
     <div>
-      <PageHeader title="Driver Earnings" subtitle="Track and manage driver earnings & payouts" breadcrumb={['Drivers', 'Earnings']} />
-      <DataTable title="Driver Earnings" columns={EARN_COLS} data={earnings} searchKeys={['driver_name', 'vehicle_type']} />
+      <PageHeader title="Captain Earnings" subtitle="Track and manage Captain earnings & payouts" breadcrumb={['Captain', 'Earnings']} />
+      <DataTable title="Captain Earnings" columns={EARN_COLS} data={earnings} searchKeys={['driver_name', 'vehicle_type']} />
     </div>
   );
 }
@@ -413,7 +413,7 @@ export function DriverRatings() {
 
   return (
     <div>
-      <PageHeader title="Driver Ratings" subtitle="Customer reviews for drivers" breadcrumb={['Drivers', 'Ratings']} />
+      <PageHeader title="Captain Ratings" subtitle="Customer reviews for Captain" breadcrumb={['Captain', 'Ratings']} />
       <DataTable
         title="Ratings & Reviews"
         columns={RAT_COLS}
