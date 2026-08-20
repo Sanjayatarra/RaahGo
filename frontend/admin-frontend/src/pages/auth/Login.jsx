@@ -61,7 +61,7 @@ export default function Login() {
             />
           </div>
 
-          <div className="auth-input-group" style={{ position: 'relative' }}>
+          <div className="auth-input-group">
             <Lock size={16} className="auth-input-icon" />
             <input
               className="auth-input"
@@ -70,17 +70,12 @@ export default function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              style={{ paddingRight: 40 }}
             />
             <button
               type="button"
+              className="auth-password-toggle"
               onClick={() => setShowPass(!showPass)}
-              style={{
-                position: 'absolute', right: 12, top: '50%',
-                transform: 'translateY(-50%)',
-                background: 'none', border: 'none',
-                color: 'var(--text-muted)', cursor: 'pointer'
-              }}
+              aria-label={showPass ? 'Hide password' : 'Show password'}
             >
               {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
