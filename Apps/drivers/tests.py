@@ -56,6 +56,48 @@ class DriverDocumentPersistenceTests(TestCase):
             {'phone_number': '9876543210'},
         )
         profile_response = DriverViewSet.as_view({'get': 'onboarding_profile'})(profile_request)
-        self.assertEqual(profile_response.status_code, 200)
         self.assertEqual(profile_response.data['documents']['license']['name'], 'license.pdf')
         self.assertIn(6, profile_response.data['completed_steps'])
+
+    def test_captain_operating_address_persistence(self):
+        from drivers.models import Driver
+        from users.models import UserAddress
+
+        request = APIRequestFactory().post(
+            '/api/v1/drivers/complete_profile/',
+            {
+                'phone_number': '9988776655',
+                'email': 'captain.delhi@example.com',
+                'first_name': 'Ramesh',
+                'last_name': 'Kumar',
+                'service_city': 'Noida Sector 62',
+                'operating_address': 'Near Fortis Hospital, Sector 62, Noida, UP',
+                'operating_pincode': '201301',
+                'step': 3
+            },
+            format='json'
+        )
+        response = DriverViewSet.as_view({'post': 'complete_captain_profile'})(request)
+        self.assertEqual(response.status_code, 200)
+
+        driver = Driver.objects.filter(user__phone_number='9988776655').first()
+        self.assertIsNotNone(driver)
+        self.assertEqual(driver.service_city, 'Noida Sector 62')
+        self.assertEqual(driver.operating_address, 'Near Fortis Hospital, Sector 62, Noida, UP')
+        self.assertEqual(driver.operating_pincode, '201301')
+
+        # Check linked UserAddress
+        user_addr = UserAddress.objects.filter(user=driver.user).first()
+        self.assertIsNotNone(user_addr)
+        self.assertEqual(user_addr.city, 'Noida Sector 62')
+        self.assertEqual(user_addr.address_line_1, 'Near Fortis Hospital, Sector 62, Noida, UP')
+
+        # Check onboarding_profile endpoint returns it
+        profile_req = APIRequestFactory().get(
+            '/api/v1/drivers/profile/',
+            {'phone_number': '9988776655'}
+        )
+        profile_res = DriverViewSet.as_view({'get': 'onboarding_profile'})(profile_req)
+        self.assertEqual(profile_res.status_code, 200)
+        self.assertEqual(profile_res.data['service_city'], 'Noida Sector 62')
+        self.assertEqual(profile_res.data['operating_address'], 'Near Fortis Hospital, Sector 62, Noida, UP')

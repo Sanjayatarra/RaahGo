@@ -9,7 +9,7 @@ from django.contrib.auth.models import update_last_login
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 
-from .models import User, OTPVerification
+from .models import User, UserAddress, OTPVerification
 from .serializers import UserSerializer
 from .views import send_otp_email
 from .authentication import issue_tokens_for_user
@@ -344,6 +344,10 @@ class DriverVerifySignupOTPView(APIView):
             first_name = parts[0].strip()
             last_name = parts[1].strip() if len(parts) > 1 else ''
 
+        operating_address = request.data.get('operating_address') or request.data.get('address')
+        service_city = request.data.get('service_city') or request.data.get('city')
+        operating_pincode = request.data.get('operating_pincode') or request.data.get('pincode')
+
         if otp_record.otp == otp_code:
             otp_record.is_verified = True
             otp_record.save()
@@ -359,10 +363,10 @@ class DriverVerifySignupOTPView(APIView):
             user.is_verified = False
             user.save()
 
-            # Ensure linked Driver record exists
+            # Ensure linked Driver record exists and update operating address
             try:
                 from drivers.models import Driver
-                Driver.objects.get_or_create(
+                driver, _ = Driver.objects.get_or_create(
                     user=user,
                     defaults={
                         'license_number': f"DL{str(user.id).replace('-', '')[:8].upper()}",
@@ -370,8 +374,33 @@ class DriverVerifySignupOTPView(APIView):
                         'availability_status': Driver.AvailabilityStatus.OFFLINE,
                     }
                 )
-            except Exception:
-                pass
+                if operating_address:
+                    driver.operating_address = operating_address
+                if service_city:
+                    driver.service_city = service_city
+                if operating_pincode:
+                    driver.operating_pincode = operating_pincode
+                driver.save()
+            except Exception as ex:
+                print(f"[DriverVerifySignupOTPView] Error updating driver operating address: {ex}")
+
+            # Also create/update linked UserAddress
+            if operating_address or service_city:
+                try:
+                    UserAddress.objects.update_or_create(
+                        user=user,
+                        title=UserAddress.TitleChoices.WORK,
+                        defaults={
+                            'address_line_1': operating_address or f"Riding Base - {service_city or 'City'}",
+                            'city': service_city or 'Delhi NCR',
+                            'postal_code': operating_pincode or '110001',
+                            'state': 'Delhi NCR',
+                            'country': 'India',
+                            'is_default': True,
+                        }
+                    )
+                except Exception as ex:
+                    print(f"[DriverVerifySignupOTPView] Error saving UserAddress: {ex}")
 
             tokens = issue_tokens_for_user(user, request)
 
@@ -400,6 +429,9 @@ class DriverCompleteProfileView(APIView):
         last_name = request.data.get('last_name')
         email = request.data.get('email')
         phone_number = request.data.get('phone_number')
+        operating_address = request.data.get('operating_address') or request.data.get('address')
+        service_city = request.data.get('service_city') or request.data.get('city')
+        operating_pincode = request.data.get('operating_pincode') or request.data.get('pincode')
 
         if full_name and not (first_name or last_name):
             parts = full_name.strip().split(' ', 1)
@@ -438,6 +470,39 @@ class DriverCompleteProfileView(APIView):
             user.phone_number = phone_number
 
         user.save()
+
+        # Update linked Driver record operating address
+        try:
+            from drivers.models import Driver
+            driver = Driver.objects.filter(user=user).first()
+            if driver:
+                if operating_address:
+                    driver.operating_address = operating_address
+                if service_city:
+                    driver.service_city = service_city
+                if operating_pincode:
+                    driver.operating_pincode = operating_pincode
+                driver.save()
+        except Exception as ex:
+            print(f"[DriverCompleteProfileView] Error updating driver operating address: {ex}")
+
+        # Update UserAddress record
+        if operating_address or service_city:
+            try:
+                UserAddress.objects.update_or_create(
+                    user=user,
+                    title=UserAddress.TitleChoices.WORK,
+                    defaults={
+                        'address_line_1': operating_address or f"Riding Base - {service_city or 'City'}",
+                        'city': service_city or 'Delhi NCR',
+                        'postal_code': operating_pincode or '110001',
+                        'state': 'Delhi NCR',
+                        'country': 'India',
+                        'is_default': True,
+                    }
+                )
+            except Exception as ex:
+                print(f"[DriverCompleteProfileView] Error saving UserAddress: {ex}")
 
         return Response({
             'status': 'Driver profile completed successfully.',

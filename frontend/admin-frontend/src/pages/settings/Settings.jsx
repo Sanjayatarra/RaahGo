@@ -14,7 +14,8 @@ const SECTIONS = [
   ]},
   { key: 'ride', label: '🚗 Ride', fields: [
     { key: 'max_cancellations', label: 'Max Cancellations (per day)', type: 'number', value: 3 },
-    { key: 'driver_wait_time', label: 'Driver Wait Time (minutes)', type: 'number', value: 5 },
+    { key: 'customer_wait_time', label: 'Customer Wait Time for Captain (minutes)', type: 'number', value: 5, desc: 'Maximum time customer waits for a captain to accept before ride is auto-cancelled' },
+    { key: 'driver_wait_time', label: 'Driver Wait Time (minutes)', type: 'number', value: 5, desc: 'Free waiting time for captain at pickup location before waiting charges apply' },
     { key: 'auto_assign', label: 'Auto-assign Driver', type: 'toggle', value: true },
     { key: 'track_interval', label: 'Live Tracking Interval (seconds)', type: 'number', value: 10 },
   ]},

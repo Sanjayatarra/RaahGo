@@ -90,6 +90,8 @@ class ServiceViewSet(viewsets.ModelViewSet):
         support_phone = SystemSetting.get_setting('support_phone') or '+91 1800-XXX-XXXX'
         track_interval = int(SystemSetting.get_setting('track_interval') or 10)
         cashback_enabled = str(SystemSetting.get_setting('cashback_enabled', 'true')).lower() == 'true'
+        customer_wait_time = int(SystemSetting.get_setting('customer_wait_time', '5') or 5)
+        driver_wait_time = int(SystemSetting.get_setting('driver_wait_time', '5') or 5)
 
         return Response({
             'app_name': app_name,
@@ -100,6 +102,8 @@ class ServiceViewSet(viewsets.ModelViewSet):
             'location_suggestion_radius_km': radius,
             'track_interval': track_interval,
             'cashback_enabled': cashback_enabled,
+            'customer_wait_time': customer_wait_time,
+            'driver_wait_time': driver_wait_time,
             'tile_url': '/api/v1/services/tiles/{z}/{x}/{y}.png',
         }, status=status.HTTP_200_OK)
 

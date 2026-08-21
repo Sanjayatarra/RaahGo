@@ -37,6 +37,40 @@ export default function Auth() {
     }
   }, [location.pathname, user, pendingAuthData, navigate]);
 
+  // Validate active driver session against backend on load
+  useEffect(() => {
+    const validateActiveSession = async () => {
+      const saved = localStorage.getItem('raahgo_driver_user');
+      const token = localStorage.getItem('driver_access_token');
+      if (!saved && !token) return;
+
+      const parsed = saved ? JSON.parse(saved) : null;
+      const phone = parsed?.phone_number || parsed?.user?.phone_number || (parsed?.identifier && !parsed.identifier.includes('@') ? parsed.identifier : '');
+      const email = parsed?.email || parsed?.user?.email || (parsed?.identifier && parsed.identifier.includes('@') ? parsed.identifier : '');
+      const cleanPhone = phone ? phone.replace(/\D/g, '') : '';
+
+      let url = '/api/v1/drivers/profile/';
+      const params = new URLSearchParams();
+      if (cleanPhone) params.append('phone_number', cleanPhone);
+      if (email) params.append('email', email);
+      if (params.toString()) url += `?${params.toString()}`;
+
+      try {
+        const res = await fetch(url, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        if (res.status === 404 || res.status === 401) {
+          console.warn('[RaahGo Auth] User not found in backend DB (deleted or invalid session). Logging out...');
+          handleLogout();
+        }
+      } catch (err) {
+        // Network offline, skip
+      }
+    };
+
+    validateActiveSession();
+  }, []);
+
   const handleAuthSuccess = (data) => {
     const initialName = data.name || (data.user?.first_name ? `${data.user.first_name} ${data.user.last_name || ''}`.trim() : (data.identifier?.includes('@') ? data.identifier.split('@')[0] : 'Captain'));
     const authData = {

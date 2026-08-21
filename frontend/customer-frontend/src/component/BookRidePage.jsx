@@ -64,6 +64,7 @@ export default function BookRidePage({ user, onLogout }) {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('Change of plans');
   const [activeRideRef] = useState(() => React.createRef());
+  const [customerWaitMinutes, setCustomerWaitMinutes] = useState(5);
   const [searchTimeLeft, setSearchTimeLeft] = useState(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
@@ -119,7 +120,23 @@ export default function BookRidePage({ user, onLogout }) {
         console.log('Vehicle types API fetch notice:', err);
       }
     };
+
+    const fetchConfig = async () => {
+      try {
+        const res = await fetchWithAuth('/api/v1/services/config/');
+        if (res.ok) {
+          const cfg = await res.json();
+          if (cfg?.customer_wait_time) {
+            setCustomerWaitMinutes(Number(cfg.customer_wait_time));
+          }
+        }
+      } catch (err) {
+        console.log('Config API fetch notice:', err);
+      }
+    };
+
     fetchVehicleTypes();
+    fetchConfig();
   }, []);
 
   // Auto-detect GPS Location and restore active booking state on mount
@@ -141,7 +158,8 @@ export default function BookRidePage({ user, onLogout }) {
               setBookingSuccess(false);
               const created = new Date(data.created_at).getTime();
               const elapsed = Math.floor((Date.now() - created) / 1000);
-              const remaining = Math.max(0, 15 * 60 - elapsed);
+              const waitSec = (customerWaitMinutes || 5) * 60;
+              const remaining = Math.max(0, waitSec - elapsed);
               setSearchTimeLeft(remaining);
             } else if (['Accepted', 'Arrived', 'In Trip'].includes(data.status)) {
               setIsSearchingDriver(false);
@@ -157,7 +175,7 @@ export default function BookRidePage({ user, onLogout }) {
     };
 
     restoreActiveBookingOnMount();
-  }, [user]);
+  }, [user, customerWaitMinutes]);
 
   // Auto-geocode pickup address text to coordinates if pickupCoords is null
   useEffect(() => {
@@ -251,10 +269,12 @@ export default function BookRidePage({ user, onLogout }) {
       }, 2000);
 
       if (activeBookingData?.status === 'Searching') {
+        const waitMins = customerWaitMinutes || 5;
+        const waitSec = waitMins * 60;
         const created = new Date(activeBookingData.created_at).getTime();
         countdownInterval = setInterval(() => {
           const elapsed = Math.floor((Date.now() - created) / 1000);
-          const remaining = Math.max(0, 15 * 60 - elapsed);
+          const remaining = Math.max(0, waitSec - elapsed);
           setSearchTimeLeft(remaining);
 
           if (remaining === 0) {
@@ -262,7 +282,7 @@ export default function BookRidePage({ user, onLogout }) {
             fetchWithAuth(`/api/v1/bookings/bookings/${bookingId}/cancel/`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ reason: 'Auto-cancelled: no driver found within 15 minutes.' })
+              body: JSON.stringify({ reason: `Auto-cancelled: no driver found within ${waitMins} minutes.` })
             }).then(() => {
               setIsSearchingDriver(false);
               setBookingSuccess(false);
@@ -270,8 +290,8 @@ export default function BookRidePage({ user, onLogout }) {
               setActiveBookingData(null);
               setRideNotification({
                 type: 'declined',
-                title: 'No Driver Found ⏱️',
-                message: 'Your ride was automatically cancelled after 15 minutes with no driver response. Please try again.'
+                title: 'No Captain Found ⏱️',
+                message: `Your ride was automatically cancelled after ${waitMins} minutes with no driver response. Please try again.`
               });
             }).catch(() => {});
           }
@@ -283,7 +303,7 @@ export default function BookRidePage({ user, onLogout }) {
       if (interval) clearInterval(interval);
       if (countdownInterval) clearInterval(countdownInterval);
     };
-  }, [activeBookingData?.id, activeBookingData?.status, isSearchingDriver]);
+  }, [activeBookingData?.id, activeBookingData?.status, isSearchingDriver, customerWaitMinutes]);
 
   // Close suggestion dropdowns when clicking outside
   useEffect(() => {
@@ -539,7 +559,7 @@ export default function BookRidePage({ user, onLogout }) {
     };
 
     setIsSearchingDriver(true);
-    setSearchTimeLeft(15 * 60);
+    setSearchTimeLeft((customerWaitMinutes || 5) * 60);
 
     try {
       const res = await fetchWithAuth('/api/v1/bookings/bookings/', {

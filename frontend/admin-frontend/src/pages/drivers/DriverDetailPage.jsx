@@ -926,7 +926,8 @@ export default function DriverDetailPage() {
                   <div><span style={{ fontSize: 12, color: 'var(--text-muted)' }}>License Expiry Date:</span> <strong style={{ display: 'block', fontSize: 14 }}>{driver.license_expiry || '—'}</strong></div>
                   <div><span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Driving Experience:</span> <strong style={{ display: 'block', fontSize: 14 }}>{driver.experience_years} Years</strong></div>
                   <div><span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Gender / DOB:</span> <strong style={{ display: 'block', fontSize: 14 }}>{driver.gender} · {driver.date_of_birth}</strong></div>
-                  <div><span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Operating City:</span> <strong style={{ display: 'block', fontSize: 14 }}>{driver.city}, {driver.state || 'Delhi NCR'}</strong></div>
+                  <div><span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Operating City:</span> <strong style={{ display: 'block', fontSize: 14 }}>{driver.city || driver.service_city || 'Delhi NCR'}, {driver.state || 'Delhi NCR'}</strong></div>
+                  <div style={{ gridColumn: '1 / -1' }}><span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ride Operating Address (Where Captain Rides the Bike):</span> <strong style={{ display: 'block', fontSize: 14, color: 'var(--text-primary)' }}>{driver.operating_address || driver.last_location_address || 'Not specified'}</strong></div>
                 </div>
               </div>
 

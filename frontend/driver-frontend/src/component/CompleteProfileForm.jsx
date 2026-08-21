@@ -63,6 +63,15 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
 
+        if (res.status === 404 || res.status === 401) {
+          // User was deleted from database or session expired
+          localStorage.removeItem('raahgo_driver_user');
+          localStorage.removeItem('driver_access_token');
+          localStorage.removeItem('driver_refresh_token');
+          window.location.href = '/login';
+          return;
+        }
+
         if (res.ok) {
           const data = await res.json();
           const u = data.user;
@@ -76,6 +85,8 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
             if (u.gender) setGender(u.gender);
             if (u.date_of_birth) setDob(u.date_of_birth);
           }
+          if (data.service_city) setServiceCity(data.service_city);
+          if (data.operating_address) setOperatingAddress(data.operating_address);
           if (data.approval_status) {
             setApprovalStatus(data.approval_status);
             if (data.approval_status === 'Approved') setIsVerified(true);
@@ -121,12 +132,14 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
             });
           }
           if (data.completed_steps && data.completed_steps.length > 0) {
-            setCompletedSteps(new Set(data.completed_steps));
-            const maxStep = Math.max(...data.completed_steps);
-            const targetStep = Math.min(maxStep + 1, 11);
-            if (targetStep >= 3) {
-              setCurrentStep(targetStep);
-            }
+            const completedSet = new Set(data.completed_steps);
+            setCompletedSteps(completedSet);
+            // Sequential check: find the first incomplete step starting from Step 3
+            const allSteps = [3, 4, 5, 6, 7, 8, 9, 10, 11];
+            const nextIncompleteStep = allSteps.find((st) => !completedSet.has(st)) || 3;
+            setCurrentStep(nextIncompleteStep);
+          } else {
+            setCurrentStep(3);
           }
         }
       } catch (err) {
@@ -219,6 +232,12 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
   );
   const [gender, setGender] = useState('Male');
   const [dob, setDob] = useState('');
+  const [serviceCity, setServiceCity] = useState(
+    initialData?.service_city || 'Delhi NCR'
+  );
+  const [operatingAddress, setOperatingAddress] = useState(
+    initialData?.operating_address || ''
+  );
 
   // Step 4: Service Selection
   const [selectedServices, setSelectedServices] = useState(['city_rides']);
@@ -452,6 +471,8 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
       payload.gender = gender;
       payload.date_of_birth = dob;
       payload.email = email;
+      payload.service_city = serviceCity;
+      payload.operating_address = operatingAddress;
     } else if (stepNum === 4) {
       payload.selected_services = selectedServices;
     } else if (stepNum === 5) {
@@ -565,6 +586,8 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
         }
       }
       if (!dob) errors.dob = 'Date of birth is required.';
+      if (!serviceCity.trim()) errors.serviceCity = 'Operating city is required.';
+      if (!operatingAddress.trim()) errors.operatingAddress = 'Please enter the address/area where you will ride the bike.';
       setBasicDetailErrors(errors);
       if (Object.keys(errors).length > 0) {
         return;
@@ -1086,6 +1109,48 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                     className={`w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border focus:outline-none ${basicDetailErrors.dob ? 'border-[#FF3B30] focus:border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
                   />
                   {basicDetailErrors.dob && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{basicDetailErrors.dob}</p>}
+                </div>
+              </div>
+
+              {/* Operating City & Ride Location Address */}
+              <div className="space-y-3 p-3.5 bg-[#F8F9FA] rounded-2xl border border-[#E5E5EA]">
+                <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#1C1C1E]">
+                  <MapPin className="w-4 h-4 text-[#FFC000]" />
+                  <span>Riding Base & Service Location</span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+                    Operating City / Service Region
+                  </label>
+                  <input
+                    type="text"
+                    value={serviceCity}
+                    onChange={(e) => {
+                      setServiceCity(e.target.value);
+                      setBasicDetailErrors((prev) => ({ ...prev, serviceCity: '' }));
+                    }}
+                    placeholder="e.g. Delhi NCR, Noida, Jaipur, Gurgaon"
+                    className={`w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border focus:outline-none ${basicDetailErrors.serviceCity ? 'border-[#FF3B30] focus:border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
+                  />
+                  {basicDetailErrors.serviceCity && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{basicDetailErrors.serviceCity}</p>}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+                    Ride Operating Address (Where you will ride the bike)
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={operatingAddress}
+                    onChange={(e) => {
+                      setOperatingAddress(e.target.value);
+                      setBasicDetailErrors((prev) => ({ ...prev, operatingAddress: '' }));
+                    }}
+                    placeholder="Enter locality, stand address or area where you plan to take rides (e.g. Connaught Place, Central Delhi)"
+                    className={`w-full bg-white text-[#1C1C1E] font-medium text-xs rounded-xl py-2.5 px-3 border focus:outline-none resize-none ${basicDetailErrors.operatingAddress ? 'border-[#FF3B30] focus:border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
+                  />
+                  {basicDetailErrors.operatingAddress && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{basicDetailErrors.operatingAddress}</p>}
                 </div>
               </div>
             </div>

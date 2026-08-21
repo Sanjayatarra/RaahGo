@@ -146,7 +146,7 @@ export function DriverList() {
         title="All Captain"
         columns={DRIVER_COLS}
         data={drivers}
-        searchKeys={['name', 'full_name', 'phone', 'phone_number', 'city', 'username']}
+        searchKeys={['name', 'full_name', 'phone', 'phone_number', 'city', 'service_city', 'operating_address', 'username']}
         filters={[
           { key: 'status', label: 'Status', options: [
             { value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' },

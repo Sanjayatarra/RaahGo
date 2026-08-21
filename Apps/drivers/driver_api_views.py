@@ -63,11 +63,6 @@ def get_driver_from_request(request):
         if d:
             return d
 
-    # Fallback to the most recent driver in database
-    recent = Driver.objects.order_by('-updated_at').first()
-    if recent:
-        return recent
-
     return None
 
 
@@ -109,15 +104,48 @@ class DriverRegisterView(APIView):
                 is_phone_verified=True
             )
 
+        operating_address = request.data.get('operating_address') or request.data.get('address')
+        service_city = request.data.get('service_city') or request.data.get('city')
+        operating_pincode = request.data.get('operating_pincode') or request.data.get('pincode')
+
         driver, _ = Driver.objects.get_or_create(
             user=user,
             defaults={
                 'license_number': license_number,
                 'approval_status': Driver.ApprovalStatus.APPROVED,
                 'availability_status': Driver.AvailabilityStatus.ONLINE,
-                'rating': Decimal('5.00')
+                'rating': Decimal('5.00'),
+                'operating_address': operating_address,
+                'service_city': service_city,
+                'operating_pincode': operating_pincode,
             }
         )
+        if operating_address:
+            driver.operating_address = operating_address
+        if service_city:
+            driver.service_city = service_city
+        if operating_pincode:
+            driver.operating_pincode = operating_pincode
+        driver.save()
+
+        # Update UserAddress record
+        if operating_address or service_city:
+            try:
+                from users.models import UserAddress
+                UserAddress.objects.update_or_create(
+                    user=user,
+                    title=UserAddress.TitleChoices.WORK,
+                    defaults={
+                        'address_line_1': operating_address or f"Riding Base - {service_city or 'City'}",
+                        'city': service_city or 'Delhi NCR',
+                        'postal_code': operating_pincode or '110001',
+                        'state': 'Delhi NCR',
+                        'country': 'India',
+                        'is_default': True,
+                    }
+                )
+            except Exception as ex:
+                print(f"[DriverRegisterView] Error saving UserAddress: {ex}")
 
         # Ensure vehicle exists
         v_type = VehicleType.objects.filter(name__iexact=vehicle_type_name).first() or VehicleType.objects.first()
@@ -141,7 +169,9 @@ class DriverRegisterView(APIView):
             'driver_id': str(driver.id),
             'user_id': str(user.id),
             'approval_status': driver.approval_status,
-            'availability_status': driver.availability_status
+            'availability_status': driver.availability_status,
+            'operating_address': driver.operating_address,
+            'service_city': driver.service_city
         }, status=status.HTTP_201_CREATED)
 
 
@@ -188,6 +218,9 @@ class DriverProfileView(APIView):
             'total_trips': driver.total_trips,
             'approval_status': driver.approval_status,
             'availability_status': driver.availability_status,
+            'operating_address': driver.operating_address or '',
+            'service_city': driver.service_city or '',
+            'operating_pincode': driver.operating_pincode or '',
             'current_latitude': str(driver.current_latitude) if driver.current_latitude else None,
             'current_longitude': str(driver.current_longitude) if driver.current_longitude else None,
             'duty_seconds_today': driver.get_current_daily_online_seconds(),
@@ -242,6 +275,12 @@ class DriverProfileView(APIView):
             driver.experience_years = data['experience_years']
         if 'license_number' in data:
             driver.license_number = data['license_number']
+        if 'operating_address' in data:
+            driver.operating_address = data['operating_address']
+        if 'service_city' in data:
+            driver.service_city = data['service_city']
+        if 'operating_pincode' in data:
+            driver.operating_pincode = data['operating_pincode']
         driver.save()
 
         return Response({'message': 'Profile updated successfully'}, status=status.HTTP_200_OK)
@@ -709,7 +748,24 @@ class DriverRideRequestsView(APIView):
         if driver:
             driver_v_types = list(driver.vehicles.filter(is_active=True).values_list('vehicle_type__name', flat=True))
 
-        qs = Booking.objects.filter(status=Booking.BookingStatus.SEARCHING).order_by('-created_at')
+        try:
+            wait_time_mins = int(SystemSetting.get_setting('customer_wait_time', '5') or 5)
+        except Exception:
+            wait_time_mins = 5
+        cutoff = timezone.now() - timedelta(minutes=wait_time_mins)
+
+        # Auto-cancel expired searching bookings so captains do not see timed-out requests
+        stale_qs = Booking.objects.filter(status=Booking.BookingStatus.SEARCHING, created_at__lte=cutoff)
+        for sb in stale_qs:
+            sb.status = Booking.BookingStatus.CANCELLED
+            sb.save()
+            BookingTracking.objects.create(
+                booking=sb,
+                status=Booking.BookingStatus.CANCELLED,
+                remarks=f'Auto-cancelled: no driver found within {wait_time_mins} minutes.'
+            )
+
+        qs = Booking.objects.filter(status=Booking.BookingStatus.SEARCHING, created_at__gt=cutoff).order_by('-created_at')
 
         # 2. Filter by Vehicle Types if driver has specific registered types
         if driver_v_types:
@@ -788,8 +844,27 @@ class DriverRideAcceptView(APIView):
         if not booking:
             return Response({'error': 'Ride not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        try:
+            wait_time_mins = int(SystemSetting.get_setting('customer_wait_time', '5') or 5)
+        except Exception:
+            wait_time_mins = 5
+        cutoff = timezone.now() - timedelta(minutes=wait_time_mins)
+
+        if booking.status == Booking.BookingStatus.SEARCHING and booking.created_at <= cutoff:
+            booking.status = Booking.BookingStatus.CANCELLED
+            booking.save()
+            BookingTracking.objects.create(
+                booking=booking,
+                status=Booking.BookingStatus.CANCELLED,
+                remarks=f'Auto-cancelled: no driver found within {wait_time_mins} minutes.'
+            )
+            return Response({'error': 'This ride request has expired and was auto-cancelled.'}, status=status.HTTP_400_BAD_REQUEST)
+
         if booking.status in [Booking.BookingStatus.ACCEPTED, Booking.BookingStatus.IN_TRIP, Booking.BookingStatus.COMPLETED]:
             return Response({'error': 'Ride has already been accepted or finished by another captain'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if booking.status == Booking.BookingStatus.CANCELLED:
+            return Response({'error': 'This ride has been cancelled.'}, status=status.HTTP_400_BAD_REQUEST)
 
         booking.driver = driver
         booking.status = Booking.BookingStatus.ACCEPTED

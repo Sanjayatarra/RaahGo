@@ -37,14 +37,11 @@ class DriverViewSet(viewsets.ModelViewSet):
             user = request.user
 
         if not user:
-            # Fallback to the latest driver profile if querying locally
-            driver = Driver.objects.order_by('-updated_at').first()
-            if driver:
-                user = driver.user
-            else:
-                return Response({'error': 'Captain profile not found.'}, status=status.HTTP_404_NOT_FOUND)
-        else:
-            driver = Driver.objects.filter(user=user).first()
+            return Response({'error': 'Captain profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        driver = Driver.objects.filter(user=user).first()
+        if not driver:
+            return Response({'error': 'Captain driver record not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         vehicle = driver.vehicles.first() if driver else None
 
@@ -60,7 +57,7 @@ class DriverViewSet(viewsets.ModelViewSet):
             key = doc_type_mapping.get(doc.document_type, doc.document_type.lower().replace(' ', '_'))
             documents[key] = {
                 'id': str(doc.id),
-                'name': doc.document_type,
+                'name': doc.document_url.split('/')[-1] if doc.document_url else doc.document_type,
                 'url': doc.document_url,
                 'status': doc.verification_status,
             }
@@ -69,9 +66,9 @@ class DriverViewSet(viewsets.ModelViewSet):
         emergency = DriverEmergencyContact.objects.filter(driver=driver).first() if driver else None
 
         completed_steps = [1, 2]
-        if user.first_name:
+        if user.first_name and user.date_of_birth and (driver and driver.operating_address):
             completed_steps.append(3)
-        if vehicle:
+        if vehicle and vehicle.registration_number:
             completed_steps.extend([4, 5])
         if len(documents) >= 5 or ('license' in documents and 'rc' in documents):
             completed_steps.append(6)
@@ -79,15 +76,18 @@ class DriverViewSet(viewsets.ModelViewSet):
             completed_steps.append(7)
         if emergency and emergency.phone_number:
             completed_steps.append(8)
-        if driver:
+        if driver and driver.terms_accepted:
             completed_steps.append(9)
-            completed_steps.append(10)
         if driver and driver.approval_status == Driver.ApprovalStatus.APPROVED:
+            completed_steps.append(10)
             completed_steps.append(11)
 
         return Response({
             'user': UserSerializer(user).data,
             'approval_status': driver.approval_status if driver else 'Pending',
+            'operating_address': driver.operating_address if driver else '',
+            'service_city': driver.service_city if driver else '',
+            'operating_pincode': driver.operating_pincode if driver else '',
             'terms_accepted': driver.terms_accepted if driver else False,
             'terms_accepted_at': driver.terms_accepted_at.strftime('%Y-%m-%d %H:%M:%S') if (driver and driver.terms_accepted_at) else None,
             'vehicle': {
@@ -191,9 +191,35 @@ class DriverViewSet(viewsets.ModelViewSet):
                 if not User.objects.filter(username=username, role=User.RoleChoices.DRIVER).exclude(id=user.id).exists():
                     user.username = username
 
-            if email and email != user.email:
-                if not User.objects.filter(email__iexact=email, role=User.RoleChoices.DRIVER).exclude(id=user.id).exists():
-                    user.email = email
+            operating_address = request.data.get('operating_address') or request.data.get('address')
+            service_city = request.data.get('service_city') or request.data.get('city')
+            operating_pincode = request.data.get('operating_pincode') or request.data.get('pincode')
+
+            if operating_address:
+                driver.operating_address = operating_address
+            if service_city:
+                driver.service_city = service_city
+            if operating_pincode:
+                driver.operating_pincode = operating_pincode
+            driver.save()
+
+            if operating_address or service_city:
+                try:
+                    from users.models import UserAddress
+                    UserAddress.objects.update_or_create(
+                        user=user,
+                        title=UserAddress.TitleChoices.WORK,
+                        defaults={
+                            'address_line_1': operating_address or f"Riding Base - {service_city or 'City'}",
+                            'city': service_city or 'Delhi NCR',
+                            'postal_code': operating_pincode or '110001',
+                            'state': 'Delhi NCR',
+                            'country': 'India',
+                            'is_default': True,
+                        }
+                    )
+                except Exception as ex:
+                    print(f"[complete_captain_profile] Error saving UserAddress: {ex}")
 
             user.save()
 

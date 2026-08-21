@@ -19,8 +19,12 @@ from .serializers import (
 from vehicles.models import VehicleType
 from users.models import SystemSetting
 
-# Auto-cancel a Searching ride after this many minutes with no driver
-AUTO_CANCEL_SEARCHING_MINUTES = 15
+# Auto-cancel a Searching ride after this many minutes with no driver (configurable via Admin Settings)
+def get_customer_wait_time_minutes():
+    try:
+        return int(SystemSetting.get_setting('customer_wait_time', '5') or 5)
+    except Exception:
+        return 5
 
 
 def calculate_haversine_distance(lat1, lon1, lat2, lon2):
@@ -140,7 +144,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         """
         GET /api/v1/bookings/bookings/active/
         Returns the customer's current non-terminal booking, auto-cancelling
-        any Searching ride that has been waiting longer than AUTO_CANCEL_SEARCHING_MINUTES.
+        any Searching ride that has been waiting longer than customer_wait_time minutes.
         """
         from users.models import User
         user = request.user
@@ -169,16 +173,17 @@ class BookingViewSet(viewsets.ModelViewSet):
         if not active:
             return Response(None, status=status.HTTP_200_OK)
 
-        # Auto-cancel if Searching for longer than AUTO_CANCEL_SEARCHING_MINUTES
+        # Auto-cancel if Searching for longer than customer_wait_time
         if active.status == Booking.BookingStatus.SEARCHING:
-            cutoff = timezone.now() - timedelta(minutes=AUTO_CANCEL_SEARCHING_MINUTES)
+            wait_time_mins = get_customer_wait_time_minutes()
+            cutoff = timezone.now() - timedelta(minutes=wait_time_mins)
             if active.created_at <= cutoff:
                 active.status = Booking.BookingStatus.CANCELLED
                 active.save()
                 BookingTracking.objects.create(
                     booking=active,
                     status=Booking.BookingStatus.CANCELLED,
-                    remarks=f'Auto-cancelled: no driver found within {AUTO_CANCEL_SEARCHING_MINUTES} minutes.'
+                    remarks=f'Auto-cancelled: no driver found within {wait_time_mins} minutes.'
                 )
                 return Response(
                     {'auto_cancelled': True, 'booking': BookingSerializer(active).data},
@@ -202,8 +207,20 @@ class BookingViewSet(viewsets.ModelViewSet):
             if driver_obj and driver_obj.vehicles.exists():
                 driver_v_name = driver_obj.vehicles.first().vehicle_type.name
 
-        # Strictly filter Searching status in Django Backend DB
-        qs = Booking.objects.filter(status=Booking.BookingStatus.SEARCHING).order_by('-created_at')
+        # Strictly filter Searching status in Django Backend DB (auto-cancelling expired rides)
+        wait_time_mins = get_customer_wait_time_minutes()
+        cutoff = timezone.now() - timedelta(minutes=wait_time_mins)
+        stale_qs = Booking.objects.filter(status=Booking.BookingStatus.SEARCHING, created_at__lte=cutoff)
+        for sb in stale_qs:
+            sb.status = Booking.BookingStatus.CANCELLED
+            sb.save()
+            BookingTracking.objects.create(
+                booking=sb,
+                status=Booking.BookingStatus.CANCELLED,
+                remarks=f'Auto-cancelled: no driver found within {wait_time_mins} minutes.'
+            )
+
+        qs = Booking.objects.filter(status=Booking.BookingStatus.SEARCHING, created_at__gt=cutoff).order_by('-created_at')
 
         nearby_list = []
         try:
@@ -243,7 +260,8 @@ class BookingViewSet(viewsets.ModelViewSet):
         # ── Auto-cancel stale Searching rides before allowing a new booking ──
         user = self.request.user
         if user and getattr(user, 'is_authenticated', False) and isinstance(user, User):
-            cutoff = timezone.now() - timedelta(minutes=AUTO_CANCEL_SEARCHING_MINUTES)
+            wait_time_mins = get_customer_wait_time_minutes()
+            cutoff = timezone.now() - timedelta(minutes=wait_time_mins)
             stale = Booking.objects.filter(
                 customer=user,
                 status=Booking.BookingStatus.SEARCHING,
@@ -255,7 +273,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                 BookingTracking.objects.create(
                     booking=b,
                     status=Booking.BookingStatus.CANCELLED,
-                    remarks=f'Auto-cancelled: no driver found within {AUTO_CANCEL_SEARCHING_MINUTES} minutes.'
+                    remarks=f'Auto-cancelled: no driver found within {wait_time_mins} minutes.'
                 )
         # ─────────────────────────────────────────────────────────────────────
 

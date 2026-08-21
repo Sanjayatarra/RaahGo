@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 
-from users.models import User, UserAddress, OTPVerification
+from users.models import User, UserAddress, OTPVerification, SystemSetting
 from vehicles.models import Vehicle, VehicleType
 from bookings.models import Booking, RideDetail, ParcelDetail, MovingDetail, BookingTracking
 from bookings.serializers import BookingSerializer
@@ -557,12 +557,21 @@ class CustomerActiveRideView(APIView):
         if not active:
             return Response(None, status=status.HTTP_200_OK)
 
-        # Auto-cancel after 15 min if still Searching
+        # Auto-cancel after customer_wait_time min if still Searching
         if active.status == Booking.BookingStatus.SEARCHING:
-            cutoff = timezone.now() - timedelta(minutes=15)
+            try:
+                wait_time_mins = int(SystemSetting.get_setting('customer_wait_time', '5') or 5)
+            except Exception:
+                wait_time_mins = 5
+            cutoff = timezone.now() - timedelta(minutes=wait_time_mins)
             if active.created_at <= cutoff:
                 active.status = Booking.BookingStatus.CANCELLED
                 active.save()
+                BookingTracking.objects.create(
+                    booking=active,
+                    status=Booking.BookingStatus.CANCELLED,
+                    remarks=f'Auto-cancelled: no driver found within {wait_time_mins} minutes.'
+                )
                 return Response({'auto_cancelled': True, 'booking': BookingSerializer(active).data}, status=status.HTTP_200_OK)
 
         return Response(BookingSerializer(active).data, status=status.HTTP_200_OK)
