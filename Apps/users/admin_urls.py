@@ -1,10 +1,12 @@
 from django.urls import path
 from . import admin_api_views
+from .token_refresh_views import SingleDeviceTokenRefreshView
 
 urlpatterns = [
     # ── 1. Auth ───────────────────────────────────────────────
     path('auth/login/', admin_api_views.AdminLoginView.as_view(), name='admin-api-login'),
     path('auth/logout/', admin_api_views.AdminLogoutView.as_view(), name='admin-api-logout'),
+    path('auth/refresh/', SingleDeviceTokenRefreshView.as_view(), name='admin-api-refresh'),
     path('auth/me/', admin_api_views.AdminMeView.as_view(), name='admin-api-me'),
 
     # ── 2. Dashboard ──────────────────────────────────────────

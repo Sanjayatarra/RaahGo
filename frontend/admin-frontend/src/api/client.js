@@ -17,14 +17,84 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle 401 → redirect to login (except when already on login request)
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error, token = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
+
+// Handle 401 with automatic token refresh
 api.interceptors.response.use(
   (res) => res,
-  (err) => {
-    if (err.response?.status === 401 && !err.config?.url?.includes('/auth/login/')) {
-      localStorage.removeItem('admin_token');
-      window.location.href = '/login';
+  async (err) => {
+    const originalRequest = err.config;
+
+    // Don't retry auth login or refresh requests
+    if (
+      err.response?.status === 401 &&
+      !originalRequest?._retry &&
+      !originalRequest?.url?.includes('/auth/login/') &&
+      !originalRequest?.url?.includes('/auth/refresh/')
+    ) {
+      const refreshToken = localStorage.getItem('admin_refresh_token');
+      if (!refreshToken) {
+        localStorage.removeItem('admin_token');
+        localStorage.removeItem('admin_refresh_token');
+        localStorage.removeItem('admin_session_timeout');
+        window.location.href = '/login';
+        return Promise.reject(err);
+      }
+
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then((token) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            return api(originalRequest);
+          })
+          .catch((err) => Promise.reject(err));
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        const response = await axios.post(
+          `${BASE_URL}/api/admin/auth/refresh/`,
+          { refresh: refreshToken },
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+
+        const newAccessToken = response.data?.access;
+        if (newAccessToken) {
+          localStorage.setItem('admin_token', newAccessToken);
+          api.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
+          originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+
+          processQueue(null, newAccessToken);
+          return api(originalRequest);
+        }
+      } catch (refreshErr) {
+        processQueue(refreshErr, null);
+        localStorage.removeItem('admin_token');
+        localStorage.removeItem('admin_refresh_token');
+        localStorage.removeItem('admin_session_timeout');
+        window.location.href = '/login';
+        return Promise.reject(refreshErr);
+      } finally {
+        isRefreshing = false;
+      }
     }
+
     return Promise.reject(err);
   }
 );

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -8,13 +8,22 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams.get('reason') === 'session_timeout') {
+      setInfoMessage('Your session timed out due to inactivity. Please sign in again.');
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setInfoMessage('');
     setLoading(true);
     try {
       const ok = await login(email, password);
@@ -40,6 +49,13 @@ export default function Login() {
 
         <h2 className="auth-title">Welcome back</h2>
         <p className="auth-subtitle">Sign in to your admin account to continue</p>
+
+        {infoMessage && (
+          <div className="alert alert-warning" style={{ marginBottom: 16 }}>
+            <AlertCircle size={16} />
+            {infoMessage}
+          </div>
+        )}
 
         {error && (
           <div className="alert alert-danger" style={{ marginBottom: 16 }}>
