@@ -7,15 +7,93 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 
 from users.models import User, SystemSetting
-from drivers.models import Driver, DriverDocument, DriverBankAccount, DriverEmergencyContact
+from drivers.models import Driver, DriverDocument, DriverBankAccount, DriverEmergencyContact, get_max_duty_seconds
 from vehicles.models import Vehicle, VehicleType
 from bookings.models import Booking, RideDetail, BookingTracking
 from bookings.serializers import BookingSerializer
 from tracking.models import DriverLocation
+import datetime
+from datetime import timedelta, date
 from wallets.models import Wallet, WalletTransaction
 from reviews.models import Rating
 from notifications.models import Notification
 from bookings.views import calculate_haversine_distance
+
+def _parse_date_safe(val):
+    if not val:
+        return None
+    if isinstance(val, (datetime.date, datetime.datetime)):
+        return val.date() if isinstance(val, datetime.datetime) else val
+    if isinstance(val, str):
+        val = val.strip()
+        for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%Y/%m/%d', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S'):
+            try:
+                return datetime.datetime.strptime(val, fmt).date()
+            except (ValueError, TypeError):
+                continue
+    return None
+
+def check_driver_can_go_online(driver):
+    """
+    Strict validation to ensure captain is fully eligible to go online:
+    1. Account is active & unblocked
+    2. Approval status is APPROVED
+    3. KYC documents exist and ALL documents are VERIFIED (none pending, rejected, or missing)
+    4. None of the documents are expired
+    5. A verified Driving License is present
+    6. Active vehicle exists, is active, and is approved
+    7. Driver rating meets minimum platform standard
+    """
+    if not driver or not driver.user or not driver.user.is_active:
+        return False, "Your driver account is deactivated or locked. Please contact RaahGo Support."
+
+    if driver.approval_status != Driver.ApprovalStatus.APPROVED:
+        if driver.approval_status == Driver.ApprovalStatus.REJECTED:
+            return False, "Your KYC application was rejected by admin. Please review rejected documents and re-upload."
+        elif driver.approval_status == Driver.ApprovalStatus.SUSPENDED:
+            return False, "Your driver account is suspended. Please contact RaahGo support."
+        return False, "Your KYC verification is currently pending review by RaahGo Operations."
+
+    # Check compliance documents
+    docs = list(DriverDocument.objects.filter(driver=driver))
+    if not docs:
+        return False, "No KYC compliance documents found. Please upload required documents (Driving License, Aadhaar, RC, Insurance) for admin verification before going online."
+
+    unverified = [d for d in docs if d.verification_status != DriverDocument.VerificationStatus.VERIFIED]
+    if unverified:
+        unverified_names = [d.document_type.upper() for d in unverified]
+        return False, f"Your document(s) ({', '.join(unverified_names)}) are not verified yet. All KYC documents must be verified by admin before you can go online."
+
+    today = timezone.now().date()
+    expired = []
+    for d in docs:
+        exp = _parse_date_safe(d.expiry_date)
+        if exp and exp < today:
+            expired.append(f"{d.document_type.upper()} (expired on {exp})")
+    if expired:
+        return False, f"Your document(s) ({', '.join(expired)}) have expired. Please update renewed documents before going online."
+
+    # Check required license
+    has_license = any('license' in d.document_type.lower() and d.verification_status == DriverDocument.VerificationStatus.VERIFIED for d in docs)
+    if not has_license:
+        return False, "A verified Driving License is required to go online."
+
+    # Check active vehicle
+    active_vehicle = Vehicle.objects.filter(driver=driver, is_active=True).first()
+    if not active_vehicle:
+        return False, "No active vehicle assigned. Please register your vehicle first."
+    if not active_vehicle.is_approved:
+        return False, f"Your assigned vehicle ({active_vehicle.make} {active_vehicle.model} - {active_vehicle.registration_number}) is awaiting admin verification and approval."
+
+    # Check rating
+    try:
+        min_rating_threshold = float(SystemSetting.get_setting('min_rating', '3.5'))
+        if driver.rating and float(driver.rating) < min_rating_threshold:
+            return False, f"Your captain rating ({driver.rating}) is below the required minimum of {min_rating_threshold}. Please contact RaahGo Support."
+    except Exception:
+        pass
+
+    return True, None
 
 def get_driver_from_request(request):
     """Helper to extract Driver instance from request or authentication credentials"""
@@ -100,13 +178,15 @@ class DriverRegisterView(APIView):
                 role=User.RoleChoices.DRIVER,
                 first_name=first_name,
                 last_name=last_name,
-                is_verified=True,
+                is_verified=False,
                 is_phone_verified=True
             )
 
         operating_address = request.data.get('operating_address') or request.data.get('address')
         service_city = request.data.get('service_city') or request.data.get('city')
         operating_pincode = request.data.get('operating_pincode') or request.data.get('pincode')
+        state = request.data.get('state') or 'Delhi NCR'
+        country = request.data.get('country') or 'India'
 
         driver, _ = Driver.objects.get_or_create(
             user=user,
@@ -136,11 +216,11 @@ class DriverRegisterView(APIView):
                     user=user,
                     title=UserAddress.TitleChoices.WORK,
                     defaults={
-                        'address_line_1': operating_address or f"Riding Base - {service_city or 'City'}",
-                        'city': service_city or 'Delhi NCR',
-                        'postal_code': operating_pincode or '110001',
-                        'state': 'Delhi NCR',
-                        'country': 'India',
+                        'address_line_1': operating_address or '',
+                        'city': service_city or '',
+                        'postal_code': operating_pincode or '',
+                        'state': state,
+                        'country': country,
                         'is_default': True,
                     }
                 )
@@ -160,7 +240,7 @@ class DriverRegisterView(APIView):
                 'year': 2024,
                 'color': 'Black',
                 'is_active': True,
-                'is_approved': True
+                'is_approved': True 
             }
         )
 
@@ -282,6 +362,25 @@ class DriverProfileView(APIView):
         if 'operating_pincode' in data:
             driver.operating_pincode = data['operating_pincode']
         driver.save()
+
+        # Update UserAddress record
+        if any(k in data for k in ['operating_address', 'service_city', 'operating_pincode', 'state', 'country']):
+            try:
+                from users.models import UserAddress
+                UserAddress.objects.update_or_create(
+                    user=driver.user,
+                    title=UserAddress.TitleChoices.WORK,
+                    defaults={
+                        'address_line_1': driver.operating_address or '',
+                        'city': driver.service_city or '',
+                        'postal_code': driver.operating_pincode or '',
+                        'state': data.get('state') or 'Delhi NCR',
+                        'country': data.get('country') or 'India',
+                        'is_default': True,
+                    }
+                )
+            except Exception as ex:
+                print(f"[DriverProfileView.patch] Error saving UserAddress: {ex}")
 
         return Response({'message': 'Profile updated successfully'}, status=status.HTTP_200_OK)
 
@@ -467,38 +566,73 @@ class DriverVehicleView(APIView):
         v_type_name = request.data.get('vehicle_type', 'Bike')
         v_type = VehicleType.objects.filter(name__iexact=v_type_name).first() or VehicleType.objects.first()
 
-        vehicle = Vehicle.objects.create(
-            driver=driver,
-            vehicle_type=v_type,
-            make=request.data.get('make', 'Standard'),
-            model=request.data.get('model', 'Express'),
-            registration_number=request.data.get('registration_number') or request.data.get('vehicle_number', f"DL{random.randint(10, 99)}AB{random.randint(1000, 9999)}"),
-            year=request.data.get('year', 2024),
-            color=request.data.get('color', 'Black'),
-            is_active=True,
-            is_approved=False
-        )
+        vehicle = driver.vehicles.first()
+        if vehicle:
+            vehicle.vehicle_type = v_type
+            vehicle.make = request.data.get('make', vehicle.make)
+            vehicle.model = request.data.get('model', vehicle.model)
+            vehicle.registration_number = request.data.get('registration_number') or request.data.get('vehicle_number', vehicle.registration_number)
+            vehicle.year = request.data.get('year', vehicle.year)
+            vehicle.color = request.data.get('color', vehicle.color)
+            vehicle.is_approved = False
+            vehicle.save()
+        else:
+            vehicle = Vehicle.objects.create(
+                driver=driver,
+                vehicle_type=v_type,
+                make=request.data.get('make', 'Standard'),
+                model=request.data.get('model', 'Express'),
+                registration_number=request.data.get('registration_number') or request.data.get('vehicle_number', f"DL{random.randint(10, 99)}AB{random.randint(1000, 9999)}"),
+                year=request.data.get('year', 2024),
+                color=request.data.get('color', 'Black'),
+                is_active=False,
+                is_approved=False
+            )
         return Response({
-            'message': 'Vehicle registered successfully. Pending admin approval.',
+            'message': 'Vehicle saved successfully. Pending admin approval.',
             'id': str(vehicle.id),
+            'make': vehicle.make,
+            'model': vehicle.model,
             'vehicle_number': vehicle.registration_number,
             'registration_number': vehicle.registration_number,
+            'vehicle_type': vehicle.vehicle_type.name if vehicle.vehicle_type else 'Car',
             'is_approved': False
-        }, status=status.HTTP_201_CREATED)
+        }, status=status.HTTP_200_OK)
 
     def patch(self, request, vehicle_id=None):
         driver = get_driver_from_request(request)
+        if not driver:
+            return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
+
         vehicle = driver.vehicles.filter(id=vehicle_id).first() if vehicle_id else driver.vehicles.first()
         if not vehicle:
-            return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
+            return self.post(request)
 
         for key in ['make', 'model', 'color', 'year', 'is_active']:
             if key in request.data:
                 setattr(vehicle, key, request.data[key])
         if 'vehicle_number' in request.data or 'registration_number' in request.data:
             vehicle.registration_number = request.data.get('registration_number') or request.data.get('vehicle_number')
+        if 'vehicle_type' in request.data:
+            v_type = VehicleType.objects.filter(name__iexact=request.data['vehicle_type']).first()
+            if v_type:
+                vehicle.vehicle_type = v_type
+
+        # Editing vehicle details resets approval to False (Pending Admin Review)
+        vehicle.is_approved = False
         vehicle.save()
-        return Response({'message': 'Vehicle updated successfully'}, status=status.HTTP_200_OK)
+
+        return Response({
+            'message': 'Vehicle updated successfully. Pending admin approval.',
+            'id': str(vehicle.id),
+            'make': vehicle.make,
+            'model': vehicle.model,
+            'registration_number': vehicle.registration_number,
+            'vehicle_type': vehicle.vehicle_type.name if vehicle.vehicle_type else 'Car',
+            'year': vehicle.year,
+            'color': vehicle.color,
+            'is_approved': False
+        }, status=status.HTTP_200_OK)
 
     def delete(self, request, vehicle_id):
         driver = get_driver_from_request(request)
@@ -507,6 +641,70 @@ class DriverVehicleView(APIView):
             return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
         vehicle.delete()
         return Response({'message': 'Vehicle removed successfully'}, status=status.HTTP_200_OK)
+
+
+class DriverBankView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        driver = get_driver_from_request(request)
+        if not driver:
+            return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
+        bank = DriverBankAccount.objects.filter(driver=driver, is_primary=True).first() or DriverBankAccount.objects.filter(driver=driver).first()
+        if not bank:
+            return Response(None, status=status.HTTP_200_OK)
+        return Response({
+            'id': str(bank.id),
+            'bank_name': bank.bank_name,
+            'account_number': bank.account_number,
+            'ifsc_code': bank.ifsc_code,
+            'account_holder_name': bank.account_holder_name,
+            'is_verified': bank.is_verified,
+            'is_primary': bank.is_primary
+        }, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        driver = get_driver_from_request(request)
+        if not driver:
+            return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        bank_name = request.data.get('bank_name', '').strip()
+        account_number = request.data.get('account_number', '').strip()
+        ifsc_code = request.data.get('ifsc_code', '').strip().upper()
+        account_holder_name = request.data.get('account_holder_name', '').strip()
+
+        bank = DriverBankAccount.objects.filter(driver=driver).first()
+        if bank:
+            bank.bank_name = bank_name or bank.bank_name
+            bank.account_number = account_number or bank.account_number
+            bank.ifsc_code = ifsc_code or bank.ifsc_code
+            bank.account_holder_name = account_holder_name or bank.account_holder_name
+            # Editing bank details resets verification to False (Pending Admin Review)
+            bank.is_verified = False
+            bank.save()
+        else:
+            bank = DriverBankAccount.objects.create(
+                driver=driver,
+                bank_name=bank_name,
+                account_number=account_number,
+                ifsc_code=ifsc_code,
+                account_holder_name=account_holder_name,
+                is_verified=False,
+                is_primary=True
+            )
+
+        return Response({
+            'message': 'Bank details saved successfully. Awaiting admin verification.',
+            'id': str(bank.id),
+            'bank_name': bank.bank_name,
+            'account_number': bank.account_number,
+            'ifsc_code': bank.ifsc_code,
+            'account_holder_name': bank.account_holder_name,
+            'is_verified': False
+        }, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        return self.post(request)
 
 
 # ============================================================================
@@ -521,57 +719,16 @@ class DriverStatusOnlineView(APIView):
         if not driver:
             return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        # ── 1. KYC Approval Rule Enforcement ────────────────────────────────
-        if driver.approval_status != Driver.ApprovalStatus.APPROVED:
-            reason = "Your KYC verification is currently pending review by RaahGo Operations."
-            if driver.approval_status == Driver.ApprovalStatus.REJECTED:
-                reason = "Your KYC application was rejected by admin. Please review rejected documents and re-upload."
-            elif driver.approval_status == Driver.ApprovalStatus.SUSPENDED:
-                reason = "Your driver account is suspended. Please contact RaahGo support."
-
+        # ── 1. Strict Eligibility & KYC Document Verification Check ─────────
+        can_go_online, block_reason = check_driver_can_go_online(driver)
+        if not can_go_online:
             return Response({
-                'error': f'Cannot go online: {reason}',
+                'error': f'Cannot go online: {block_reason}',
                 'approval_status': driver.approval_status,
                 'is_online': False
             }, status=status.HTTP_403_FORBIDDEN)
 
-        # ── 2. Approved Active Vehicle Check ─────────────────────────────────
         active_vehicle = Vehicle.objects.filter(driver=driver, is_active=True).first()
-        if not active_vehicle:
-            return Response({
-                'error': 'Cannot go online: No active vehicle assigned. Please register your vehicle first.',
-                'approval_status': driver.approval_status,
-                'is_online': False
-            }, status=status.HTTP_403_FORBIDDEN)
-
-        if not active_vehicle.is_approved:
-            return Response({
-                'error': f'Cannot go online: Your assigned vehicle ({active_vehicle.make} {active_vehicle.model} - {active_vehicle.registration_number}) is awaiting admin verification and approval.',
-                'approval_status': driver.approval_status,
-                'is_online': False
-            }, status=status.HTTP_403_FORBIDDEN)
-
-        # ── 3. Minimum Rating & Max Complaints Enforcement from Admin Settings ──
-        try:
-            min_rating_threshold = float(SystemSetting.get_setting('min_rating', '3.5'))
-            if driver.rating and float(driver.rating) < min_rating_threshold:
-                return Response({
-                    'error': f'Cannot go online: Your captain rating ({driver.rating}) is below the required minimum of {min_rating_threshold}. Please contact RaahGo Support.',
-                    'approval_status': driver.approval_status,
-                    'is_online': False
-                }, status=status.HTTP_403_FORBIDDEN)
-
-            max_complaints_limit = int(SystemSetting.get_setting('max_complaints', '5'))
-            # Check 1-star ratings or negative complaints
-            complaint_count = Rating.objects.filter(driver=driver, score__lte=2).count()
-            if complaint_count >= max_complaints_limit:
-                return Response({
-                    'error': f'Cannot go online: Your account has received {complaint_count} low-rating complaints (limit is {max_complaints_limit}). Please contact RaahGo Operations for review.',
-                    'approval_status': driver.approval_status,
-                    'is_online': False
-                }, status=status.HTTP_403_FORBIDDEN)
-        except Exception:
-            pass
 
         # ── 4. Daily Shift Limit Check ───────────────────────────────────────
         today = timezone.now().date()
@@ -579,16 +736,22 @@ class DriverStatusOnlineView(APIView):
             driver.daily_online_seconds = 0
             driver.last_duty_reset_date = today
 
-        if driver.daily_online_seconds >= 43200:
+        max_duty_sec = get_max_duty_seconds()
+        max_duty_hours = max_duty_sec / 3600
+        current_duty_sec = driver.get_current_daily_online_seconds()
+
+        if current_duty_sec >= max_duty_sec:
             driver.availability_status = Driver.AvailabilityStatus.OFFLINE
             driver.last_online_start = None
             driver.save()
             return Response({
-                'error': 'Daily 12-hour online shift limit reached for today.',
-                'is_online': False
+                'error': f'Daily {int(max_duty_hours)}-hour online shift limit reached for today. Maximum {int(max_duty_hours)} hours online per day permitted.',
+                'is_online': False,
+                'current_daily_online_seconds': current_duty_sec,
+                'max_duty_seconds': max_duty_sec
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # ── 4. Driver Goes Online & Ready for Rides ─────────────────────────
+        # ── 5. Driver Goes Online & Ready for Rides ─────────────────────────
         driver.last_online_start = timezone.now()
         driver.availability_status = Driver.AvailabilityStatus.ONLINE
         driver.save()
@@ -598,6 +761,8 @@ class DriverStatusOnlineView(APIView):
             'is_online': True,
             'is_available': True,
             'duty_seconds_today': driver.get_current_daily_online_seconds(),
+            'current_daily_online_seconds': driver.get_current_daily_online_seconds(),
+            'max_duty_seconds': max_duty_sec,
             'active_vehicle': {
                 'make': active_vehicle.make,
                 'model': active_vehicle.model,
@@ -634,11 +799,12 @@ class DriverStatusOfflineView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
         # ────────────────────────────────────────────────────────────────────
 
+        max_duty_sec = get_max_duty_seconds()
         if driver.last_online_start:
             midnight_today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
             effective_start = max(driver.last_online_start, midnight_today)
             elapsed = int((timezone.now() - effective_start).total_seconds())
-            driver.daily_online_seconds = min(43200, driver.daily_online_seconds + max(0, elapsed))
+            driver.daily_online_seconds = min(max_duty_sec, driver.daily_online_seconds + max(0, elapsed))
             driver.last_online_start = None
 
         driver.availability_status = Driver.AvailabilityStatus.OFFLINE
@@ -648,7 +814,9 @@ class DriverStatusOfflineView(APIView):
             'status': 'Offline',
             'is_online': False,
             'is_available': False,
-            'duty_seconds_today': driver.get_current_daily_online_seconds()
+            'duty_seconds_today': driver.get_current_daily_online_seconds(),
+            'current_daily_online_seconds': driver.get_current_daily_online_seconds(),
+            'max_duty_seconds': max_duty_sec
         }, status=status.HTTP_200_OK)
 
 

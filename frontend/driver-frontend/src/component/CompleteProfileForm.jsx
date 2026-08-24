@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Phone, KeyRound, User, Car, Upload, CreditCard, ShieldCheck, CheckCircle2,
-  FileText, ArrowRight, ArrowLeft, Check, Sparkles, AlertCircle, Clock, Award, Power, RefreshCw, MapPin
+  FileText, ArrowRight, ArrowLeft, Check, Sparkles, AlertCircle, Clock, Award, Power, RefreshCw
 } from 'lucide-react';
 
 const formatPhone = (val) => {
@@ -118,6 +118,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
             setBankName(data.bank.bank_name || '');
             setAccountNumber(data.bank.account_number || '');
             setIfscCode(data.bank.ifsc_code || '');
+            if (data.bank.passbook_image) setPassbookImage(data.bank.passbook_image);
           }
           if (data.emergency_contact) {
             setEmergencyName(data.emergency_contact.name || '');
@@ -263,6 +264,8 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
   const [accountNumber, setAccountNumber] = useState('');
   const [ifscCode, setIfscCode] = useState('');
   const [upiId, setUPIId] = useState('');
+  const [passbookImage, setPassbookImage] = useState('');
+  const [passbookFile, setPassbookFile] = useState(null);
 
   // Step 8: Emergency Contact
   const [emergencyName, setEmergencyName] = useState('');
@@ -500,10 +503,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
     }
 
     try {
-      const isDocumentStep = stepNum === 6;
-      let body;
-      let headers;
-      if (isDocumentStep) {
+      if (stepNum === 6) {
         body = new FormData();
         body.append('step', 6);
         body.append('phone_number', cleanPhone);
@@ -511,6 +511,18 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
         Object.entries(documents).forEach(([key, document]) => {
           if (document.file) body.append(`document_${key}`, document.file);
         });
+        headers = {};
+      } else if (stepNum === 7 && passbookFile) {
+        body = new FormData();
+        body.append('step', 7);
+        body.append('phone_number', cleanPhone);
+        if (email) body.append('email', email);
+        body.append('account_holder_name', accountHolder);
+        body.append('bank_name', bankName);
+        body.append('account_number', accountNumber);
+        body.append('ifsc_code', ifscCode);
+        if (upiId) body.append('upi_id', upiId);
+        body.append('passbook_image', passbookFile);
         headers = {};
       } else {
         body = JSON.stringify(payload);
@@ -575,7 +587,6 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
     if (currentStep === 3) {
       const errors = {};
       if (!firstName.trim()) errors.firstName = 'First name is required.';
-      if (!lastName.trim()) errors.lastName = 'Last name is required.';
       const cleanEmail = email.trim();
       if (!cleanEmail) {
         errors.email = 'Email address is required.';
@@ -585,9 +596,20 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
           errors.email = "Please enter a valid email address (e.g. rahul@gmail.com). Missing '@' or domain.";
         }
       }
-      if (!dob) errors.dob = 'Date of birth is required.';
-      if (!serviceCity.trim()) errors.serviceCity = 'Operating city is required.';
-      if (!operatingAddress.trim()) errors.operatingAddress = 'Please enter the address/area where you will ride the bike.';
+      if (!dob) {
+        errors.dob = 'Date of birth is required.';
+      } else {
+        const birthDate = new Date(dob);
+        const today = new Date();
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const m = today.getMonth() - birthDate.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+          age--;
+        }
+        if (age < 18) {
+          errors.dob = 'Captain must be at least 18 years old to register.';
+        }
+      }
       setBasicDetailErrors(errors);
       if (Object.keys(errors).length > 0) {
         return;
@@ -749,7 +771,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
 
   return (
     <div className="w-full max-w-6xl mx-auto bg-white border border-[#E5E5EA] rounded-2xl sm:rounded-3xl shadow-xl overflow-hidden flex flex-col md:flex-row my-2 sm:my-4 animate-fade-in">
-      
+
       {/* MOBILE STEPPER HEADER */}
       <div className="block md:hidden bg-[#1C1C1E] text-white p-4 border-b border-[#2C2C2E]">
         <div className="flex items-center justify-between mb-3">
@@ -789,13 +811,12 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                 onClick={() => {
                   if (isDone && st.id >= 3) setCurrentStep(st.id);
                 }}
-                className={`flex items-center gap-1 shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                  isCurr
+                className={`flex items-center gap-1 shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${isCurr
                     ? 'bg-[#FFC000] text-black shadow-xs'
                     : isDone
-                    ? 'bg-[#34C759]/20 text-[#34C759] border border-[#34C759]/30'
-                    : 'bg-[#2C2C2E] text-[#8E8E93]'
-                }`}
+                      ? 'bg-[#34C759]/20 text-[#34C759] border border-[#34C759]/30'
+                      : 'bg-[#2C2C2E] text-[#8E8E93]'
+                  }`}
               >
                 {isDone ? <Check className="w-3 h-3 text-[#34C759]" /> : st.id}
                 <span className="truncate max-w-[75px]">{st.title}</span>
@@ -842,24 +863,22 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                         setCurrentStep(step.id);
                       }
                     }}
-                    className={`flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200 ${
-                      isCompleted
+                    className={`flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200 ${isCompleted
                         ? 'cursor-pointer hover:bg-[#2C2C2E] text-[#8E8E93]'
                         : isCurrent
-                        ? 'bg-[#FFC000] text-black font-extrabold shadow-md shadow-[#FFC000]/20 cursor-pointer'
-                        : step.id <= (completedSteps.size > 0 ? Math.max(...completedSteps) + 1 : 3)
-                        ? 'cursor-pointer hover:bg-[#2C2C2E] text-white'
-                        : 'text-[#636366] opacity-60 cursor-not-allowed'
-                    }`}
+                          ? 'bg-[#FFC000] text-black font-extrabold shadow-md shadow-[#FFC000]/20 cursor-pointer'
+                          : step.id <= (completedSteps.size > 0 ? Math.max(...completedSteps) + 1 : 3)
+                            ? 'cursor-pointer hover:bg-[#2C2C2E] text-white'
+                            : 'text-[#636366] opacity-60 cursor-not-allowed'
+                      }`}
                   >
                     <div
-                      className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                        isCompleted
+                      className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${isCompleted
                           ? 'bg-[#34C759] text-white'
                           : isCurrent
-                          ? 'bg-black text-[#FFC000]'
-                          : 'bg-[#2C2C2E] text-[#8E8E93]'
-                      }`}
+                            ? 'bg-black text-[#FFC000]'
+                            : 'bg-[#2C2C2E] text-[#8E8E93]'
+                        }`}
                     >
                       {isCompleted ? <Check className="w-4 h-4 stroke-[3]" /> : step.id}
                     </div>
@@ -972,13 +991,12 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                     value={digit}
                     onChange={(e) => handleOtpChange(idx, e.target.value)}
                     onKeyDown={(e) => handleOtpKeyDown(idx, e)}
-                    className={`w-12 h-14 text-center text-xl font-extrabold rounded-xl bg-white border transition-all duration-200 focus:outline-none ${
-                      otpError
+                    className={`w-12 h-14 text-center text-xl font-extrabold rounded-xl bg-white border transition-all duration-200 focus:outline-none ${otpError
                         ? 'border-[#FF3B30] text-[#FF3B30] focus:ring-2 focus:ring-[#FF3B30]/20'
                         : digit
-                        ? 'border-[#FFC000] text-[#1C1C1E] shadow-xs ring-2 ring-[#FFC000]/30'
-                        : 'border-[#E5E5EA] text-[#1C1C1E] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20'
-                    }`}
+                          ? 'border-[#FFC000] text-[#1C1C1E] shadow-xs ring-2 ring-[#FFC000]/30'
+                          : 'border-[#E5E5EA] text-[#1C1C1E] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20'
+                      }`}
                   />
                 ))}
               </div>
@@ -1102,6 +1120,7 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                   <input
                     type="date"
                     value={dob}
+                    max={new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().split('T')[0]}
                     onChange={(e) => {
                       setDob(e.target.value);
                       setBasicDetailErrors((prev) => ({ ...prev, dob: '' }));
@@ -1109,48 +1128,6 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                     className={`w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border focus:outline-none ${basicDetailErrors.dob ? 'border-[#FF3B30] focus:border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
                   />
                   {basicDetailErrors.dob && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{basicDetailErrors.dob}</p>}
-                </div>
-              </div>
-
-              {/* Operating City & Ride Location Address */}
-              <div className="space-y-3 p-3.5 bg-[#F8F9FA] rounded-2xl border border-[#E5E5EA]">
-                <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#1C1C1E]">
-                  <MapPin className="w-4 h-4 text-[#FFC000]" />
-                  <span>Riding Base & Service Location</span>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
-                    Operating City / Service Region
-                  </label>
-                  <input
-                    type="text"
-                    value={serviceCity}
-                    onChange={(e) => {
-                      setServiceCity(e.target.value);
-                      setBasicDetailErrors((prev) => ({ ...prev, serviceCity: '' }));
-                    }}
-                    placeholder="e.g. Delhi NCR, Noida, Jaipur, Gurgaon"
-                    className={`w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border focus:outline-none ${basicDetailErrors.serviceCity ? 'border-[#FF3B30] focus:border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
-                  />
-                  {basicDetailErrors.serviceCity && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{basicDetailErrors.serviceCity}</p>}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
-                    Ride Operating Address (Where you will ride the bike)
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={operatingAddress}
-                    onChange={(e) => {
-                      setOperatingAddress(e.target.value);
-                      setBasicDetailErrors((prev) => ({ ...prev, operatingAddress: '' }));
-                    }}
-                    placeholder="Enter locality, stand address or area where you plan to take rides (e.g. Connaught Place, Central Delhi)"
-                    className={`w-full bg-white text-[#1C1C1E] font-medium text-xs rounded-xl py-2.5 px-3 border focus:outline-none resize-none ${basicDetailErrors.operatingAddress ? 'border-[#FF3B30] focus:border-[#FF3B30]' : 'border-[#E5E5EA] focus:border-[#FFC000]'}`}
-                  />
-                  {basicDetailErrors.operatingAddress && <p className="mt-1 text-xs font-medium text-[#FF3B30]">{basicDetailErrors.operatingAddress}</p>}
                 </div>
               </div>
             </div>
@@ -1176,11 +1153,10 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                     <div
                       key={serv.id}
                       onClick={() => toggleService(serv.id)}
-                      className={`p-3 sm:p-3.5 rounded-2xl border cursor-pointer transition-all ${
-                        active
+                      className={`p-3 sm:p-3.5 rounded-2xl border cursor-pointer transition-all ${active
                           ? 'border-[#FFC000] bg-[#FFF9E6] shadow-xs'
                           : 'border-[#E5E5EA] bg-white hover:border-[#C7C7CC]'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center justify-between mb-1">
                         <span className="font-extrabold text-xs text-[#1C1C1E]">{serv.label}</span>
@@ -1347,6 +1323,42 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                     onChange={(e) => setUPIId(e.target.value)}
                     className="w-full bg-white text-[#1C1C1E] font-bold text-sm rounded-xl py-2.5 px-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:outline-none"
                   />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#3A3A3C] mb-1">
+                  Bank Passbook / Cancelled Cheque Photo (Optional)
+                </label>
+                <div className="relative border-2 border-dashed border-[#E5E5EA] hover:border-[#FFC000] rounded-xl p-3 bg-[#F9F9FB] transition-colors flex items-center justify-between">
+                  <div className="flex items-center space-x-3 overflow-hidden">
+                    <div className="w-10 h-10 rounded-lg bg-[#FFF9E6] flex items-center justify-center flex-shrink-0 text-[#FFC000]">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div className="truncate">
+                      <p className="text-xs font-bold text-[#1C1C1E] truncate">
+                        {passbookFile ? passbookFile.name : (passbookImage ? 'Uploaded Passbook' : 'Upload Passbook / Cheque')}
+                      </p>
+                      <p className="text-[10px] text-[#8E8E93]">
+                        {passbookFile ? `${(passbookFile.size / 1024).toFixed(0)} KB` : 'JPG, PNG, or PDF up to 10MB'}
+                      </p>
+                    </div>
+                  </div>
+                  <label className="cursor-pointer bg-white hover:bg-gray-50 text-[#1C1C1E] text-xs font-bold py-1.5 px-3 rounded-lg border border-[#E5E5EA] shadow-sm transition-all flex items-center space-x-1 flex-shrink-0">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{passbookFile || passbookImage ? 'Change' : 'Upload'}</span>
+                    <input
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.pdf,.webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setPassbookFile(file);
+                        }
+                      }}
+                    />
+                  </label>
                 </div>
               </div>
             </div>
@@ -1573,11 +1585,10 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
               type="button"
               onClick={handleNext}
               disabled={isSavingStep || ((currentStep === 10 || currentStep === 11) && !isAccountApproved)}
-              className={`px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs flex items-center gap-1.5 sm:gap-2 transition-transform active:scale-[0.99] ${
-                isSavingStep || ((currentStep === 10 || currentStep === 11) && !isAccountApproved)
+              className={`px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-extrabold text-xs flex items-center gap-1.5 sm:gap-2 transition-transform active:scale-[0.99] ${isSavingStep || ((currentStep === 10 || currentStep === 11) && !isAccountApproved)
                   ? 'bg-gray-200 text-gray-400 cursor-not-allowed opacity-70'
                   : 'bg-[#FFC000] hover:bg-[#e6ad00] text-black shadow-md shadow-[#FFC000]/20 cursor-pointer'
-              }`}
+                }`}
             >
               {isSavingStep ? (
                 <>
@@ -1590,10 +1601,10 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
                     {currentStep === 10 && !isAccountApproved
                       ? 'Awaiting Admin Approval'
                       : currentStep === 11
-                      ? isAccountApproved
-                        ? 'Proceed to Go Online'
-                        : 'Awaiting Admin Response'
-                      : 'Next Step'}
+                        ? isAccountApproved
+                          ? 'Proceed to Go Online'
+                          : 'Awaiting Admin Response'
+                        : 'Next Step'}
                   </span>
                   <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </>

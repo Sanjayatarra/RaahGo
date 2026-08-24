@@ -16,6 +16,7 @@ from .driver_api_views import (
     DriverDocumentsView,
     DriverDocumentDetailView,
     DriverVehicleView,
+    DriverBankView,
     DriverStatusOnlineView,
     DriverStatusOfflineView,
     DriverStatusView,
@@ -67,6 +68,9 @@ urlpatterns = [
     # Vehicle
     path('vehicle/', DriverVehicleView.as_view(), name='driver-vehicle'),
     path('vehicle/<uuid:vehicle_id>/', DriverVehicleView.as_view(), name='driver-vehicle-detail'),
+
+    # Bank Account
+    path('bank/', DriverBankView.as_view(), name='driver-bank'),
 
     # Online / Offline Status
     path('status/online/', DriverStatusOnlineView.as_view(), name='driver-status-online'),

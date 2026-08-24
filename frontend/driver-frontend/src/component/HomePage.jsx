@@ -600,15 +600,33 @@ export default function HomePage({ user, onLogout }) {
               {/* Show GO ONLINE button only if currently offline */}
               {!isOnline && (
                 <div className="mt-4 pt-3 border-t border-gray-100">
-                  {(!user?.is_verified && driverProfile?.approval_status !== 'Approved') && (
-                    <div className="mb-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div>
-                        <strong className="block font-bold">Account Verification Pending</strong>
-                        <span>Your account is not verified yet. Please complete your profile KYC documents to start earning.</span>
-                      </div>
-                    </div>
-                  )}
+                  {(() => {
+                    const docs = driverProfile?.documents || [];
+                    const unverifiedDocs = docs.filter(
+                      d => String(d.status || d.verification_status).toLowerCase() !== 'verified'
+                    );
+                    const isPendingApproval = driverProfile?.approval_status !== 'Approved';
+                    const hasMissingDocs = docs.length === 0;
+
+                    if (hasMissingDocs || unverifiedDocs.length > 0 || isPendingApproval) {
+                      return (
+                        <div className="mb-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                          <div>
+                            <strong className="block font-bold">Document Verification Required</strong>
+                            <span>
+                              {hasMissingDocs
+                                ? 'Please upload your KYC compliance documents (License, Aadhaar, RC, Insurance) to get verified.'
+                                : unverifiedDocs.length > 0
+                                ? `Your document(s) (${unverifiedDocs.map(d => (d.document_type || 'Document').toUpperCase()).join(', ')}) are awaiting admin verification.`
+                                : 'Your account KYC is pending approval by RaahGo Operations.'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                   <button
                     type="button"
                     onClick={handleToggleOnline}

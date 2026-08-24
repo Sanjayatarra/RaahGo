@@ -140,6 +140,36 @@ def format_time_ago(dt):
         return f'{days}d ago'
 
 
+def _parse_date_safe(val):
+    if not val:
+        return None
+    if isinstance(val, (datetime.date, datetime.datetime)):
+        return val if isinstance(val, datetime.date) else val.date()
+    if isinstance(val, str):
+        val = val.strip()
+        if not val or val.lower() in ['none', 'null', '—', '-', 'undefined']:
+            return None
+        try:
+            return datetime.datetime.strptime(val[:10], '%Y-%m-%d').date()
+        except Exception:
+            return None
+    return None
+
+
+def _format_date_safe(val):
+    if not val:
+        return None
+    if hasattr(val, 'strftime'):
+        try:
+            return val.strftime('%Y-%m-%d')
+        except Exception:
+            pass
+    s = str(val).strip()
+    if not s or s.lower() in ['none', 'null', '—', '-']:
+        return None
+    return s[:10]
+
+
 def check_admin_password(stored_password, input_password):
     if not stored_password or not input_password:
         return False
@@ -1300,18 +1330,19 @@ class AdminDriverDetailView(APIView):
                     except Exception:
                         doc_url = f"/{clean_path}"
 
-                is_expired = bool(doc.expiry_date and doc.expiry_date < timezone.now().date())
+                parsed_exp = _parse_date_safe(doc.expiry_date)
+                is_expired = bool(parsed_exp and parsed_exp < timezone.now().date())
                 doc_info = {
                     'id': str(doc.id),
                     'document_type': doc.document_type,
-                    'document_number': doc.document_number or '—',
+                    'document_number': doc.document_number or '',
                     'document_url': doc_url,
                     'status': str(doc.verification_status).lower(),
                     'is_verified': doc.verification_status == DriverDocument.VerificationStatus.VERIFIED,
                     'is_expired': is_expired,
-                    'rejection_reason': doc.rejection_reason,
-                    'submitted_at': doc.created_at.strftime('%Y-%m-%d'),
-                    'expires_at': doc.expiry_date.strftime('%Y-%m-%d') if doc.expiry_date else None,
+                    'rejection_reason': doc.rejection_reason or '',
+                    'submitted_at': _format_date_safe(doc.created_at) or '',
+                    'expires_at': _format_date_safe(doc.expiry_date),
                 }
                 all_docs.append(doc_info)
 
@@ -1336,11 +1367,18 @@ class AdminDriverDetailView(APIView):
             chk_account_active = bool(d.user.is_active)
             chk_driver_approved = d.approval_status == Driver.ApprovalStatus.APPROVED
             chk_vehicle_approved = bool(primary_vehicle and primary_vehicle.get('is_approved') and primary_vehicle.get('is_active'))
-            
-            chk_license_valid = bool(license_doc and license_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED and (not license_doc.expiry_date or license_doc.expiry_date >= today_date))
-            chk_rc_valid = bool(rc_doc and rc_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED and (not rc_doc.expiry_date or rc_doc.expiry_date >= today_date))
-            chk_insurance_valid = bool(ins_doc and ins_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED and (not ins_doc.expiry_date or ins_doc.expiry_date >= today_date))
-            chk_puc_valid = bool(not puc_doc or (puc_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED and (not puc_doc.expiry_date or puc_doc.expiry_date >= today_date)))
+
+            license_exp = _parse_date_safe(license_doc.expiry_date) if license_doc else None
+            chk_license_valid = bool(license_doc and license_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED and (not license_exp or license_exp >= today_date))
+
+            rc_exp = _parse_date_safe(rc_doc.expiry_date) if rc_doc else None
+            chk_rc_valid = bool(rc_doc and rc_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED and (not rc_exp or rc_exp >= today_date))
+
+            ins_exp = _parse_date_safe(ins_doc.expiry_date) if ins_doc else None
+            chk_insurance_valid = bool(ins_doc and ins_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED and (not ins_exp or ins_exp >= today_date))
+
+            puc_exp = _parse_date_safe(puc_doc.expiry_date) if puc_doc else None
+            chk_puc_valid = bool(not puc_doc or (puc_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED and (not puc_exp or puc_exp >= today_date)))
             chk_bg_valid = bool(not bg_doc or bg_doc.verification_status == DriverDocument.VerificationStatus.VERIFIED)
             chk_no_suspension = d.approval_status != Driver.ApprovalStatus.SUSPENDED
 
@@ -1351,16 +1389,48 @@ class AdminDriverDetailView(APIView):
                 eligibility_reasons.append(f'Driver KYC is currently {d.approval_status.lower()}.')
             if not chk_vehicle_approved:
                 eligibility_reasons.append('No approved and active vehicle linked.')
-            if license_doc and license_doc.expiry_date and license_doc.expiry_date < today_date:
-                eligibility_reasons.append(f'Driving License expired on {license_doc.expiry_date}.')
+            if not license_doc:
+                eligibility_reasons.append('Driving License document is missing.')
+            elif license_exp and license_exp < today_date:
+                eligibility_reasons.append(f'Driving License expired on {license_exp}.')
             elif not chk_license_valid:
                 eligibility_reasons.append('Driving License is unverified.')
-            if ins_doc and ins_doc.expiry_date and ins_doc.expiry_date < today_date:
-                eligibility_reasons.append(f'Vehicle Insurance expired on {ins_doc.expiry_date}.')
+
+            if not rc_doc:
+                eligibility_reasons.append('Registration Certificate (RC) document is missing.')
+            elif rc_exp and rc_exp < today_date:
+                eligibility_reasons.append(f'Registration Certificate (RC) expired on {rc_exp}.')
+            elif not chk_rc_valid:
+                eligibility_reasons.append('Registration Certificate (RC) is unverified.')
+
+            if not ins_doc:
+                eligibility_reasons.append('Vehicle Insurance document is missing.')
+            elif ins_exp and ins_exp < today_date:
+                eligibility_reasons.append(f'Vehicle Insurance expired on {ins_exp}.')
             elif not chk_insurance_valid:
                 eligibility_reasons.append('Vehicle Insurance is unverified.')
-            if not chk_rc_valid:
-                eligibility_reasons.append('Registration Certificate (RC) is unverified.')
+
+            if puc_doc:
+                if puc_exp and puc_exp < today_date:
+                    eligibility_reasons.append(f'Transport Permit / PUC expired on {puc_exp}.')
+                elif not chk_puc_valid:
+                    eligibility_reasons.append('Transport Permit / PUC is unverified.')
+
+            if bg_doc and not chk_bg_valid:
+                eligibility_reasons.append('Aadhaar / Background verification is unverified.')
+
+            # Check if any uploaded document is unverified or expired
+            for doc in all_docs:
+                doc_name = doc.get('document_type', 'Document').title()
+                if not doc.get('is_verified'):
+                    r_msg = f"{doc_name} is unverified."
+                    if r_msg not in eligibility_reasons:
+                        eligibility_reasons.append(r_msg)
+                if doc.get('is_expired'):
+                    exp_val = doc.get('expires_at')
+                    r_msg = f"{doc_name} expired on {exp_val}." if exp_val else f"{doc_name} has expired."
+                    if r_msg not in eligibility_reasons:
+                        eligibility_reasons.append(r_msg)
 
             can_accept_rides = (len(eligibility_reasons) == 0) and chk_no_suspension
             
@@ -1405,16 +1475,7 @@ class AdminDriverDetailView(APIView):
             all_bookings = Booking.objects.filter(driver=d).select_related('customer').order_by('-created_at')
             rides_list = [serialize_booking(b) for b in all_bookings]
 
-            # ── 5. Multi-Status ──
-            multi_status = {
-                'account_status': 'suspended' if (d.approval_status == Driver.ApprovalStatus.SUSPENDED or not d.user.is_active) else 'active',
-                'verification_status': str(d.approval_status).lower(),
-                'online_status': str(d.availability_status).lower(),
-                'ride_status': 'in_trip' if active_ride else ('available' if d.availability_status == Driver.AvailabilityStatus.ONLINE else 'offline'),
-                'vehicle_status': 'approved' if (primary_vehicle and primary_vehicle.get('is_approved')) else 'pending'
-            }
-
-            # ── 6. Earnings Breakdown ──
+            # ── 5. Earnings Breakdown (from actual completed bookings) ──
             completed_rides = all_bookings.filter(status=Booking.BookingStatus.COMPLETED)
             lifetime_fare = sum(float(b.total_fare or 0) for b in completed_rides)
             lifetime_commission = sum(float(getattr(b, 'commission_amount', None) or (float(b.total_fare or 0) * 0.15)) for b in completed_rides)
@@ -1439,11 +1500,11 @@ class AdminDriverDetailView(APIView):
                 'ride_earnings': round(lifetime_fare - lifetime_commission, 2),
                 'commission_deducted': round(lifetime_commission, 2),
                 'tips': 0.0,
-                'incentives': 300.0 if d.total_trips > 5 else 0.0,
+                'incentives': 0.0,
                 'net_earnings': round(lifetime_fare - lifetime_commission, 2)
             }
 
-            # ── 7. Wallet & Bank Accounts ──
+            # ── 6. Wallet & Bank Accounts ──
             w = Wallet.objects.filter(user=d.user).first()
             wallet_tx_list = []
             if w:
@@ -1469,37 +1530,31 @@ class AdminDriverDetailView(APIView):
                     'is_primary': b.is_primary,
                 })
 
-            payouts_list = [{
-                'id': f"PO-{str(d.id)[:4].upper()}-01",
-                'amount': round(week_earnings or 1200.0, 2),
-                'account_number': bank_accounts[0]['account_number'] if bank_accounts else 'XXXX-8921',
-                'bank_name': bank_accounts[0]['bank_name'] if bank_accounts else 'Bank Account',
-                'status': 'Paid',
-                'date': (timezone.now() - datetime.timedelta(days=3)).strftime('%Y-%m-%d'),
-            }] if bank_accounts else []
-
-            # ── 8. Ratings & Performance ──
+            # ── 7. Ratings & Dynamic Performance ──
             ratings_qs = Rating.objects.filter(reviewee_driver=d).select_related('reviewer', 'booking').order_by('-created_at')
             ratings_list = [{
                 'id': str(r.id),
                 'reviewer_name': r.reviewer.username if r.reviewer else 'Customer',
                 'booking_number': r.booking.booking_number if r.booking else '—',
                 'rating': r.rating,
-                'comment': r.comment or 'Good driving and timely arrival.',
+                'comment': r.comment or '',
                 'created_at': r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '—',
             } for r in ratings_qs]
+
+            total_b = all_bookings.count()
+            completed_b = completed_rides.count()
+            cancelled_b = all_bookings.filter(status=Booking.BookingStatus.CANCELLED).count()
 
             performance = {
                 'rating': float(d.rating),
                 'total_trips': d.total_trips,
-                'acceptance_rate': 94,
-                'cancellation_rate': 3,
-                'completion_rate': 97,
+                'acceptance_rate': 100.0 if total_b > 0 else 0.0,
+                'cancellation_rate': round((cancelled_b / total_b * 100), 1) if total_b > 0 else 0.0,
+                'completion_rate': round((completed_b / total_b * 100), 1) if total_b > 0 else 0.0,
                 'online_hours': round(d.get_current_daily_online_seconds() / 3600, 1),
-                'ratings': ratings_list
             }
 
-            # ── 9. Complaints & Emergencies ──
+            # ── 8. Real Complaints from low ratings (<= 2 stars) ──
             complaints_list = []
             low_ratings = ratings_qs.filter(rating__lte=2)
             for lr in low_ratings:
@@ -1507,39 +1562,25 @@ class AdminDriverDetailView(APIView):
                     'id': f"TKT-{str(lr.id)[:8].upper()}",
                     'customer_name': lr.reviewer.username if lr.reviewer else 'Customer',
                     'subject': f"Ride feedback low rating ({lr.rating} Stars)",
-                    'reason': lr.comment or 'Delayed arrival or route dispute.',
+                    'reason': lr.comment or 'Low rating provided by customer',
                     'status': 'Resolved' if lr.created_at and (timezone.now() - lr.created_at).days > 1 else 'Under Review',
                     'created_at': lr.created_at.strftime('%Y-%m-%d %H:%M') if lr.created_at else '—',
                 })
 
-            emergencies_list = []
-
-            # ── 10. Devices ──
+            # ── 9. Real Devices (no fake auto-creation) ──
             devices_qs = UserDevice.objects.filter(user=d.user).order_by('-is_active', '-last_active', '-created_at')
-            if not devices_qs.exists():
-                UserDevice.objects.create(
-                    user=d.user,
-                    device_type=UserDevice.DeviceTypeChoices.ANDROID,
-                    device_name='Driver Terminal (Android)',
-                    app_version='v2.4.1',
-                    firebase_token='FCM-DRV-8914BCE8319FA02',
-                    is_active=True,
-                    last_active=d.user.last_login or timezone.now()
-                )
-                devices_qs = UserDevice.objects.filter(user=d.user).order_by('-is_active', '-last_active', '-created_at')
-
             driver_devices = [{
                 'id': str(dev.id),
                 'device_type': dev.device_type,
                 'device_name': dev.device_name or f"{dev.device_type} Device",
-                'app_version': dev.app_version or 'v2.4.1',
+                'app_version': dev.app_version or 'v1.0.0',
                 'firebase_token': (dev.firebase_token[:24] + '...') if dev.firebase_token else 'FCM_Configured',
                 'last_active': dev.last_active.strftime('%Y-%m-%d %H:%M') if dev.last_active else (dev.created_at.strftime('%Y-%m-%d %H:%M') if dev.created_at else '—'),
                 'is_active': dev.is_active,
                 'created_at': dev.created_at.strftime('%Y-%m-%d') if dev.created_at else '—',
             } for dev in devices_qs]
 
-            # ── 11. Push Notifications ──
+            # ── 10. Real Notifications from DB ──
             notifs_qs = Notification.objects.filter(user=d.user).order_by('-created_at')[:30]
             notifs_list = [{
                 'id': str(n.id),
@@ -1550,45 +1591,6 @@ class AdminDriverDetailView(APIView):
                 'created_at': n.created_at.strftime('%Y-%m-%d %H:%M') if n.created_at else '—',
             } for n in notifs_qs]
 
-            # ── 12. Service Eligibility ──
-            v_type_name = primary_vehicle.get('vehicle_type', '').lower() if primary_vehicle else 'bike'
-            is_bike = 'bike' in v_type_name or 'two' in v_type_name
-            is_auto = 'auto' in v_type_name
-            is_car = 'car' in v_type_name or 'cab' in v_type_name or 'sedan' in v_type_name or 'suv' in v_type_name
-
-            services = [
-                {'id': 1, 'name': 'Bike Taxi', 'icon': '🛵', 'category': 'Passenger', 'enabled': is_bike and chk_vehicle_approved, 'desc': 'Fast city 2-wheeler commute'},
-                {'id': 2, 'name': 'Parcel Express', 'icon': '📦', 'category': 'Delivery', 'enabled': (is_bike or is_auto or is_car) and chk_vehicle_approved, 'desc': 'Intracity courier & package delivery'},
-                {'id': 3, 'name': 'Auto Rickshaw', 'icon': '🛺', 'category': 'Passenger', 'enabled': is_auto and chk_vehicle_approved, 'desc': 'Standard 3-wheeler passenger transit'},
-                {'id': 4, 'name': 'Cab Economy', 'icon': '🚗', 'category': 'Passenger', 'enabled': is_car and chk_vehicle_approved, 'desc': 'Compact 4-seater hatchback cabs'},
-                {'id': 5, 'name': 'Cab Premier', 'icon': '🚘', 'category': 'Passenger', 'enabled': is_car and chk_vehicle_approved, 'desc': 'Comfort sedans & top-rated captains'},
-                {'id': 6, 'name': 'Intercity Outstation', 'icon': '🛣️', 'category': 'Long Distance', 'enabled': is_car and chk_vehicle_approved, 'desc': 'Cross-city scheduled travel'},
-            ]
-
-            # ── 13. Duty History & Shifts ──
-            duty_history = [
-                {'date': today_date.strftime('%Y-%m-%d'), 'online': '08:00 AM', 'offline': '05:00 PM', 'hours': 9.0, 'status': 'Completed'},
-                {'date': (today_date - datetime.timedelta(days=1)).strftime('%Y-%m-%d'), 'online': '09:00 AM', 'offline': '07:00 PM', 'hours': 10.0, 'status': 'Completed'},
-                {'date': (today_date - datetime.timedelta(days=2)).strftime('%Y-%m-%d'), 'online': '08:30 AM', 'offline': '06:30 PM', 'hours': 10.0, 'status': 'Completed'},
-            ]
-
-            # ── 14. Incentives ──
-            incentives = [
-                {'id': 1, 'title': 'Complete 8 Rides Peak Hour', 'target': 8, 'completed': min(8, d.total_trips), 'reward': 300, 'status': 'Active', 'expiry': 'Today 11:00 PM'},
-                {'id': 2, 'title': 'Weekend Warrior Bonus (30 Rides)', 'target': 30, 'completed': min(30, d.total_trips), 'reward': 1200, 'status': 'Active', 'expiry': 'Sunday Midnight'},
-            ]
-
-            # ── 15. Audit Logs ──
-            audit_logs = [
-                {'id': 1, 'action': 'Driver Registered', 'actor': 'System Auth', 'details': 'Driver signed up with phone OTP', 'created_at': d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '—'},
-                {'id': 2, 'action': 'Vehicle Registered', 'actor': 'Driver App', 'details': f"Vehicle {primary_vehicle.get('registration_number', '') if primary_vehicle else 'Primary'} attached", 'created_at': d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '—'},
-                {'id': 3, 'action': 'KYC Documents Uploaded', 'actor': 'Driver App', 'details': f"{len(all_docs)} compliance documents submitted", 'created_at': d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else '—'},
-            ]
-            if d.approval_status == Driver.ApprovalStatus.APPROVED:
-                audit_logs.insert(0, {'id': 4, 'action': 'Driver Approved', 'actor': 'Operations Admin', 'details': 'Driver approved for platform duty', 'created_at': d.updated_at.strftime('%Y-%m-%d %H:%M') if d.updated_at else '—'})
-            elif d.approval_status == Driver.ApprovalStatus.SUSPENDED:
-                audit_logs.insert(0, {'id': 5, 'action': 'Driver Suspended', 'actor': 'Security Admin', 'details': 'Driver account suspended from accepting rides', 'created_at': d.updated_at.strftime('%Y-%m-%d %H:%M') if d.updated_at else '—'})
-
             # Real live location and reverse geocoding via OpenStreetMap (OSM)
             geo = reverse_geocode_osm(d.current_latitude, d.current_longitude)
             formatted_last_update = format_time_ago(d.last_location_update) if d.last_location_update else (
@@ -1597,29 +1599,24 @@ class AdminDriverDetailView(APIView):
 
             return Response({
                 'id': str(d.id),
-                'name': full_name,
                 'full_name': full_name,
                 'first_name': d.user.first_name or '',
                 'last_name': d.user.last_name or '',
                 'username': d.user.username,
-                'email': d.user.email or f"{d.user.username}@driver.raahgo.in",
-                'phone': d.user.phone_number or '—',
-                'phone_number': d.user.phone_number or '—',
+                'email': d.user.email or '',
+                'phone_number': d.user.phone_number or '',
                 'profile_image': d.user.profile_image or '',
                 'gender': d.user.gender or 'Male',
-                'date_of_birth': d.user.date_of_birth.strftime('%Y-%m-%d') if d.user.date_of_birth else '—',
-                'city': d.service_city or geo['city'],
-                'service_city': d.service_city or geo['city'],
+                'date_of_birth': _format_date_safe(d.user.date_of_birth) or '—',
+                'service_city': d.service_city or geo['city'] or '',
                 'operating_address': d.operating_address or '',
                 'operating_pincode': d.operating_pincode or '',
-                'state': geo['state'],
+                'state': geo['state'] or '',
                 'license_number': d.license_number or '—',
-                'license_expiry': d.license_expiry.strftime('%Y-%m-%d') if d.license_expiry else None,
+                'license_expiry': _format_date_safe(d.license_expiry),
                 'experience_years': d.experience_years,
                 'rating': float(d.rating),
                 'total_trips': d.total_trips,
-                'latitude': float(d.current_latitude) if d.current_latitude else 28.4415,
-                'longitude': float(d.current_longitude) if d.current_longitude else 77.0395,
                 'current_latitude': float(d.current_latitude) if d.current_latitude else 28.4415,
                 'current_longitude': float(d.current_longitude) if d.current_longitude else 77.0395,
                 'last_location': geo['location_name'],
@@ -1630,48 +1627,35 @@ class AdminDriverDetailView(APIView):
                 'last_active': d.user.last_login.strftime('%Y-%m-%d %H:%M') if d.user.last_login else '—',
 
                 # Core States & Eligibility
-                'status': multi_status['account_status'],
                 'approval_status': d.approval_status,
                 'availability_status': d.availability_status,
-                'multi_status': multi_status,
                 'eligibility': eligibility,
 
                 # Vehicle & Documents
                 'vehicle': primary_vehicle,
-                'vehicles': vehicles,
                 'driver_documents': driver_docs,
                 'vehicle_documents': vehicle_docs,
-                'documents': all_docs,
 
                 # Rides & Live Activity
                 'active_ride': active_ride,
                 'rides': rides_list,
-                'recent_rides': rides_list[:10],
 
                 # Financials & Wallet
                 'earnings': earnings,
                 'wallet_balance': float(w.balance) if w else 0.0,
                 'wallet_transactions': wallet_tx_list,
                 'bank_accounts': bank_accounts,
-                'payouts': payouts_list,
 
                 # Performance & Support
                 'performance': performance,
                 'ratings': ratings_list,
                 'complaints': complaints_list,
-                'emergencies': emergencies_list,
-                'emergency_contacts': [
-                    {'name': 'Police Control Room', 'phone': '112', 'relation': 'National Emergency'},
-                    {'name': 'RaahGo Safety Support', 'phone': '1800-123-456', 'relation': '24x7 Safety Response'}
-                ],
 
-                # Operational Controls & Audit
-                'services': services,
+                # Operational Controls
                 'devices': driver_devices,
                 'notifications': notifs_list,
-                'duty_history': duty_history,
-                'incentives': incentives,
-                'audit_logs': audit_logs,
+
+                # User Flags
                 'is_phone_verified': bool(d.user.is_phone_verified),
                 'is_email_verified': bool(d.user.is_email_verified),
                 'is_verified': bool(d.user.is_verified),
@@ -1782,17 +1766,120 @@ class AdminDriverRejectView(APIView):
             return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
+def _update_driver_vehicle_from_payload(driver, req_data, target_vehicle=None):
+    v_data = req_data.get('vehicle') if isinstance(req_data.get('vehicle'), dict) else req_data
+
+    reg_num = v_data.get('registration_number') or v_data.get('vehicle_registration_number')
+    make = v_data.get('make') or v_data.get('vehicle_make')
+    model = v_data.get('model') or v_data.get('vehicle_model')
+    year = v_data.get('year') or v_data.get('vehicle_year')
+    color = v_data.get('color') or v_data.get('vehicle_color')
+    v_type_val = v_data.get('vehicle_type') or v_data.get('type')
+    is_approved_val = v_data.get('vehicle_is_approved') if 'vehicle_is_approved' in v_data else v_data.get('is_approved')
+    is_active_val = v_data.get('vehicle_is_active') if 'vehicle_is_active' in v_data else v_data.get('is_active')
+
+    # Check if any vehicle field is supplied
+    has_vehicle_data = any(x is not None for x in [reg_num, make, model, year, color, v_type_val, is_approved_val, is_active_val])
+    if not has_vehicle_data:
+        return None
+
+    v = target_vehicle or Vehicle.objects.filter(driver=driver, is_active=True).first() or Vehicle.objects.filter(driver=driver).first()
+
+    # Check if registration_number conflicts with another vehicle
+    if reg_num and str(reg_num).strip():
+        clean_reg = str(reg_num).strip().upper()
+        conflict = Vehicle.objects.filter(registration_number__iexact=clean_reg)
+        if v:
+            conflict = conflict.exclude(pk=v.pk)
+        if conflict.exists():
+            conflict_v = conflict.first()
+            if conflict_v.driver_id != driver.id:
+                raise ValueError(f"Registration number '{clean_reg}' is already assigned to another vehicle.")
+            else:
+                v = conflict_v
+
+    # Resolve VehicleType
+    vtype_obj = None
+    if v_type_val:
+        vtype_obj = VehicleType.objects.filter(name__iexact=str(v_type_val).strip()).first()
+        if not vtype_obj:
+            vtype_obj = VehicleType.objects.filter(name__icontains=str(v_type_val).strip()).first()
+    if not vtype_obj and v:
+        vtype_obj = v.vehicle_type
+    if not vtype_obj:
+        vtype_obj = VehicleType.objects.first()
+
+    if not v:
+        if reg_num or make or model:
+            v = Vehicle(
+                driver=driver,
+                vehicle_type=vtype_obj,
+                registration_number=(str(reg_num).strip().upper() if reg_num else f"DL-{str(driver.id)[:6].upper()}"),
+                make=(make or 'Honda').strip(),
+                model=(model or 'Activa').strip(),
+                year=int(year) if year and str(year).isdigit() else 2023,
+                color=(color or 'Black').strip(),
+                is_active=True if is_active_val is None else bool(is_active_val),
+                is_approved=bool(is_approved_val) if is_approved_val is not None else False
+            )
+            v.save()
+    else:
+        if reg_num and str(reg_num).strip():
+            v.registration_number = str(reg_num).strip().upper()
+        if make and str(make).strip():
+            v.make = str(make).strip()
+        if model and str(model).strip():
+            v.model = str(model).strip()
+        if year and str(year).isdigit():
+            v.year = int(year)
+        if color and str(color).strip():
+            v.color = str(color).strip()
+        if vtype_obj:
+            v.vehicle_type = vtype_obj
+        if is_approved_val is not None:
+            v.is_approved = bool(is_approved_val)
+        if is_active_val is not None:
+            v.is_active = bool(is_active_val)
+        v.save()
+
+    return v
+
+
 class AdminDriverDocApproveView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, driver_pk, doc_pk):
         try:
             doc = DriverDocument.objects.get(pk=doc_pk, driver_id=driver_pk)
+            req_data = getattr(request, 'data', None) or getattr(request, 'POST', {}) or {}
+
+            doc_number = req_data.get('document_number')
+            expiry_date_val = req_data.get('expiry_date') or req_data.get('expires_at')
+
+            if doc_number is not None:
+                doc.document_number = str(doc_number).strip()
+            if expiry_date_val is not None:
+                doc.expiry_date = _parse_date_safe(expiry_date_val)
+
             doc.verification_status = DriverDocument.VerificationStatus.VERIFIED
             doc.rejection_reason = None
-            doc.save(update_fields=['verification_status', 'rejection_reason'])
+            doc.save()
 
             d = Driver.objects.get(pk=driver_pk)
+            if 'license' in (doc.document_type or '').lower():
+                d_updates = []
+                if doc.document_number:
+                    d.license_number = doc.document_number
+                    d_updates.append('license_number')
+                if doc.expiry_date:
+                    d.license_expiry = doc.expiry_date
+                    d_updates.append('license_expiry')
+                if d_updates:
+                    d.save(update_fields=d_updates)
+
+            # Update vehicle details if vehicle fields supplied
+            _update_driver_vehicle_from_payload(d, req_data)
+
             pending_or_rejected = DriverDocument.objects.filter(
                 driver=d
             ).exclude(verification_status=DriverDocument.VerificationStatus.VERIFIED).exists()
@@ -1807,12 +1894,116 @@ class AdminDriverDocApproveView(APIView):
 
             return Response({
                 'status': 'Document approved successfully',
-                'driver_approval_status': d.approval_status
+                'driver_approval_status': d.approval_status,
+                'document_number': doc.document_number,
+                'expires_at': _format_date_safe(doc.expiry_date),
+                'is_verified': True
             })
         except DriverDocument.DoesNotExist:
             return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
         except Driver.DoesNotExist:
             return Response({'status': 'Document approved'})
+
+
+class AdminDriverDocUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, driver_pk, doc_pk):
+        return self.patch(request, driver_pk, doc_pk)
+
+    def patch(self, request, driver_pk, doc_pk):
+        try:
+            doc = DriverDocument.objects.get(pk=doc_pk, driver_id=driver_pk)
+            req_data = getattr(request, 'data', None) or getattr(request, 'POST', {}) or {}
+
+            if 'document_number' in req_data:
+                doc.document_number = (req_data.get('document_number') or '').strip()
+
+            if 'expiry_date' in req_data or 'expires_at' in req_data:
+                exp = req_data.get('expiry_date') or req_data.get('expires_at')
+                doc.expiry_date = _parse_date_safe(exp)
+
+            if 'verification_status' in req_data:
+                v_stat = req_data.get('verification_status')
+                if str(v_stat).lower() in ['verified', 'approved']:
+                    doc.verification_status = DriverDocument.VerificationStatus.VERIFIED
+                    doc.rejection_reason = None
+                elif str(v_stat).lower() == 'rejected':
+                    doc.verification_status = DriverDocument.VerificationStatus.REJECTED
+                    doc.rejection_reason = req_data.get('rejection_reason', 'Rejected by admin')
+                elif str(v_stat).lower() == 'pending':
+                    doc.verification_status = DriverDocument.VerificationStatus.PENDING
+
+            doc.save()
+
+            d = Driver.objects.filter(pk=driver_pk).first()
+            if d:
+                if 'license' in (doc.document_type or '').lower():
+                    d_updates = []
+                    if doc.document_number:
+                        d.license_number = doc.document_number
+                        d_updates.append('license_number')
+                    if doc.expiry_date:
+                        d.license_expiry = doc.expiry_date
+                        d_updates.append('license_expiry')
+                    if d_updates:
+                        d.save(update_fields=d_updates)
+
+                # Also update vehicle details if provided
+                _update_driver_vehicle_from_payload(d, req_data)
+
+            return Response({
+                'status': 'Document updated successfully',
+                'id': str(doc.id),
+                'document_type': doc.document_type,
+                'document_number': doc.document_number,
+                'expires_at': _format_date_safe(doc.expiry_date),
+                'verification_status': str(doc.verification_status).lower()
+            })
+        except DriverDocument.DoesNotExist:
+            return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AdminDriverVehicleUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, driver_pk, vehicle_pk=None):
+        return self.patch(request, driver_pk, vehicle_pk)
+
+    def patch(self, request, driver_pk, vehicle_pk=None):
+        try:
+            d = Driver.objects.get(pk=driver_pk)
+            req_data = getattr(request, 'data', None) or getattr(request, 'POST', {}) or {}
+
+            v = None
+            if vehicle_pk and str(vehicle_pk).lower() != 'primary':
+                try:
+                    v = Vehicle.objects.filter(pk=vehicle_pk, driver=d).first()
+                except Exception:
+                    pass
+
+            v = _update_driver_vehicle_from_payload(d, req_data, target_vehicle=v)
+            if not v:
+                return Response({'error': 'No vehicle data provided to update'}, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response({
+                'status': 'Vehicle details updated successfully',
+                'id': str(v.id),
+                'make': v.make,
+                'model': v.model,
+                'year': v.year,
+                'color': v.color,
+                'registration_number': v.registration_number,
+                'vehicle_type': v.vehicle_type.name if v.vehicle_type else '',
+                'is_approved': v.is_approved,
+                'is_active': v.is_active
+            })
+        except Driver.DoesNotExist:
+            return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class AdminDriverDocRejectView(APIView):
@@ -2916,6 +3107,7 @@ def get_persisted_settings():
         'max_cancellations': 3,
         'customer_wait_time': 5,
         'driver_wait_time': 5,
+        'driver_max_duty_hours': 12,
         'auto_assign': True,
         'track_interval': 10,
         'min_rating': 3.5,

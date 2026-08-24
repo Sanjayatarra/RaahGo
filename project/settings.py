@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR / 'Apps'))
+sys.path.insert(0, str(BASE_DIR.parent))
 
 # Load environment variables from .env
 load_dotenv(BASE_DIR / '.env')
@@ -156,7 +157,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
-MEDIA_URL = '/media/'
+MEDIA_URL = os.getenv('MEDIA_URL', '/media/')
 MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type

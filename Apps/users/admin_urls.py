@@ -43,9 +43,14 @@ urlpatterns = [
     path('drivers/<uuid:pk>/devices/<str:device_id>/logout/', admin_api_views.AdminDriverDeviceLogoutView.as_view(), name='admin-driver-device-logout'),
     path('drivers/<uuid:driver_pk>/documents/<uuid:doc_pk>/approve/', admin_api_views.AdminDriverDocApproveView.as_view(), name='admin-driver-doc-approve'),
     path('drivers/<uuid:driver_pk>/documents/<uuid:doc_pk>/reject/', admin_api_views.AdminDriverDocRejectView.as_view(), name='admin-driver-doc-reject'),
+    path('drivers/<uuid:driver_pk>/documents/<uuid:doc_pk>/update/', admin_api_views.AdminDriverDocUpdateView.as_view(), name='admin-driver-doc-update'),
+    path('drivers/<uuid:driver_pk>/documents/<uuid:doc_pk>/', admin_api_views.AdminDriverDocUpdateView.as_view(), name='admin-driver-doc-detail-update'),
     path('drivers/<uuid:driver_pk>/vehicles/<uuid:vehicle_pk>/approve/', admin_api_views.AdminDriverVehicleApproveView.as_view(), name='admin-driver-vehicle-approve'),
     path('drivers/<uuid:driver_pk>/vehicles/<uuid:vehicle_pk>/reject/', admin_api_views.AdminDriverVehicleRejectView.as_view(), name='admin-driver-vehicle-reject'),
     path('drivers/<uuid:driver_pk>/vehicles/<uuid:vehicle_pk>/deactivate/', admin_api_views.AdminDriverVehicleDeactivateView.as_view(), name='admin-driver-vehicle-deactivate'),
+    path('drivers/<uuid:driver_pk>/vehicles/<str:vehicle_pk>/update/', admin_api_views.AdminDriverVehicleUpdateView.as_view(), name='admin-driver-vehicle-str-update'),
+    path('drivers/<uuid:driver_pk>/vehicles/<uuid:vehicle_pk>/update/', admin_api_views.AdminDriverVehicleUpdateView.as_view(), name='admin-driver-vehicle-update'),
+    path('drivers/<uuid:driver_pk>/vehicle/update/', admin_api_views.AdminDriverVehicleUpdateView.as_view(), name='admin-driver-primary-vehicle-update'),
 
     # ── 6. Vehicles ───────────────────────────────────────────
     path('vehicles/', admin_api_views.AdminVehiclesListView.as_view(), name='admin-vehicles-list'),

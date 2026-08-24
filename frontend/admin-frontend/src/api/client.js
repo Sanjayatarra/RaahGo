@@ -151,8 +151,9 @@ export const driversAPI = {
   block: (id, data) => api.post(`/api/admin/drivers/${id}/block/`, data),
   unblock: (id) => api.post(`/api/admin/drivers/${id}/unblock/`),
   documents: (id) => api.get(`/api/admin/drivers/${id}/documents/`),
-  approveDoc: (id, docId) => api.post(`/api/admin/drivers/${id}/documents/${docId}/approve/`),
+  approveDoc: (id, docId, data = {}) => api.post(`/api/admin/drivers/${id}/documents/${docId}/approve/`, data),
   rejectDoc: (id, docId, data) => api.post(`/api/admin/drivers/${id}/documents/${docId}/reject/`, data),
+  updateDoc: (id, docId, data) => api.post(`/api/admin/drivers/${id}/documents/${docId}/update/`, data),
   vehicles: (id) => api.get(`/api/admin/drivers/${id}/vehicles/`),
   rides: (id) => api.get(`/api/admin/drivers/${id}/rides/`),
   earnings: (id) => api.get(`/api/admin/drivers/${id}/earnings/`),
@@ -166,6 +167,7 @@ export const driversAPI = {
   approveVehicle: (id, vehicleId) => api.post(`/api/admin/drivers/${id}/vehicles/${vehicleId}/approve/`),
   rejectVehicle: (id, vehicleId, data) => api.post(`/api/admin/drivers/${id}/vehicles/${vehicleId}/reject/`, data),
   deactivateVehicle: (id, vehicleId) => api.post(`/api/admin/drivers/${id}/vehicles/${vehicleId}/deactivate/`),
+  updateVehicle: (id, vehicleId, data) => api.post(`/api/admin/drivers/${id}/vehicles/${vehicleId || 'primary'}/update/`, data),
   location: (id) => api.get(`/api/admin/drivers/${id}/location/`),
 };
 

@@ -1,6 +1,8 @@
 import random
 import uuid
+from datetime import date, datetime
 from pathlib import Path
+from django.conf import settings
 from django.core.files.storage import default_storage
 from django.utils import timezone
 from rest_framework import viewsets, status, permissions
@@ -10,13 +12,75 @@ from rest_framework.response import Response
 from users.models import User
 from users.serializers import UserSerializer
 from users.driver_auth_views import is_valid_email
-from .models import Driver, DriverDocument, DriverBankAccount, DriverEmergencyContact
+from .models import Driver, DriverDocument, DriverBankAccount, DriverEmergencyContact, get_max_duty_seconds
 from .serializers import (
     DriverSerializer,
     DriverDocumentSerializer,
     DriverBankAccountSerializer,
     DriverEmergencyContactSerializer
 )
+
+try:
+    from PaddleOCR.main import extract_document
+except ImportError:
+    import sys
+    from pathlib import Path
+    parent_path = str(Path(__file__).resolve().parent.parent.parent.parent)
+    if parent_path not in sys.path:
+        sys.path.insert(0, parent_path)
+    try:
+        from PaddleOCR.main import extract_document
+    except Exception as _e:
+        print(f"[PaddleOCR Import Notice]: {_e}")
+        extract_document = None
+
+
+def validate_date_of_birth_18_years(dob_val):
+    """
+    Validates that date_of_birth is a valid date and the person is at least 18 years old.
+    Returns (validated_date, error_message)
+    """
+    if not dob_val:
+        return None, None
+
+    if isinstance(dob_val, str):
+        dob_str = dob_val.strip()
+        if not dob_str:
+            return None, None
+        try:
+            dob_date = datetime.strptime(dob_str, '%Y-%m-%d').date()
+        except ValueError:
+            return None, 'Invalid Date of Birth format. Please use YYYY-MM-DD.'
+    elif isinstance(dob_val, date):
+        dob_date = dob_val
+    else:
+        return None, 'Invalid Date of Birth.'
+
+    today = date.today()
+    if dob_date > today:
+        return None, 'Date of Birth cannot be in the future.'
+
+    age = today.year - dob_date.year - ((today.month, today.day) < (dob_date.month, dob_date.day))
+    if age < 18:
+        return None, 'Captain must be at least 18 years old to register.'
+
+    return dob_date, None
+
+
+def parse_ocr_date(date_val):
+    """Safely converts an OCR date string (e.g. '03-05-2041', '03/05/2041') into a datetime.date object."""
+    if not date_val:
+        return None
+    if isinstance(date_val, date):
+        return date_val
+    if isinstance(date_val, str):
+        clean_val = date_val.strip().replace('/', '-')
+        for fmt in ('%d-%m-%Y', '%Y-%m-%d', '%d-%m-%y', '%m-%d-%Y'):
+            try:
+                return datetime.strptime(clean_val, fmt).date()
+            except ValueError:
+                pass
+    return None
 
 
 class DriverViewSet(viewsets.ModelViewSet):
@@ -49,8 +113,12 @@ class DriverViewSet(viewsets.ModelViewSet):
             DriverDocument.DocumentType.LICENSE: 'license',
             DriverDocument.DocumentType.RC: 'rc',
             DriverDocument.DocumentType.INSURANCE: 'insurance',
+            DriverDocument.DocumentType.AADHAAR: 'aadhaar',
+            DriverDocument.DocumentType.PHOTO: 'photo',
             DriverDocument.DocumentType.BACKGROUND_CHECK: 'aadhaar',
             DriverDocument.DocumentType.PERMIT: 'photo',
+            'Aadhaar': 'aadhaar',
+            'Photo': 'photo',
         }
         documents = {}
         for doc in (driver.documents.all() if driver else []):
@@ -66,7 +134,7 @@ class DriverViewSet(viewsets.ModelViewSet):
         emergency = DriverEmergencyContact.objects.filter(driver=driver).first() if driver else None
 
         completed_steps = [1, 2]
-        if user.first_name and user.date_of_birth and (driver and driver.operating_address):
+        if user.first_name and user.date_of_birth:
             completed_steps.append(3)
         if vehicle and vehicle.registration_number:
             completed_steps.extend([4, 5])
@@ -124,6 +192,14 @@ class DriverViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+        # Validate date_of_birth if provided (must be at least 18 years old)
+        raw_dob = request.data.get('date_of_birth')
+        validated_dob = None
+        if raw_dob:
+            validated_dob, dob_err = validate_date_of_birth_18_years(raw_dob)
+            if dob_err:
+                return Response({'error': dob_err}, status=status.HTTP_400_BAD_REQUEST)
+
         # 1. Resolve User and Driver
         user = None
         if clean_phone:
@@ -155,10 +231,17 @@ class DriverViewSet(viewsets.ModelViewSet):
                 first_name=first_name or 'Captain',
                 last_name=last_name or '',
                 gender=request.data.get('gender', 'Male'),
-                date_of_birth=request.data.get('date_of_birth') or None,
+                date_of_birth=validated_dob,
                 is_verified=False,
                 is_phone_verified=True
             )
+        else:
+            # If user already exists (e.g. registered via phone) and email is provided, link it
+            if email and not user.email:
+                clean_email = email.strip()
+                if not User.objects.filter(email__iexact=clean_email, role=User.RoleChoices.DRIVER).exclude(id=user.id).exists():
+                    user.email = clean_email
+                    user.save(update_fields=['email'])
 
         driver = Driver.objects.filter(user=user).first()
         if not driver:
@@ -172,7 +255,7 @@ class DriverViewSet(viewsets.ModelViewSet):
 
         # 2. Process Specific Step Chunk
         # --- Step 3: Basic Details Chunk ---
-        if step == 3 or (step is None and (request.data.get('first_name') or request.data.get('full_name') or request.data.get('date_of_birth'))):
+        if step == 3 or (step is None and (request.data.get('first_name') or request.data.get('full_name') or request.data.get('date_of_birth') or request.data.get('email'))):
             first_name = request.data.get('first_name')
             last_name = request.data.get('last_name')
             full_name = request.data.get('full_name') or request.data.get('name')
@@ -184,42 +267,20 @@ class DriverViewSet(viewsets.ModelViewSet):
             if first_name: user.first_name = first_name
             if last_name: user.last_name = last_name
             if request.data.get('gender'): user.gender = request.data.get('gender')
-            if request.data.get('date_of_birth'): user.date_of_birth = request.data.get('date_of_birth')
+            if validated_dob:
+                user.date_of_birth = validated_dob
+
+            if email:
+                clean_email = email.strip()
+                dup_email = User.objects.filter(email__iexact=clean_email, role=User.RoleChoices.DRIVER).exclude(id=user.id).exclude(email='').first()
+                if dup_email:
+                    return Response({'error': f'Email address "{clean_email}" is already registered to another Captain.'}, status=status.HTTP_400_BAD_REQUEST)
+                user.email = clean_email
 
             username = request.data.get('username')
             if username and username != user.username:
                 if not User.objects.filter(username=username, role=User.RoleChoices.DRIVER).exclude(id=user.id).exists():
                     user.username = username
-
-            operating_address = request.data.get('operating_address') or request.data.get('address')
-            service_city = request.data.get('service_city') or request.data.get('city')
-            operating_pincode = request.data.get('operating_pincode') or request.data.get('pincode')
-
-            if operating_address:
-                driver.operating_address = operating_address
-            if service_city:
-                driver.service_city = service_city
-            if operating_pincode:
-                driver.operating_pincode = operating_pincode
-            driver.save()
-
-            if operating_address or service_city:
-                try:
-                    from users.models import UserAddress
-                    UserAddress.objects.update_or_create(
-                        user=user,
-                        title=UserAddress.TitleChoices.WORK,
-                        defaults={
-                            'address_line_1': operating_address or f"Riding Base - {service_city or 'City'}",
-                            'city': service_city or 'Delhi NCR',
-                            'postal_code': operating_pincode or '110001',
-                            'state': 'Delhi NCR',
-                            'country': 'India',
-                            'is_default': True,
-                        }
-                    )
-                except Exception as ex:
-                    print(f"[complete_captain_profile] Error saving UserAddress: {ex}")
 
             user.save()
 
@@ -295,8 +356,8 @@ class DriverViewSet(viewsets.ModelViewSet):
                 'document_license': DriverDocument.DocumentType.LICENSE,
                 'document_rc': DriverDocument.DocumentType.RC,
                 'document_insurance': DriverDocument.DocumentType.INSURANCE,
-                'document_aadhaar': DriverDocument.DocumentType.BACKGROUND_CHECK,
-                'document_photo': DriverDocument.DocumentType.PERMIT,
+                'document_aadhaar': DriverDocument.DocumentType.AADHAAR,
+                'document_photo': DriverDocument.DocumentType.PHOTO,
             }
             for field_name, document_type in document_types.items():
                 uploaded_file = request.FILES.get(field_name)
@@ -308,19 +369,59 @@ class DriverViewSet(viewsets.ModelViewSet):
                 if uploaded_file.size > 10 * 1024 * 1024:
                     return Response({'error': f'{field_name} must be 10 MB or smaller.'}, status=status.HTTP_400_BAD_REQUEST)
 
+                # Clean up previous file for this document type to avoid disk duplication
+                old_doc = DriverDocument.objects.filter(driver=driver, document_type=document_type).first()
+                if old_doc and old_doc.document_url:
+                    try:
+                        media_prefix = getattr(settings, 'MEDIA_URL', '/media/')
+                        old_rel_path = old_doc.document_url.split(media_prefix)[-1] if media_prefix in old_doc.document_url else old_doc.document_url.split('/media/')[-1]
+                        if default_storage.exists(old_rel_path):
+                            default_storage.delete(old_rel_path)
+                    except Exception:
+                        pass
+
                 storage_path = default_storage.save(
                     f'driver_documents/{driver.id}/{document_type}/{uploaded_file.name}',
                     uploaded_file,
                 )
                 document_url = request.build_absolute_uri(default_storage.url(storage_path))
-                DriverDocument.objects.update_or_create(
+                
+                doc_number = None
+                parsed_expiry = None
+
+                if extract_document and document_type != 'Photo': 
+                    try:
+                        local_doc_path = default_storage.path(storage_path)
+                        result = extract_document(local_doc_path, document_type)
+                        print(f"[PaddleOCR Extracted for {document_type}]:", result)
+                        
+                        if isinstance(result, dict):
+                            doc_number = result.get('DocsNo') or result.get('aadhaar_number') or result.get('License No.')
+                            raw_expiry = result.get('ExpireyDate') or result.get('Date of Expiry')
+                            parsed_expiry = parse_ocr_date(raw_expiry)
+                        elif isinstance(result, (list, tuple)):
+                            doc_number = result[0] if len(result) > 0 else None
+                            raw_expiry = result[2] if len(result) > 2 else None
+                            parsed_expiry = parse_ocr_date(raw_expiry)
+                    except Exception as ocr_err:
+                        print(f"[PaddleOCR extraction note for {document_type}]: {ocr_err}")
+
+                doc_defaults = {
+                    'document_url': document_url,
+                    'verification_status': DriverDocument.VerificationStatus.PENDING,
+                }
+                if doc_number:
+                    doc_defaults['document_number'] = str(doc_number).strip()
+                if parsed_expiry:
+                    doc_defaults['expiry_date'] = parsed_expiry
+
+                doc, _ = DriverDocument.objects.update_or_create(
                     driver=driver,
                     document_type=document_type,
-                    defaults={
-                        'document_url': document_url,
-                        'verification_status': DriverDocument.VerificationStatus.PENDING,
-                    },
+                    defaults=doc_defaults,
                 )
+                # Ensure no other duplicate records exist for this document type
+                DriverDocument.objects.filter(driver=driver, document_type=document_type).exclude(id=doc.id).delete()
 
         # --- Step 7: Bank Details Chunk ---
         if step == 7 or (step is None and request.data.get('account_number')):
@@ -329,6 +430,27 @@ class DriverViewSet(viewsets.ModelViewSet):
             bank_name = request.data.get('bank_name')
             ifsc_code = request.data.get('ifsc_code')
 
+            passbook_file = request.FILES.get('passbook_image') or request.FILES.get('passbook_photo') or request.FILES.get('passbook')
+            passbook_url = None
+            if passbook_file:
+                ext = Path(passbook_file.name).suffix.lower()
+                if ext in {'.pdf', '.jpg', '.jpeg', '.png', '.webp'} and passbook_file.size <= 10 * 1024 * 1024:
+                    old_bank = DriverBankAccount.objects.filter(driver=driver).first()
+                    if old_bank and old_bank.passbook_image:
+                        try:
+                            media_prefix = getattr(settings, 'MEDIA_URL', '/media/')
+                            old_rel_path = old_bank.passbook_image.split(media_prefix)[-1] if media_prefix in old_bank.passbook_image else old_bank.passbook_image.split('/media/')[-1]
+                            if default_storage.exists(old_rel_path):
+                                default_storage.delete(old_rel_path)
+                        except Exception:
+                            pass
+
+                    storage_path = default_storage.save(
+                        f'driver_passbooks/{driver.id}/{passbook_file.name}',
+                        passbook_file,
+                    )
+                    passbook_url = request.build_absolute_uri(default_storage.url(storage_path))
+
             if account_number and bank_name and ifsc_code:
                 bank_acc = DriverBankAccount.objects.filter(driver=driver).first()
                 if bank_acc:
@@ -336,6 +458,8 @@ class DriverViewSet(viewsets.ModelViewSet):
                     bank_acc.account_holder_name = account_holder_name
                     bank_acc.ifsc_code = ifsc_code
                     bank_acc.bank_name = bank_name
+                    if passbook_url:
+                        bank_acc.passbook_image = passbook_url
                     bank_acc.is_verified = False
                     bank_acc.is_primary = True
                     bank_acc.save()
@@ -347,6 +471,7 @@ class DriverViewSet(viewsets.ModelViewSet):
                         account_holder_name=account_holder_name,
                         ifsc_code=ifsc_code,
                         bank_name=bank_name,
+                        passbook_image=passbook_url,
                         is_verified=False,
                         is_primary=True
                     )
@@ -473,17 +598,30 @@ class DriverViewSet(viewsets.ModelViewSet):
             driver.last_online_start = None
             driver.save()
 
-        # Enforce strict 12-Hour Daily Shift Limit (43,200 seconds = 12h)
+        # Enforce dynamic Daily Shift Limit from DB SystemSetting
+        max_duty_sec = get_max_duty_seconds()
+        max_duty_hours = max_duty_sec / 3600
+
         if new_status == Driver.AvailabilityStatus.ONLINE:
+            from .driver_api_views import check_driver_can_go_online
+            can_go_online, block_reason = check_driver_can_go_online(driver)
+            if not can_go_online:
+                return Response({
+                    'error': f'Cannot go online: {block_reason}',
+                    'approval_status': driver.approval_status,
+                    'is_online': False
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            current_duty_sec = driver.get_current_daily_online_seconds()
             # Check accumulated duty seconds for today
-            if driver.daily_online_seconds >= 43200:
+            if current_duty_sec >= max_duty_sec:
                 driver.availability_status = Driver.AvailabilityStatus.OFFLINE
                 driver.last_online_start = None
                 driver.save()
                 return Response({
-                    'error': 'Daily 12-hour online shift limit reached for today. Maximum 12 hours online per day permitted. Please rest until tomorrow.',
-                    'current_daily_online_seconds': 43200,
-                    'max_duty_seconds': 43200
+                    'error': f'Daily {int(max_duty_hours)}-hour online shift limit reached for today. Maximum {int(max_duty_hours)} hours online per day permitted. Please rest until tomorrow.',
+                    'current_daily_online_seconds': current_duty_sec,
+                    'max_duty_seconds': max_duty_sec
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             driver.last_online_start = timezone.now()
@@ -492,7 +630,7 @@ class DriverViewSet(viewsets.ModelViewSet):
             return Response({
                 'status': 'Driver availability set to Online',
                 'current_daily_online_seconds': driver.get_current_daily_online_seconds(),
-                'max_duty_seconds': 43200
+                'max_duty_seconds': max_duty_sec
             }, status=status.HTTP_200_OK)
 
         elif new_status == Driver.AvailabilityStatus.OFFLINE:
@@ -500,7 +638,7 @@ class DriverViewSet(viewsets.ModelViewSet):
                 midnight_today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
                 effective_start = max(driver.last_online_start, midnight_today)
                 elapsed = int((timezone.now() - effective_start).total_seconds())
-                driver.daily_online_seconds = min(43200, driver.daily_online_seconds + max(0, elapsed))
+                driver.daily_online_seconds = min(max_duty_sec, driver.daily_online_seconds + max(0, elapsed))
                 driver.last_online_start = None
 
             driver.availability_status = Driver.AvailabilityStatus.OFFLINE
@@ -508,7 +646,7 @@ class DriverViewSet(viewsets.ModelViewSet):
             return Response({
                 'status': 'Driver availability set to Offline',
                 'current_daily_online_seconds': driver.get_current_daily_online_seconds(),
-                'max_duty_seconds': 43200
+                'max_duty_seconds': max_duty_sec
             }, status=status.HTTP_200_OK)
 
         if new_status in [choice[0] for choice in Driver.AvailabilityStatus.choices]:
@@ -543,9 +681,10 @@ class DriverViewSet(viewsets.ModelViewSet):
                 driver.last_duty_reset_date = today
 
             current_duty_sec = driver.get_current_daily_online_seconds()
+            max_duty_sec = get_max_duty_seconds()
 
-            # Auto force OFFLINE if 12 hours reached
-            if current_duty_sec >= 43200 and driver.availability_status == Driver.AvailabilityStatus.ONLINE:
+            # Auto force OFFLINE if max duty hours reached
+            if current_duty_sec >= max_duty_sec and driver.availability_status == Driver.AvailabilityStatus.ONLINE:
                 driver.availability_status = Driver.AvailabilityStatus.OFFLINE
 
             lat_val = round(float(latitude), 7)
@@ -575,7 +714,7 @@ class DriverViewSet(viewsets.ModelViewSet):
                 'longitude': driver.current_longitude,
                 'is_online': loc_obj.is_online,
                 'current_daily_online_seconds': current_duty_sec,
-                'max_duty_seconds': 43200,
+                'max_duty_seconds': max_duty_sec,
                 'updated_at': driver.last_location_update
             }, status=status.HTTP_200_OK)
         return Response({'error': 'latitude and longitude are required'}, status=status.HTTP_400_BAD_REQUEST)

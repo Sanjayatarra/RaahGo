@@ -6,7 +6,7 @@ import {
   Check, RefreshCw, Send, BellRing, Sparkles, Smartphone, MessageSquare,
   ShieldCheck, LogOut, Navigation, TrendingUp, CreditCard, Layers,
   AlertOctagon, Key, FileSpreadsheet, Eye, Plus, Minus, Copy,
-  ExternalLink, ChevronRight, CheckCircle2, X, Play, Fuel
+  ExternalLink, ChevronRight, CheckCircle2, X, Play, Fuel, Edit, Edit3
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
@@ -18,6 +18,10 @@ import Modal from '../../components/shared/Modal';
 import DataTable from '../../components/shared/DataTable';
 import { useApi, LoadingState, ErrorState } from '../../hooks/useApi';
 import { driversAPI } from '../../api/client';
+
+function Capitalize(str) {
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
 
 // Fix default marker icon assets
 delete L.Icon.Default.prototype._getIconUrl;
@@ -55,6 +59,28 @@ export default function DriverDetailPage() {
   const [walletModal, setWalletModal] = useState({ isOpen: false, type: 'credit', amount: '', reason: '' });
   const [notifModal, setNotifModal] = useState({ isOpen: false, title: '', body: '', type: 'System' });
   const [docPreviewModal, setDocPreviewModal] = useState({ isOpen: false, url: '', title: '', type: '' });
+  const [editDocModal, setEditDocModal] = useState({
+    isOpen: false,
+    docId: null,
+    docType: '',
+    documentNumber: '',
+    expiresAt: '',
+    documentUrl: '',
+    isVerified: false,
+    status: '',
+    rejectionReason: '',
+    type: 'driver',
+    // Vehicle specifications (from vehicles/models.py)
+    vehicleId: null,
+    registrationNumber: '',
+    make: '',
+    model: '',
+    year: '',
+    color: '',
+    vehicleType: 'Bike',
+    vehicleApproved: false,
+    vehicleActive: true,
+  });
 
   const [alertModal, setAlertModal] = useState({
     isOpen: false,
@@ -164,10 +190,90 @@ export default function DriverDetailPage() {
     );
   };
 
-  // ── Document Review Actions ──
+  // ── Document & Vehicle Review / Edit Actions ──
+  const handleOpenDocModal = (doc = null, type = 'driver') => {
+    const v = primaryVehicle || driver?.vehicle || (driver?.vehicles && driver.vehicles[0]) || null;
+    const isVehicleDoc = type === 'vehicle' || (doc && ['rc', 'insurance', 'puc', 'permit', 'vehicle'].some(k => (doc.document_type || '').toLowerCase().includes(k)));
+
+    setEditDocModal({
+      isOpen: true,
+      docId: doc?.id || null,
+      docType: doc?.document_type || (isVehicleDoc ? 'Vehicle & Compliance' : 'Compliance Document'),
+      documentNumber: (doc?.document_number && doc?.document_number !== '—') ? doc.document_number : (doc?.document_type === 'RC' && v?.registration_number ? v.registration_number : ''),
+      expiresAt: doc?.expires_at || doc?.expiry_date || '',
+      documentUrl: doc?.document_url || '',
+      isVerified: Boolean(doc?.is_verified),
+      status: doc?.status || (doc?.is_verified ? 'verified' : 'pending'),
+      rejectionReason: doc?.rejection_reason || '',
+      type: isVehicleDoc ? 'vehicle' : type,
+      // Vehicle specifications (vehicles/models.py)
+      vehicleId: v?.id || null,
+      registrationNumber: v?.registration_number || (doc?.document_type === 'RC' && doc?.document_number && doc?.document_number !== '—' ? doc.document_number : ''),
+      make: v?.make || '',
+      model: v?.model || '',
+      year: v?.year || 2023,
+      color: v?.color || 'Black',
+      vehicleType: v?.vehicle_type || 'Bike',
+      vehicleApproved: Boolean(v?.is_approved),
+      vehicleActive: v?.is_active ?? true,
+    });
+  };
+
+  const handleSaveDocUpdate = async (shouldApprove = false) => {
+    setActionLoading(true);
+    try {
+      const payload = {
+        document_number: editDocModal.documentNumber.trim(),
+        expiry_date: editDocModal.expiresAt || null,
+        // Vehicle fields
+        registration_number: editDocModal.registrationNumber.trim() || undefined,
+        make: editDocModal.make.trim() || undefined,
+        model: editDocModal.model.trim() || undefined,
+        year: editDocModal.year ? parseInt(editDocModal.year, 10) : undefined,
+        color: editDocModal.color.trim() || undefined,
+        vehicle_type: editDocModal.vehicleType || undefined,
+        vehicle_is_approved: shouldApprove ? true : editDocModal.vehicleApproved,
+        vehicle_is_active: editDocModal.vehicleActive,
+      };
+
+      if (shouldApprove) {
+        if (editDocModal.docId) {
+          await driversAPI.approveDoc(id, editDocModal.docId, payload);
+        }
+        if (editDocModal.vehicleId || editDocModal.registrationNumber) {
+          await driversAPI.updateVehicle(id, editDocModal.vehicleId || 'primary', {
+            ...payload,
+            is_approved: true,
+            is_active: true
+          });
+        }
+        showAlert(`Document "${editDocModal.docType.toUpperCase()}" & Vehicle details verified & approved successfully.`, 'Verified & Approved', 'success');
+      } else {
+        if (editDocModal.docId) {
+          await driversAPI.updateDoc(id, editDocModal.docId, payload);
+        }
+        if (editDocModal.vehicleId || editDocModal.registrationNumber) {
+          await driversAPI.updateVehicle(id, editDocModal.vehicleId || 'primary', payload);
+        }
+        showAlert(`Document "${editDocModal.docType.toUpperCase()}" & Vehicle specifications updated successfully.`, 'Updated Successfully', 'success');
+      }
+      setEditDocModal(prev => ({ ...prev, isOpen: false }));
+      await refetch();
+    } catch (err) {
+      showAlert(err?.response?.data?.error || err.message, 'Action Failed', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleApproveDoc = async (docId, docType) => {
+    const targetDoc = (driver?.documents || []).find(d => String(d.id) === String(docId));
+    if (targetDoc) {
+      handleOpenDocModal(targetDoc);
+      return;
+    }
     showAlert(
-      `Approve document "${docType}" for this Captain?`,
+      `Approve document "${docType.toUpperCase()}" for this Captain?`,
       'Approve Document',
       'info',
       'Confirm Approve',
@@ -177,7 +283,7 @@ export default function DriverDetailPage() {
         try {
           await driversAPI.approveDoc(id, docId);
           await refetch();
-          showAlert(`Document "${docType}" verified successfully.`, 'Document Approved', 'success');
+          showAlert(`Document "${docType.toUpperCase()}" verified successfully.`, 'Document Approved', 'success');
         } catch (err) {
           showAlert(err?.response?.data?.error || err.message, 'Approval Failed', 'error');
         } finally {
@@ -474,7 +580,7 @@ export default function DriverDetailPage() {
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
             <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 50}}>
-               <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>{driver.name || driver.username}</h2>
+               <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>{driver.full_name || driver.name || driver.username}</h2>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                
 
@@ -759,8 +865,8 @@ export default function DriverDetailPage() {
                     <TrendingUp size={18} />
                     <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase' }}>Ride Acceptance Rate</span>
                   </div>
-                  <h4 style={{ fontSize: 16, fontWeight: 800, margin: '0 0 4px 0' }}>{driver.performance?.acceptance_rate || 94}%</h4>
-                  <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>Completion rate: {driver.performance?.completion_rate || 97}%</p>
+                  <h4 style={{ fontSize: 16, fontWeight: 800, margin: '0 0 4px 0' }}>{driver.performance?.acceptance_rate}%</h4>
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>Completion rate: {driver.performance?.completion_rate}%</p>
                 </div>
               </div>
 
@@ -907,6 +1013,66 @@ export default function DriverDetailPage() {
                     <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0 0' }}>Compliance documents uploaded</p>
                   </div>
                 </div>
+
+                {/* Fast-Track Compliance Documents List */}
+                <div style={{ marginTop: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <h4 style={{ fontSize: 14, fontWeight: 800, margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <FileText size={16} /> Compliance Documents Quick Verification
+                    </h4>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Click any document row to inspect, edit document number & expiry date, or approve
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+                    {(driver.documents || []).map(doc => (
+                      <div
+                        key={doc.id}
+                        onClick={() => handleOpenDocModal(doc)}
+                        style={{
+                          padding: 12,
+                          borderRadius: 10,
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--border-color)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 10,
+                          transition: 'all 0.15s ease'
+                        }}
+                        className="hover-card"
+                      >
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 2 }}>
+                            <strong style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {Capitalize(doc.document_type)}
+                            </strong>
+                            <span className={`badge ${doc.is_verified ? 'badge-active' : (doc.status === 'rejected' ? 'badge-suspended' : 'badge-pending')}`} style={{ fontSize: 10, padding: '2px 6px' }}>
+                              {doc.status?.toUpperCase() || (doc.is_verified ? 'VERIFIED' : 'PENDING')}
+                            </span>
+                            <button
+                          type="button"
+                          className="btn btn-secondary btn-xs p-2"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenDocModal(doc);
+                          }}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                        >
+                          <Edit3 size={11} />
+                        </button>
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                            <span>No: <strong style={{ color: 'var(--text-primary)' }}>{doc.document_number || '—'}</strong></span>
+                            {doc.expires_at && <span>Exp: <strong style={{ color: doc.is_expired ? 'var(--accent-pink)' : 'inherit' }}>{doc.expires_at}</strong></span>}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -934,19 +1100,25 @@ export default function DriverDetailPage() {
               {/* Emergency Contacts */}
               <div className="card" style={{ padding: 10 }}>
                 <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Emergency Contacts & Support Desk</h3>
-                <div className="grid-2" style={{ gap: 12 }}>
-                  {(driver.emergency_contacts || []).map((ec, idx) => (
-                    <div key={idx} style={{ padding: 12, borderRadius: 10, background: 'var(--bg-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <strong>{ec.name}</strong>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{ec.relation}</div>
+                {(!driver.emergency_contacts || driver.emergency_contacts.length === 0) ? (
+                  <div style={{ padding: 16, color: 'var(--text-muted)', fontSize: 13 }}>
+                    No emergency contacts registered for this captain.
+                  </div>
+                ) : (
+                  <div className="grid-2" style={{ gap: 12 }}>
+                    {(driver.emergency_contacts || []).map((ec, idx) => (
+                      <div key={idx} style={{ padding: 12, borderRadius: 10, background: 'var(--bg-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <strong>{ec.name}</strong>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{ec.relation}</div>
+                        </div>
+                        <a href={`tel:${ec.phone}`} className="btn btn-secondary btn-xs" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <Phone size={12} /> {ec.phone}
+                        </a>
                       </div>
-                      <a href={`tel:${ec.phone}`} className="btn btn-secondary btn-xs" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <Phone size={12} /> {ec.phone}
-                      </a>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -965,18 +1137,27 @@ export default function DriverDetailPage() {
                     </span>
                   </div>
 
-                  {primaryVehicle && (
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      {!primaryVehicle.is_approved && (
-                        <button onClick={() => handleApproveVehicle(primaryVehicle.id)} className="btn btn-success btn-sm" disabled={actionLoading}>
-                          Approve Vehicle
-                        </button>
-                      )}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenDocModal(null, 'vehicle')}
+                      className="btn btn-secondary btn-sm"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                      title="Edit Vehicle specifications & registration"
+                    >
+                      <Edit3 size={13} /> Edit Vehicle Details
+                    </button>
+                    {primaryVehicle && !primaryVehicle.is_approved && (
+                      <button onClick={() => handleApproveVehicle(primaryVehicle.id)} className="btn btn-success btn-sm" disabled={actionLoading}>
+                        Approve Vehicle
+                      </button>
+                    )}
+                    {primaryVehicle && (
                       <button onClick={() => handleDeactivateVehicle(primaryVehicle.id)} className="btn btn-danger btn-sm" disabled={actionLoading}>
                         Deactivate / Replace Vehicle
                       </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
 
                 {primaryVehicle ? (
@@ -1025,46 +1206,100 @@ export default function DriverDetailPage() {
           {activeTab === 'driver_documents' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div className="card" style={{ padding: 10 }}>
-                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <FileText size={18} /> Captain Personal Compliance Documents ({driverDocs.length})
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <FileText size={18} /> Captain Personal Compliance Documents ({driverDocs.length})
+                  </h3>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Click any document or &quot;Edit&quot; to update document number & expiry date
+                  </span>
+                </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
                   {driverDocs.map(doc => (
-                    <div key={doc.id} style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 12 }}>
+                    <div
+                      key={doc.id}
+                      onClick={() => handleOpenDocModal(doc, 'driver')}
+                      style={{
+                        padding: 16,
+                        borderRadius: 12,
+                        background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-color)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                      className="hover-card"
+                    >
                       <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                          <strong style={{ fontSize: 14 }}>{doc.document_type}</strong>
+                          <strong style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <FileText size={15} color="var(--accent-primary)" />
+                            {doc.document_type.toUpperCase()}
+                          </strong>
                           <span className={`badge ${doc.is_verified ? 'badge-active' : (doc.status === 'rejected' ? 'badge-suspended' : 'badge-pending')}`} style={{ fontSize: 11 }}>
-                            {doc.status?.toUpperCase()}
+                            {doc.status?.toUpperCase() || (doc.is_verified ? 'VERIFIED' : 'PENDING')}
                           </span>
                         </div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Number: <strong>{doc.document_number}</strong></div>
-                        <div style={{ fontSize: 12, color: doc.is_expired ? 'var(--accent-pink)' : 'var(--text-muted)' }}>
-                          Expires: <strong>{doc.expires_at || 'No Expiry'}</strong> {doc.is_expired && '(EXPIRED)'}
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>Number: <strong style={{ color: doc.document_number && doc.document_number !== '—' ? 'var(--text-primary)' : 'var(--text-muted)' }}>{doc.document_number || 'Not Provided'}</strong></span>
+                          <Edit3 size={13} style={{ opacity: 0.6 }} />
                         </div>
+                        {doc.expires_at && (
+                          <div style={{ fontSize: 12, color: doc.is_expired ? 'var(--accent-pink)' : 'var(--text-muted)', marginTop: 2 }}>
+                            Expires: <strong>{doc.expires_at}</strong> {doc.is_expired && '(EXPIRED)'}
+                          </div>
+                        )}
                         {doc.rejection_reason && (
-                          <div style={{ fontSize: 11, color: 'var(--accent-pink)', marginTop: 4, background: 'rgba(239,68,68,0.1)', padding: 6, borderRadius: 6 }}>
-                            Reason: {doc.rejection_reason}
+                          <div style={{ fontSize: 11, color: 'var(--accent-pink)', marginTop: 6, background: 'rgba(239,68,68,0.1)', padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.2)' }}>
+                            <strong>Rejection Note:</strong> {doc.rejection_reason}
                           </div>
                         )}
                       </div>
 
-                      <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--border-light)', paddingTop: 10 }}>
+                      <div style={{ display: 'flex', gap: 6, borderTop: '1px solid var(--border-light)', paddingTop: 10 }} onClick={e => e.stopPropagation()}>
                         <button
+                          type="button"
                           onClick={() => setDocPreviewModal({ isOpen: true, url: doc.document_url, title: doc.document_type, type: 'driver' })}
                           className="btn btn-secondary btn-xs"
                           style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+                          title="View Document Image"
                         >
                           <Eye size={12} /> View File
                         </button>
-                        {!doc.is_verified && (
-                          <button onClick={() => handleApproveDoc(doc.id, doc.document_type)} className="btn btn-success btn-xs" disabled={actionLoading}>
-                            Approve
+                        {!doc.is_verified ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDocModal(doc, 'driver')}
+                            className="btn btn-success btn-xs"
+                            disabled={actionLoading}
+                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+                            title="Verify and Approve Document"
+                          >
+                            <Check size={12} /> Approve
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDocModal(doc, 'driver')}
+                            className="btn btn-ghost btn-xs"
+                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4, color: 'var(--status-active)' }}
+                            title="Click to update details or re-verify"
+                          >
+                            <CheckCircle2 size={12} /> Verified
                           </button>
                         )}
-                        <button onClick={() => setRejectDocModal({ isOpen: true, docId: doc.id, docType: doc.document_type, reason: '' })} className="btn btn-danger btn-xs" disabled={actionLoading}>
-                          Reject
+                        <button
+                          type="button"
+                          onClick={() => setRejectDocModal({ isOpen: true, docId: doc.id, docType: doc.document_type, reason: '' })}
+                          className="btn btn-danger btn-xs"
+                          disabled={actionLoading}
+                          title="Reject Document"
+                        >
+                          <X size={12} /> Reject
                         </button>
                       </div>
                     </div>
@@ -1078,46 +1313,98 @@ export default function DriverDetailPage() {
           {activeTab === 'vehicle_documents' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div className="card" style={{ padding: 10 }}>
-                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <FileText size={18} /> Vehicle Compliance Documents ({vehicleDocs.length})
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <FileText size={18} /> Vehicle Compliance Documents ({vehicleDocs.length})
+                  </h3>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Click any document or &quot;Edit&quot; to update document number & expiry date
+                  </span>
+                </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
                   {vehicleDocs.map(doc => (
-                    <div key={doc.id} style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 12 }}>
+                    <div
+                      key={doc.id}
+                      onClick={() => handleOpenDocModal(doc, 'vehicle')}
+                      style={{
+                        padding: 16,
+                        borderRadius: 12,
+                        background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-color)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                      className="hover-card"
+                    >
                       <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                          <strong style={{ fontSize: 14 }}>{doc.document_type}</strong>
+                          <strong style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Car size={15} color="var(--accent-primary)" />
+                            {doc.document_type.toUpperCase()}
+                          </strong>
                           <span className={`badge ${doc.is_verified ? 'badge-active' : (doc.status === 'rejected' ? 'badge-suspended' : 'badge-pending')}`} style={{ fontSize: 11 }}>
-                            {doc.status?.toUpperCase()}
+                            {doc.status?.toUpperCase() || (doc.is_verified ? 'VERIFIED' : 'PENDING')}
                           </span>
                         </div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Number: <strong>{doc.document_number}</strong></div>
-                        <div style={{ fontSize: 12, color: doc.is_expired ? 'var(--accent-pink)' : 'var(--text-muted)' }}>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>Number: <strong style={{ color: doc.document_number && doc.document_number !== '—' ? 'var(--text-primary)' : 'var(--text-muted)' }}>{doc.document_number || 'Not Provided'}</strong></span>
+                          <Edit3 size={13} style={{ opacity: 0.6 }} />
+                        </div>
+                        <div style={{ fontSize: 12, color: doc.is_expired ? 'var(--accent-pink)' : 'var(--text-muted)', marginTop: 2 }}>
                           Expires: <strong>{doc.expires_at || 'No Expiry'}</strong> {doc.is_expired && '(EXPIRED)'}
                         </div>
                         {doc.rejection_reason && (
-                          <div style={{ fontSize: 11, color: 'var(--accent-pink)', marginTop: 4, background: 'rgba(239,68,68,0.1)', padding: 6, borderRadius: 6 }}>
-                            Reason: {doc.rejection_reason}
+                          <div style={{ fontSize: 11, color: 'var(--accent-pink)', marginTop: 6, background: 'rgba(239,68,68,0.1)', padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.2)' }}>
+                            <strong>Rejection Note:</strong> {doc.rejection_reason}
                           </div>
                         )}
                       </div>
 
-                      <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--border-light)', paddingTop: 10 }}>
+                      <div style={{ display: 'flex', gap: 6, borderTop: '1px solid var(--border-light)', paddingTop: 10 }} onClick={e => e.stopPropagation()}>
                         <button
+                          type="button"
                           onClick={() => setDocPreviewModal({ isOpen: true, url: doc.document_url, title: doc.document_type, type: 'vehicle' })}
                           className="btn btn-secondary btn-xs"
                           style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+                          title="View Document Image"
                         >
                           <Eye size={12} /> View File
                         </button>
-                        {!doc.is_verified && (
-                          <button onClick={() => handleApproveDoc(doc.id, doc.document_type)} className="btn btn-success btn-xs" disabled={actionLoading}>
-                            Approve
+                        {!doc.is_verified ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDocModal(doc, 'vehicle')}
+                            className="btn btn-success btn-xs"
+                            disabled={actionLoading}
+                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+                            title="Verify and Approve Document"
+                          >
+                            <Check size={12} /> Approve
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDocModal(doc, 'vehicle')}
+                            className="btn btn-ghost btn-xs"
+                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4, color: 'var(--status-active)' }}
+                            title="Click to update details or re-verify"
+                          >
+                            <CheckCircle2 size={12} /> Verified
                           </button>
                         )}
-                        <button onClick={() => setRejectDocModal({ isOpen: true, docId: doc.id, docType: doc.document_type, reason: '' })} className="btn btn-danger btn-xs" disabled={actionLoading}>
-                          Reject
+                        <button
+                          type="button"
+                          onClick={() => setRejectDocModal({ isOpen: true, docId: doc.id, docType: doc.document_type, reason: '' })}
+                          className="btn btn-danger btn-xs"
+                          disabled={actionLoading}
+                          title="Reject Document"
+                        >
+                          <X size={12} /> Reject
                         </button>
                       </div>
                     </div>
@@ -1239,19 +1526,25 @@ export default function DriverDetailPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div className="card" style={{ padding: 10 }}>
                 <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Linked Bank Accounts for Direct Deposit</h3>
-                <div className="grid-2" style={{ gap: 14 }}>
-                  {bankAccounts.map(b => (
-                    <div key={b.id} style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <strong style={{ fontSize: 14 }}>{b.bank_name}</strong>
-                        <span className="badge badge-active" style={{ fontSize: 11 }}>{b.is_verified ? '✓ Verified' : 'Unverified'}</span>
+                {bankAccounts.length === 0 ? (
+                  <div style={{ padding: 16, color: 'var(--text-muted)', fontSize: 13 }}>
+                    No bank accounts linked by this captain yet.
+                  </div>
+                ) : (
+                  <div className="grid-2" style={{ gap: 14 }}>
+                    {bankAccounts.map(b => (
+                      <div key={b.id} style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <strong style={{ fontSize: 14 }}>{b.bank_name}</strong>
+                          <span className="badge badge-active" style={{ fontSize: 11 }}>{b.is_verified ? '✓ Verified' : 'Unverified'}</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Account Holder: <strong>{b.account_holder_name}</strong></div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Account Number: <code>{b.account_number}</code></div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>IFSC: <code>{b.ifsc_code}</code></div>
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Account Holder: <strong>{b.account_holder_name}</strong></div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Account Number: <code>{b.account_number}</code></div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>IFSC: <code>{b.ifsc_code}</code></div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Payout History */}
@@ -1499,22 +1792,29 @@ export default function DriverDetailPage() {
               <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
                 Services automatically determined based on the captain's approved primary vehicle ({primaryVehicle?.vehicle_type || 'None'}).
               </p>
-              <div className="grid-2" style={{ gap: 14 }}>
-                {servicesList.map(srv => (
-                  <div key={srv.id} style={{ padding: 16, borderRadius: 12, background: srv.enabled ? 'rgba(16,185,129,0.08)' : 'var(--bg-secondary)', border: `1px solid ${srv.enabled ? 'rgba(16,185,129,0.25)' : 'var(--border-color)'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <span style={{ fontSize: 24 }}>{srv.icon}</span>
-                      <div>
-                        <strong style={{ fontSize: 14 }}>{srv.name}</strong>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{srv.desc}</div>
+              {servicesList.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <Layers size={32} style={{ opacity: 0.3, marginBottom: 8 }} />
+                  <p>No service permissions configured for this vehicle category.</p>
+                </div>
+              ) : (
+                <div className="grid-2" style={{ gap: 14 }}>
+                  {servicesList.map(srv => (
+                    <div key={srv.id} style={{ padding: 16, borderRadius: 12, background: srv.enabled ? 'rgba(16,185,129,0.08)' : 'var(--bg-secondary)', border: `1px solid ${srv.enabled ? 'rgba(16,185,129,0.25)' : 'var(--border-color)'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={{ fontSize: 24 }}>{srv.icon}</span>
+                        <div>
+                          <strong style={{ fontSize: 14 }}>{srv.name}</strong>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{srv.desc}</div>
+                        </div>
                       </div>
+                      <span className={`badge ${srv.enabled ? 'badge-active' : 'badge-inactive'}`} style={{ fontSize: 11 }}>
+                        {srv.enabled ? '✓ Enabled' : '✗ Disabled'}
+                      </span>
                     </div>
-                    <span className={`badge ${srv.enabled ? 'badge-active' : 'badge-inactive'}`} style={{ fontSize: 11 }}>
-                      {srv.enabled ? '✓ Enabled' : '✗ Disabled'}
-                    </span>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -1545,23 +1845,30 @@ export default function DriverDetailPage() {
               <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Sparkles size={18} color="var(--accent-yellow)" /> Active Targets & Captain Incentives ({incentivesList.length})
               </h3>
-              <div className="grid-2" style={{ gap: 14 }}>
-                {incentivesList.map(inc => (
-                  <div key={inc.id} style={{ padding: 18, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <strong style={{ fontSize: 14 }}>{inc.title}</strong>
-                      <span className="badge badge-active" style={{ fontSize: 11 }}>+ ₹{inc.reward} Bonus</span>
+              {incentivesList.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <Sparkles size={32} style={{ opacity: 0.3, marginBottom: 8 }} />
+                  <p>No active incentive targets currently assigned to this captain.</p>
+                </div>
+              ) : (
+                <div className="grid-2" style={{ gap: 14 }}>
+                  {incentivesList.map(inc => (
+                    <div key={inc.id} style={{ padding: 18, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <strong style={{ fontSize: 14 }}>{inc.title}</strong>
+                        <span className="badge badge-active" style={{ fontSize: 11 }}>+ ₹{inc.reward} Bonus</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+                        <span>Progress: <strong>{inc.completed} / {inc.target} Trips</strong></span>
+                        <span>Expires: <strong>{inc.expiry}</strong></span>
+                      </div>
+                      <div style={{ width: '100%', height: 6, borderRadius: 3, background: 'var(--border-light)', overflow: 'hidden' }}>
+                        <div style={{ width: `${Math.min(100, Math.round((inc.completed / inc.target) * 100))}%`, height: '100%', background: 'var(--accent-gradient)' }} />
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-                      <span>Progress: <strong>{inc.completed} / {inc.target} Trips</strong></span>
-                      <span>Expires: <strong>{inc.expiry}</strong></span>
-                    </div>
-                    <div style={{ width: '100%', height: 6, borderRadius: 3, background: 'var(--border-light)', overflow: 'hidden' }}>
-                      <div style={{ width: `${Math.min(100, Math.round((inc.completed / inc.target) * 100))}%`, height: '100%', background: 'var(--accent-gradient)' }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -1636,6 +1943,317 @@ export default function DriverDetailPage() {
 
         </div>
       </div>
+
+      {/* ── Document & Vehicle Edit / Verification Modal ── */}
+      {editDocModal.isOpen && (
+        <Modal
+          title={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(59,130,246,0.15)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Car size={18} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>
+                  Review & Update {editDocModal.docType.toUpperCase()}
+                </h3>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Captain: <strong>{driver.name || driver.username}</strong>
+                </span>
+              </div>
+            </div>
+          }
+          onClose={() => setEditDocModal(prev => ({ ...prev, isOpen: false }))}
+          size="modal-lg"
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                {!editDocModal.isVerified && editDocModal.docId && (
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-sm"
+                    onClick={() => {
+                      const docId = editDocModal.docId;
+                      const docType = editDocModal.docType;
+                      setEditDocModal(prev => ({ ...prev, isOpen: false }));
+                      setRejectDocModal({ isOpen: true, docId, docType, reason: '' });
+                    }}
+                    disabled={actionLoading}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <XCircle size={14} /> Reject
+                  </button>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setEditDocModal(prev => ({ ...prev, isOpen: false }))}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleSaveDocUpdate(false)}
+                  disabled={actionLoading}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                >
+                  <RefreshCw size={13} /> Update Details
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-success btn-sm"
+                  onClick={() => handleSaveDocUpdate(true)}
+                  disabled={actionLoading}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                >
+                  <CheckCircle size={14} /> {editDocModal.isVerified ? 'Save & Re-Verify' : 'Approve Document & Vehicle'}
+                </button>
+              </div>
+            </div>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '4px 0' }}>
+            
+            {/* ── 1. Document Details & Image Preview Section ── */}
+            {editDocModal.docId && (
+              <div style={{ padding: 14, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-primary)' }}>
+                    <FileText size={16} /> Compliance Document Details
+                  </h4>
+                  <span className={`badge ${editDocModal.isVerified ? 'badge-active' : (editDocModal.status === 'rejected' ? 'badge-suspended' : 'badge-pending')}`} style={{ fontSize: 11 }}>
+                    {editDocModal.status?.toUpperCase() || (editDocModal.isVerified ? 'VERIFIED' : 'PENDING REVIEW')}
+                  </span>
+                </div>
+
+                {/* Document Image Thumbnail Preview if available */}
+                {editDocModal.documentUrl && (
+                  <div
+                    style={{
+                      position: 'relative',
+                      borderRadius: 10,
+                      overflow: 'hidden',
+                      border: '1px solid var(--border-color)',
+                      background: '#000000',
+                      maxHeight: '160px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      marginBottom: 14
+                    }}
+                    onClick={() => setDocPreviewModal({ isOpen: true, url: editDocModal.documentUrl, title: editDocModal.docType, type: editDocModal.type })}
+                    title="Click to view full image"
+                  >
+                    <img
+                      src={editDocModal.documentUrl}
+                      alt={editDocModal.docType}
+                      style={{ maxHeight: '160px', maxWidth: '100%', objectFit: 'contain' }}
+                    />
+                    <div style={{
+                      position: 'absolute',
+                      bottom: 6,
+                      right: 6,
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                      background: 'rgba(0,0,0,0.7)',
+                      color: '#fff',
+                      fontSize: 11,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}>
+                      <Eye size={12} /> Expand Preview
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid-2" style={{ gap: 12 }}>
+                  {/* Document Number */}
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                      Document / License Number <span style={{ color: 'var(--accent-pink)' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={`Enter ${editDocModal.docType} number`}
+                      value={editDocModal.documentNumber.toUpperCase()}
+                      onChange={e => setEditDocModal(prev => ({ ...prev, documentNumber: e.target.value.toUpperCase() }))}
+                    />
+                  </div>
+
+                  {/* Expiry Date */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, margin: 0 }}>
+                        Expiry Date
+                      </label>
+                      {editDocModal.expiresAt && (
+                        <button
+                          type="button"
+                          onClick={() => setEditDocModal(prev => ({ ...prev, expiresAt: '' }))}
+                          className="btn btn-ghost btn-xs"
+                          style={{ fontSize: 11, color: 'var(--text-muted)', padding: '0 4px' }}
+                        >
+                          Clear (No Expiry)
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={editDocModal.expiresAt}
+                      onChange={e => setEditDocModal(prev => ({ ...prev, expiresAt: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                {editDocModal.rejectionReason && (
+                  <div style={{
+                    marginTop: 10,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    background: 'rgba(239,68,68,0.1)',
+                    border: '1px solid rgba(239,68,68,0.25)',
+                    color: 'var(--accent-pink)',
+                    fontSize: 12
+                  }}>
+                    <strong>Previous Rejection Note:</strong> {editDocModal.rejectionReason}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── 2. Captain Vehicle Specifications Section (vehicles/models.py) ── */}
+            <div style={{ padding: 14, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 6 }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-yellow)' }}>
+                    <Car size={16} /> Captain Vehicle Specifications & Details
+                  </h4>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    Directly update the primary vehicle specifications linked to this captain
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={editDocModal.vehicleApproved}
+                      onChange={e => setEditDocModal(prev => ({ ...prev, vehicleApproved: e.target.checked }))}
+                    />
+                    <span style={{ fontWeight: 600 }}>Vehicle Approved</span>
+                  </label>
+                  <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={editDocModal.vehicleActive}
+                      onChange={e => setEditDocModal(prev => ({ ...prev, vehicleActive: e.target.checked }))}
+                    />
+                    <span style={{ fontWeight: 600 }}>Active on Fleet</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid-2" style={{ gap: 12 }}>
+                {/* Registration Number */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                    Vehicle Registration Number (RC Plate) <span style={{ color: 'var(--accent-pink)' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. DL01AB1234"
+                    value={editDocModal.registrationNumber.toUpperCase()}
+                    onChange={e => setEditDocModal(prev => ({ ...prev, registrationNumber: e.target.value.toUpperCase() }))}
+                  />
+                </div>
+
+                {/* Vehicle Category / Type */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                    Vehicle Category / Type <span style={{ color: 'var(--accent-pink)' }}>*</span>
+                  </label>
+                  <select
+                    className="form-control"
+                    value={editDocModal.vehicleType}
+                    onChange={e => setEditDocModal(prev => ({ ...prev, vehicleType: e.target.value }))}
+                  >
+                    <option value="Bike">Bike (2-Wheeler)</option>
+                    <option value="Auto">Auto Rickshaw (3-Wheeler)</option>
+                    <option value="Sedan">Sedan (4-Wheeler)</option>
+                    <option value="SUV">SUV (4-Wheeler)</option>
+                    <option value="Cab Economy">Cab Economy</option>
+                    <option value="Cab Premier">Cab Premier</option>
+                    <option value="Parcel">Parcel Express</option>
+                  </select>
+                </div>
+
+                {/* Vehicle Make / Manufacturer */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                    Manufacturer / Make
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Honda, Hero, Bajaj, Maruti"
+                    value={Capitalize(editDocModal.make)}
+                    onChange={e => setEditDocModal(prev => ({ ...prev, make: Capitalize(e.target.value) }))}
+                  />
+                </div>
+
+                {/* Vehicle Model */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                    Model Name
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Activa 6G, Splendor+, WagonR"
+                    value={Capitalize(editDocModal.model)}
+                    onChange={e => setEditDocModal(prev => ({ ...prev, model: Capitalize(e.target.value) }))}
+                  />
+                </div>
+
+                {/* Manufacturing Year */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                    Manufacturing Year
+                  </label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    placeholder="e.g. 2023"
+                    value={editDocModal.year}
+                    onChange={e => setEditDocModal(prev => ({ ...prev, year: e.target.value }))}
+                  />
+                </div>
+
+                {/* Vehicle Color */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                    Vehicle Color
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Black, White, Silver, Red"
+                    value={Capitalize(editDocModal.color)}
+                    onChange={e => setEditDocModal(prev => ({ ...prev, color: Capitalize(e.target.value) }))}
+                  />
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </Modal>
+      )}
 
       {/* ── Document Preview Lightbox Modal ── */}
       {docPreviewModal.isOpen && (

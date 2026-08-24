@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Mail, Phone, User, ArrowRight, CheckSquare, Square, ShieldCheck, MapPin, Building2 } from 'lucide-react';
+import { Mail, Phone, User, ArrowRight, CheckSquare, Square, ShieldCheck } from 'lucide-react';
 import OtpInput from './OtpInput';
 
 // Standard Phone Number Formatter (e.g. 98765 43210)
@@ -119,14 +119,6 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
   const validateInput = () => {
     if (!name.trim()) {
       setError('Please enter your full name');
-      return false;
-    }
-    if (!operatingAddress.trim()) {
-      setError('Please enter the address/area where you will ride the bike');
-      return false;
-    }
-    if (!serviceCity.trim()) {
-      setError('Please select or enter your operating city');
       return false;
     }
     if (authMethod === 'mobile') {
@@ -368,55 +360,9 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
                     setName(e.target.value);
                     if (error) setError('');
                   }}
-                  placeholder="Sanjay Soni"
+                  placeholder="Captain Name"
                   className="w-full bg-white text-[#1C1C1E] font-bold placeholder:font-normal placeholder:text-[#8E8E93] text-sm rounded-xl py-2.5 pl-10 pr-4 border border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20 transition-all duration-200 focus:outline-none"
                 />
-              </div>
-            </div>
-
-            {/* Operating City & Ride Location Address */}
-            <div className="space-y-2.5 p-3 bg-[#F8F9FA] rounded-xl border border-[#E5E5EA]">
-              <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#1C1C1E]">
-                <MapPin className="w-3.5 h-3.5 text-[#FFC000]" />
-                <span>Riding Base & Service Location</span>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-[#636366] mb-1">
-                  Operating City / Service Region
-                </label>
-                <div className="relative">
-                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#636366]" />
-                  <input
-                    type="text"
-                    value={serviceCity}
-                    onChange={(e) => {
-                      setServiceCity(e.target.value);
-                      if (error) setError('');
-                    }}
-                    placeholder="e.g. Delhi NCR, Noida, Jaipur, Gurgaon"
-                    className="w-full bg-white text-[#1C1C1E] font-bold text-xs rounded-lg py-2 pl-9 pr-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20 transition-all duration-200 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-[#636366] mb-1">
-                  Ride Operating Address (Where you will ride the bike)
-                </label>
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-2.5 w-3.5 h-3.5 text-[#636366]" />
-                  <textarea
-                    rows={2}
-                    value={operatingAddress}
-                    onChange={(e) => {
-                      setOperatingAddress(e.target.value);
-                      if (error) setError('');
-                    }}
-                    placeholder="Enter locality, stand address or area where you plan to take rides (e.g. Connaught Place, Central Delhi)"
-                    className="w-full bg-white text-[#1C1C1E] font-medium text-xs rounded-lg py-2 pl-9 pr-3 border border-[#E5E5EA] focus:border-[#FFC000] focus:ring-2 focus:ring-[#FFC000]/20 transition-all duration-200 focus:outline-none resize-none"
-                  />
-                </div>
               </div>
             </div>
 

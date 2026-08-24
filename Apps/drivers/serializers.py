@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Driver, DriverDocument, DriverBankAccount, DriverEmergencyContact
+from .models import Driver, DriverDocument, DriverBankAccount, DriverEmergencyContact, get_max_duty_seconds
 
 
 class DriverSerializer(serializers.ModelSerializer):
@@ -15,7 +15,7 @@ class DriverSerializer(serializers.ModelSerializer):
         return obj.get_current_daily_online_seconds()
 
     def get_max_duty_seconds(self, obj):
-        return 43200 # 12 hours maximum limit
+        return get_max_duty_seconds()
 
 
 class DriverDocumentSerializer(serializers.ModelSerializer):

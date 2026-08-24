@@ -3,6 +3,16 @@ from django.db import models
 from users.models import User
 
 
+def get_max_duty_seconds():
+    """Retrieve configured driver daily max duty limit in seconds from SystemSetting (default 12 hours = 43200s)."""
+    try:
+        from users.models import SystemSetting
+        hours = float(SystemSetting.get_setting('driver_max_duty_hours', '12') or 12)
+        return int(hours * 3600)
+    except Exception:
+        return 43200
+
+
 class Driver(models.Model):
     class ApprovalStatus(models.TextChoices):
         PENDING = 'Pending', 'Pending'
@@ -66,7 +76,7 @@ class Driver(models.Model):
             session_sec = int((timezone.now() - effective_start).total_seconds())
             total_sec += max(0, session_sec)
 
-        return min(total_sec, 43200) # 12 Hours Max limit (43,200 seconds)
+        return min(total_sec, get_max_duty_seconds())
 
     class Meta:
         db_table = 'drivers'
@@ -82,6 +92,8 @@ class DriverDocument(models.Model):
         LICENSE = 'License', 'Driving License'
         RC = 'RC', 'Registration Certificate'
         INSURANCE = 'Insurance', 'Vehicle Insurance'
+        AADHAAR = 'Aadhaar', 'Aadhaar Card'
+        PHOTO = 'Photo', 'Passport Photo'
         PERMIT = 'Permit', 'Commercial Permit'
         BACKGROUND_CHECK = 'Background Check', 'Background Check'
 
@@ -116,6 +128,7 @@ class DriverDocument(models.Model):
         db_table = 'driver_documents'
         verbose_name = 'Driver Document'
         verbose_name_plural = 'Driver Documents'
+        unique_together = ('driver', 'document_type')
 
     def __str__(self):
         return f"{self.driver.user.username} - {self.document_type}"
@@ -132,6 +145,7 @@ class DriverBankAccount(models.Model):
     account_number = models.CharField(max_length=50)
     ifsc_code = models.CharField(max_length=20)
     bank_name = models.CharField(max_length=100)
+    passbook_image = models.CharField(max_length=500, blank=True, null=True)
     is_verified = models.BooleanField(default=False)
     is_primary = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
