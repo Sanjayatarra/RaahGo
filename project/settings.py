@@ -34,11 +34,13 @@ SECRET_KEY = 'django-insecure-e6q5#tm1v_ue2i1-$%6a(j*1s-ejrih&76@ceyz=u0uqz!+z%!
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-# Base local hosts
+# Base local hosts & mobile emulator/device IPs
 ALLOWED_HOSTS = [
     "127.0.0.1",
     "localhost",
+    "10.0.2.2",       # Android emulator
     "192.168.137.1",
+    "*"               # Allow mobile devices on LAN during development
 ]
 
 # Dynamically add hosts from .env (comma-separated)
