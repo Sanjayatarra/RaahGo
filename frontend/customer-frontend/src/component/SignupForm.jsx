@@ -25,7 +25,7 @@ export default function SignupForm({ onSuccess, onSwitchToLogin }) {
   const identifier = authMethod === 'mobile' ? mobileNumber : emailAddress;
 
   useEffect(() => {
-    if (location.state?.prefill) {
+    if (location.state?.prefill && typeof location.state.prefill === 'string') {
       const prefill = location.state.prefill;
       if (prefill.includes('@')) {
         setAuthMethod('email');

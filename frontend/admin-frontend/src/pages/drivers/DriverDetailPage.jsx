@@ -70,14 +70,35 @@ export default function DriverDetailPage() {
     status: '',
     rejectionReason: '',
     type: 'driver',
-    // Vehicle specifications (from vehicles/models.py)
+    // Aadhaar fields
+    aadhaar_number: '',
+    name: '',
+    dob: '',
+    gender: 'Male',
+    care_of: '',
+    pincode: '',
+    address: '',
+    // Insurance fields
+    policy_number: '',
+    insurer_name: '',
+    policy_type: 'Comprehensive',
+    vehicle_registration_no: '',
+    policy_start_date: '',
+    policy_expiry_date: '',
+    insured_name: '',
+    // RC fields
+    registration_no: '',
+    owner_name: '',
+    chassis_number: '',
+    engine_number: '',
+    vehicle_make: '',
+    vehicle_model: '',
+    fuel_type: 'Petrol',
+    // License fields
+    license_number: '',
+    issuing_authority: '',
+    // Vehicle specifications
     vehicleId: null,
-    registrationNumber: '',
-    make: '',
-    model: '',
-    year: '',
-    color: '',
-    vehicleType: 'Bike',
     vehicleApproved: false,
     vehicleActive: true,
   });
@@ -190,30 +211,63 @@ export default function DriverDetailPage() {
     );
   };
 
-  // ── Document & Vehicle Review / Edit Actions ──
+  // ── Document Review / Edit Actions ──
   const handleOpenDocModal = (doc = null, type = 'driver') => {
     const v = primaryVehicle || driver?.vehicle || (driver?.vehicles && driver.vehicles[0]) || null;
-    const isVehicleDoc = type === 'vehicle' || (doc && ['rc', 'insurance', 'puc', 'permit', 'vehicle'].some(k => (doc.document_type || '').toLowerCase().includes(k)));
+    const docTypeRaw = doc?.document_type || (type === 'vehicle' ? 'RC' : 'License');
+    const docTypeLower = (docTypeRaw || '').toLowerCase();
+
+    const isPhoto = ['photo', 'passport', 'picture', 'selfie'].some(k => docTypeLower.includes(k));
+    const isAadhaar = ['aadhaar', 'adhar', 'aadhar'].some(k => docTypeLower.includes(k));
+    const isInsurance = ['insurance', 'ins'].some(k => docTypeLower.includes(k));
+    const isRC = ['rc', 'registration'].some(k => docTypeLower.includes(k));
+    const isLicense = ['license', 'licence', 'dl', 'driving'].some(k => docTypeLower.includes(k));
+
+    const driverFullName = (driver?.name || `${driver?.first_name || ''} ${driver?.last_name || ''}`).trim();
 
     setEditDocModal({
       isOpen: true,
       docId: doc?.id || null,
-      docType: doc?.document_type || (isVehicleDoc ? 'Vehicle & Compliance' : 'Compliance Document'),
-      documentNumber: (doc?.document_number && doc?.document_number !== '—') ? doc.document_number : (doc?.document_type === 'RC' && v?.registration_number ? v.registration_number : ''),
+      docType: docTypeRaw,
+      documentNumber: (doc?.document_number && doc?.document_number !== '—') ? doc.document_number : (isRC && v?.registration_number ? v.registration_number : ''),
       expiresAt: doc?.expires_at || doc?.expiry_date || '',
       documentUrl: doc?.document_url || '',
       isVerified: Boolean(doc?.is_verified),
       status: doc?.status || (doc?.is_verified ? 'verified' : 'pending'),
       rejectionReason: doc?.rejection_reason || '',
-      type: isVehicleDoc ? 'vehicle' : type,
-      // Vehicle specifications (vehicles/models.py)
+      type: (isRC || isInsurance) ? 'vehicle' : type,
+
+      // Aadhaar fields
+      aadhaar_number: doc?.aadhaar_number || (isAadhaar && doc?.document_number && doc?.document_number !== '—' ? doc.document_number : ''),
+      name: doc?.name || driverFullName || '',
+      dob: doc?.dob || doc?.date_of_birth || driver?.date_of_birth || '',
+      gender: doc?.gender || driver?.gender || 'Male',
+      address: doc?.address || driver?.operating_address || driver?.address || '',
+
+      // Insurance fields
+      policy_number: doc?.policy_number || (isInsurance && doc?.document_number && doc?.document_number !== '—' ? doc.document_number : ''),
+      insurer_name: doc?.insurer_name || v?.insurance_company || '',
+      policy_type: doc?.policy_type || 'Comprehensive',
+      vehicle_registration_no: doc?.vehicle_registration_no || v?.registration_number || '',
+      policy_start_date: doc?.policy_start_date || '',
+      policy_expiry_date: doc?.expires_at || doc?.expiry_date || v?.insurance_expiry || '',
+      insured_name: doc?.insured_name || driverFullName || '',
+
+      // RC fields
+      registration_no: doc?.registration_no || v?.registration_number || (isRC && doc?.document_number && doc?.document_number !== '—' ? doc.document_number : ''),
+      owner_name: doc?.owner_name || driverFullName || '',
+      chassis_number: doc?.chassis_number || v?.chassis_number || '',
+      engine_number: doc?.engine_number || v?.engine_number || '',
+      vehicle_make: doc?.vehicle_make || v?.make || '',
+      vehicle_model: doc?.vehicle_model || v?.model || '',
+      fuel_type: doc?.fuel_type || v?.fuel_type || 'Petrol',
+
+      // License fields
+      license_number: doc?.license_number || (isLicense && doc?.document_number && doc?.document_number !== '—' ? doc.document_number : driver?.license_number || ''),
+      issuing_authority: doc?.issuing_authority || '',
+
+      // Vehicle specs
       vehicleId: v?.id || null,
-      registrationNumber: v?.registration_number || (doc?.document_type === 'RC' && doc?.document_number && doc?.document_number !== '—' ? doc.document_number : ''),
-      make: v?.make || '',
-      model: v?.model || '',
-      year: v?.year || 2023,
-      color: v?.color || 'Black',
-      vehicleType: v?.vehicle_type || 'Bike',
       vehicleApproved: Boolean(v?.is_approved),
       vehicleActive: v?.is_active ?? true,
     });
@@ -222,16 +276,57 @@ export default function DriverDetailPage() {
   const handleSaveDocUpdate = async (shouldApprove = false) => {
     setActionLoading(true);
     try {
+      const docTypeLower = (editDocModal.docType || '').toLowerCase();
+      const isPhoto = ['photo', 'passport', 'picture', 'selfie'].some(k => docTypeLower.includes(k));
+      const isAadhaar = ['aadhaar', 'adhar', 'aadhar'].some(k => docTypeLower.includes(k));
+      const isInsurance = ['insurance', 'ins'].some(k => docTypeLower.includes(k));
+      const isRC = ['rc', 'registration'].some(k => docTypeLower.includes(k));
+      const isLicense = ['license', 'licence', 'dl', 'driving'].some(k => docTypeLower.includes(k));
+
+      let docNumber = editDocModal.documentNumber.trim();
+      let docExpiry = editDocModal.expiresAt || null;
+
+      if (isAadhaar) {
+        docNumber = editDocModal.aadhaar_number.trim();
+      } else if (isInsurance) {
+        docNumber = editDocModal.policy_number.trim();
+        docExpiry = editDocModal.policy_expiry_date || docExpiry;
+      } else if (isRC) {
+        docNumber = editDocModal.registration_no.trim();
+      } else if (isLicense) {
+        docNumber = editDocModal.license_number.trim() || docNumber;
+      }
+
       const payload = {
-        document_number: editDocModal.documentNumber.trim(),
-        expiry_date: editDocModal.expiresAt || null,
+        document_number: docNumber,
+        expiry_date: docExpiry,
+        // Aadhaar fields
+        name: editDocModal.name,
+        dob: editDocModal.dob,
+        gender: editDocModal.gender,
+        care_of: editDocModal.care_of,
+        pincode: editDocModal.pincode,
+        address: editDocModal.address,
+        // Insurance fields
+        policy_number: editDocModal.policy_number,
+        insurer_name: editDocModal.insurer_name,
+        policy_type: editDocModal.policy_type,
+        vehicle_registration_no: editDocModal.vehicle_registration_no,
+        policy_start_date: editDocModal.policy_start_date,
+        policy_expiry_date: editDocModal.policy_expiry_date,
+        insured_name: editDocModal.insured_name,
+        // RC fields
+        registration_no: editDocModal.registration_no,
+        owner_name: editDocModal.owner_name,
+        chassis_number: editDocModal.chassis_number,
+        engine_number: editDocModal.engine_number,
+        vehicle_make: editDocModal.vehicle_make,
+        vehicle_model: editDocModal.vehicle_model,
+        fuel_type: editDocModal.fuel_type,
         // Vehicle fields
-        registration_number: editDocModal.registrationNumber.trim() || undefined,
-        make: editDocModal.make.trim() || undefined,
-        model: editDocModal.model.trim() || undefined,
-        year: editDocModal.year ? parseInt(editDocModal.year, 10) : undefined,
-        color: editDocModal.color.trim() || undefined,
-        vehicle_type: editDocModal.vehicleType || undefined,
+        registration_number: isRC ? editDocModal.registration_no.trim() : (isInsurance ? editDocModal.vehicle_registration_no.trim() : undefined),
+        make: editDocModal.vehicle_make.trim() || undefined,
+        model: editDocModal.vehicle_model.trim() || undefined,
         vehicle_is_approved: shouldApprove ? true : editDocModal.vehicleApproved,
         vehicle_is_active: editDocModal.vehicleActive,
       };
@@ -240,22 +335,22 @@ export default function DriverDetailPage() {
         if (editDocModal.docId) {
           await driversAPI.approveDoc(id, editDocModal.docId, payload);
         }
-        if (editDocModal.vehicleId || editDocModal.registrationNumber) {
+        if (editDocModal.vehicleId || (isRC && editDocModal.registration_no)) {
           await driversAPI.updateVehicle(id, editDocModal.vehicleId || 'primary', {
             ...payload,
             is_approved: true,
             is_active: true
           });
         }
-        showAlert(`Document "${editDocModal.docType.toUpperCase()}" & Vehicle details verified & approved successfully.`, 'Verified & Approved', 'success');
+        showAlert(`Document "${editDocModal.docType.toUpperCase()}" verified & approved successfully.`, 'Verified & Approved', 'success');
       } else {
         if (editDocModal.docId) {
           await driversAPI.updateDoc(id, editDocModal.docId, payload);
         }
-        if (editDocModal.vehicleId || editDocModal.registrationNumber) {
+        if (editDocModal.vehicleId || (isRC && editDocModal.registration_no)) {
           await driversAPI.updateVehicle(id, editDocModal.vehicleId || 'primary', payload);
         }
-        showAlert(`Document "${editDocModal.docType.toUpperCase()}" & Vehicle specifications updated successfully.`, 'Updated Successfully', 'success');
+        showAlert(`Document "${editDocModal.docType.toUpperCase()}" details updated successfully.`, 'Updated Successfully', 'success');
       }
       setEditDocModal(prev => ({ ...prev, isOpen: false }));
       await refetch();
@@ -801,7 +896,7 @@ export default function DriverDetailPage() {
                   {[
                     { label: 'Account Active', key: 'account_active', ok: eligibility.checks?.account_active },
                     { label: 'Captain KYC Approved', key: 'driver_approved', ok: eligibility.checks?.driver_approved },
-                    { label: 'Vehicle Approved (Max 1)', key: 'vehicle_approved', ok: eligibility.checks?.vehicle_approved },
+                    { label: 'Vehicle Approved', key: 'vehicle_approved', ok: eligibility.checks?.vehicle_approved },
                     { label: 'Driving License Valid', key: 'license_valid', ok: eligibility.checks?.license_valid },
                     { label: 'RC (Registration) Valid', key: 'rc_valid', ok: eligibility.checks?.rc_valid },
                     { label: 'Vehicle Insurance Valid', key: 'insurance_valid', ok: eligibility.checks?.insurance_valid },
@@ -1944,316 +2039,559 @@ export default function DriverDetailPage() {
         </div>
       </div>
 
-      {/* ── Document & Vehicle Edit / Verification Modal ── */}
-      {editDocModal.isOpen && (
-        <Modal
-          title={
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(59,130,246,0.15)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Car size={18} />
+      {/* ── Document Edit / Verification Modal ── */}
+      {editDocModal.isOpen && (() => {
+        const docTypeLower = (editDocModal.docType || '').toLowerCase();
+        const isPhoto = ['photo', 'passport', 'picture', 'selfie'].some(k => docTypeLower.includes(k));
+        const isAadhaar = ['aadhaar', 'adhar', 'aadhar'].some(k => docTypeLower.includes(k));
+        const isInsurance = ['insurance', 'ins'].some(k => docTypeLower.includes(k));
+        const isRC = ['rc', 'registration'].some(k => docTypeLower.includes(k));
+        const isLicense = ['license', 'licence', 'dl', 'driving'].some(k => docTypeLower.includes(k));
+
+        return (
+          <Modal
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(59,130,246,0.15)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {isRC || isInsurance ? <Car size={18} /> : (isPhoto ? <User size={18} /> : <FileText size={18} />)}
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>
+                    Review & Update {editDocModal.docType.toUpperCase()}
+                  </h3>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Captain: <strong>{driver.name || driver.username}</strong>
+                  </span>
+                </div>
               </div>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>
-                  Review & Update {editDocModal.docType.toUpperCase()}
-                </h3>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  Captain: <strong>{driver.name || driver.username}</strong>
-                </span>
-              </div>
-            </div>
-          }
-          onClose={() => setEditDocModal(prev => ({ ...prev, isOpen: false }))}
-          size="modal-lg"
-          footer={
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: 8 }}>
-              <div>
-                {!editDocModal.isVerified && editDocModal.docId && (
+            }
+            onClose={() => setEditDocModal(prev => ({ ...prev, isOpen: false }))}
+            size="modal-lg"
+            footer={
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  {!editDocModal.isVerified && editDocModal.docId && (
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      onClick={() => {
+                        const docId = editDocModal.docId;
+                        const docType = editDocModal.docType;
+                        setEditDocModal(prev => ({ ...prev, isOpen: false }));
+                        setRejectDocModal({ isOpen: true, docId, docType, reason: '' });
+                      }}
+                      disabled={actionLoading}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    >
+                      <XCircle size={14} /> Reject
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
                   <button
                     type="button"
-                    className="btn btn-danger btn-sm"
-                    onClick={() => {
-                      const docId = editDocModal.docId;
-                      const docType = editDocModal.docType;
-                      setEditDocModal(prev => ({ ...prev, isOpen: false }));
-                      setRejectDocModal({ isOpen: true, docId, docType, reason: '' });
-                    }}
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setEditDocModal(prev => ({ ...prev, isOpen: false }))}
+                  >
+                    Cancel
+                  </button>
+                  {!isPhoto && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => handleSaveDocUpdate(false)}
+                      disabled={actionLoading}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    >
+                      <RefreshCw size={13} /> Update Details
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-success btn-sm"
+                    onClick={() => handleSaveDocUpdate(true)}
                     disabled={actionLoading}
                     style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
                   >
-                    <XCircle size={14} /> Reject
+                    <CheckCircle size={14} /> {editDocModal.isVerified ? 'Save & Re-Verify' : 'Approve Document'}
                   </button>
-                )}
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setEditDocModal(prev => ({ ...prev, isOpen: false }))}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={() => handleSaveDocUpdate(false)}
-                  disabled={actionLoading}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                >
-                  <RefreshCw size={13} /> Update Details
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-success btn-sm"
-                  onClick={() => handleSaveDocUpdate(true)}
-                  disabled={actionLoading}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                >
-                  <CheckCircle size={14} /> {editDocModal.isVerified ? 'Save & Re-Verify' : 'Approve Document & Vehicle'}
-                </button>
-              </div>
-            </div>
-          }
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '4px 0' }}>
-            
-            {/* ── 1. Document Details & Image Preview Section ── */}
-            {editDocModal.docId && (
-              <div style={{ padding: 14, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-primary)' }}>
-                    <FileText size={16} /> Compliance Document Details
-                  </h4>
-                  <span className={`badge ${editDocModal.isVerified ? 'badge-active' : (editDocModal.status === 'rejected' ? 'badge-suspended' : 'badge-pending')}`} style={{ fontSize: 11 }}>
-                    {editDocModal.status?.toUpperCase() || (editDocModal.isVerified ? 'VERIFIED' : 'PENDING REVIEW')}
-                  </span>
                 </div>
+              </div>
+            }
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '4px 0' }}>
+              
+              {/* Document Image Thumbnail Preview if available */}
+              {editDocModal.documentUrl && (
+                <div
+                  style={{
+                    position: 'relative',
+                    borderRadius: 10,
+                    overflow: 'hidden',
+                    border: '1px solid var(--border-color)',
+                    background: '#000000',
+                    maxHeight: '180px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => setDocPreviewModal({ isOpen: true, url: editDocModal.documentUrl, title: editDocModal.docType, type: editDocModal.type })}
+                  title="Click to view full image"
+                >
+                  <img
+                    src={editDocModal.documentUrl}
+                    alt={editDocModal.docType}
+                    style={{ maxHeight: '180px', maxWidth: '100%', objectFit: 'contain' }}
+                  />
+                  <div style={{
+                    position: 'absolute',
+                    bottom: 6,
+                    right: 6,
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    background: 'rgba(0,0,0,0.7)',
+                    color: '#fff',
+                    fontSize: 11,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}>
+                    <Eye size={12} /> Expand Preview
+                  </div>
+                </div>
+              )}
 
-                {/* Document Image Thumbnail Preview if available */}
-                {editDocModal.documentUrl && (
-                  <div
-                    style={{
-                      position: 'relative',
-                      borderRadius: 10,
-                      overflow: 'hidden',
-                      border: '1px solid var(--border-color)',
-                      background: '#000000',
-                      maxHeight: '160px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      marginBottom: 14
-                    }}
-                    onClick={() => setDocPreviewModal({ isOpen: true, url: editDocModal.documentUrl, title: editDocModal.docType, type: editDocModal.type })}
-                    title="Click to view full image"
-                  >
-                    <img
-                      src={editDocModal.documentUrl}
-                      alt={editDocModal.docType}
-                      style={{ maxHeight: '160px', maxWidth: '100%', objectFit: 'contain' }}
-                    />
-                    <div style={{
-                      position: 'absolute',
-                      bottom: 6,
-                      right: 6,
-                      padding: '4px 8px',
-                      borderRadius: 6,
-                      background: 'rgba(0,0,0,0.7)',
-                      color: '#fff',
-                      fontSize: 11,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4
-                    }}>
-                      <Eye size={12} /> Expand Preview
+              {/* Status Header Badge */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>Verification Status</span>
+                <span className={`badge ${editDocModal.isVerified ? 'badge-active' : (editDocModal.status === 'rejected' ? 'badge-suspended' : 'badge-pending')}`} style={{ fontSize: 11 }}>
+                  {editDocModal.status?.toUpperCase() || (editDocModal.isVerified ? 'VERIFIED' : 'PENDING REVIEW')}
+                </span>
+              </div>
+
+              {/* Rejection reason if any */}
+              {editDocModal.rejectionReason && (
+                <div style={{
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  background: 'rgba(239,68,68,0.1)',
+                  border: '1px solid rgba(239,68,68,0.25)',
+                  color: 'var(--accent-pink)',
+                  fontSize: 12
+                }}>
+                  <strong>Previous Rejection Note:</strong> {editDocModal.rejectionReason}
+                </div>
+              )}
+
+              {/* ── 1. Photo Type: No editable fields ── */}
+              {isPhoto && (
+                <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                  <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(59,130,246,0.15)', color: 'var(--accent-primary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+                    <User size={22} />
+                  </div>
+                  <h4 style={{ margin: '0 0 4px 0', fontSize: 15, fontWeight: 700 }}>Captain Passport Photograph</h4>
+                  <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>
+                    Verify that the photo is clear, front-facing, and matches the Captain identity. No additional input fields required.
+                  </p>
+                </div>
+              )}
+
+              {/* ── 2. Aadhaar Card Fields ── */}
+              {isAadhaar && (
+                <div style={{ padding: 14, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                  <h4 style={{ margin: '0 0 12px 0', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-primary)' }}>
+                    <ShieldCheck size={16} /> Aadhaar Card Details
+                  </h4>
+                  <div className="grid-2" style={{ gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Aadhaar Number <span style={{ color: 'var(--accent-pink)' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. 1234 5678 9012"
+                        value={editDocModal.aadhaar_number}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, aadhaar_number: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Full Name (as on Aadhaar)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Full Name"
+                        value={editDocModal.name}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, name: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Date of Birth (DOB)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="YYYY-MM-DD or DD/MM/YYYY"
+                        value={editDocModal.dob}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, dob: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Gender
+                      </label>
+                      <select
+                        className="form-control"
+                        value={editDocModal.gender}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, gender: e.target.value }))}
+                      >
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other / Transgender</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Pincode
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="6-digit Pincode"
+                        value={editDocModal.pincode}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, pincode: e.target.value }))}
+                      />
                     </div>
                   </div>
-                )}
-
-                <div className="grid-2" style={{ gap: 12 }}>
-                  {/* Document Number */}
-                  <div>
+                  <div style={{ marginTop: 12 }}>
                     <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
-                      Document / License Number <span style={{ color: 'var(--accent-pink)' }}>*</span>
+                      Address
                     </label>
-                    <input
-                      type="text"
+                    <textarea
                       className="form-control"
-                      placeholder={`Enter ${editDocModal.docType} number`}
-                      value={editDocModal.documentNumber.toUpperCase()}
-                      onChange={e => setEditDocModal(prev => ({ ...prev, documentNumber: e.target.value.toUpperCase() }))}
+                      rows={2}
+                      placeholder="Full Address as on Aadhaar"
+                      value={editDocModal.address}
+                      onChange={e => setEditDocModal(prev => ({ ...prev, address: e.target.value }))}
                     />
                   </div>
+                </div>
+              )}
 
-                  {/* Expiry Date */}
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      <label style={{ fontSize: 12, fontWeight: 700, margin: 0 }}>
+              {/* ── 3. Insurance Policy Fields ── */}
+              {isInsurance && (
+                <div style={{ padding: 14, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                  <h4 style={{ margin: '0 0 12px 0', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-primary)' }}>
+                    <FileText size={16} /> Vehicle Insurance Policy Details
+                  </h4>
+                  <div className="grid-2" style={{ gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Policy Number <span style={{ color: 'var(--accent-pink)' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Insurance Policy Number"
+                        value={editDocModal.policy_number}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, policy_number: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Insurer Name
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. HDFC ERGO, ICICI Lombard, Digit"
+                        value={editDocModal.insurer_name}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, insurer_name: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Policy Type
+                      </label>
+                      <select
+                        className="form-control"
+                        value={editDocModal.policy_type}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, policy_type: e.target.value }))}
+                      >
+                        <option value="Comprehensive">Comprehensive (First Party)</option>
+                        <option value="Third Party">Third Party Only</option>
+                        <option value="Zero Depreciation">Zero Depreciation</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Vehicle Registration No
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. DL01AB1234"
+                        value={editDocModal.vehicle_registration_no.toUpperCase()}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, vehicle_registration_no: e.target.value.toUpperCase() }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Policy Start Date
+                      </label>
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={editDocModal.policy_start_date}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, policy_start_date: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Policy Expiry Date <span style={{ color: 'var(--accent-pink)' }}>*</span>
+                      </label>
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={editDocModal.policy_expiry_date || editDocModal.expiresAt}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, policy_expiry_date: e.target.value, expiresAt: e.target.value }))}
+                      />
+                    </div>
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Insured Name
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Insured Person / Policy Holder"
+                        value={editDocModal.insured_name}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, insured_name: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── 4. RC (Registration Certificate) Fields ── */}
+              {isRC && (
+                <div style={{ padding: 14, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                  <h4 style={{ margin: '0 0 12px 0', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-yellow)' }}>
+                    <Car size={16} /> Registration Certificate (RC) Details
+                  </h4>
+                  <div className="grid-2" style={{ gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Registration No (Plate Number) <span style={{ color: 'var(--accent-pink)' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. UP90AB1234"
+                        value={editDocModal.registration_no.toUpperCase()}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, registration_no: e.target.value.toUpperCase() }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Registered Owner Name
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Owner Name as on RC"
+                        value={editDocModal.owner_name}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, owner_name: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Chassis Number (VIN)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Chassis Number"
+                        value={editDocModal.chassis_number.toUpperCase()}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, chassis_number: e.target.value.toUpperCase() }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Engine Number
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Engine Number"
+                        value={editDocModal.engine_number.toUpperCase()}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, engine_number: e.target.value.toUpperCase() }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Vehicle Make / Manufacturer
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. Honda, Hero, Bajaj, Maruti"
+                        value={editDocModal.vehicle_make}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, vehicle_make: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Vehicle Model
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. Activa 6G, Splendor, WagonR"
+                        value={editDocModal.vehicle_model}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, vehicle_model: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Fuel Type
+                      </label>
+                      <select
+                        className="form-control"
+                        value={editDocModal.fuel_type}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, fuel_type: e.target.value }))}
+                      >
+                        <option value="Petrol">Petrol</option>
+                        <option value="Diesel">Diesel</option>
+                        <option value="CNG">CNG</option>
+                        <option value="Electric">Electric (EV)</option>
+                        <option value="Hybrid">Hybrid</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        RC Fitness / Expiry Date
+                      </label>
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={editDocModal.expiresAt}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, expiresAt: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── 5. Driving License Fields ── */}
+              {isLicense && (
+                <div style={{ padding: 14, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                  <h4 style={{ margin: '0 0 12px 0', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-primary)' }}>
+                    <FileText size={16} /> Driving License Details
+                  </h4>
+                  <div className="grid-2" style={{ gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        License Number <span style={{ color: 'var(--accent-pink)' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. UP9020210007094"
+                        value={editDocModal.license_number.toUpperCase()}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, license_number: e.target.value.toUpperCase() }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        License Holder Name
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Full Name as on License"
+                        value={editDocModal.name}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, name: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Date of Birth (DOB)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="YYYY-MM-DD"
+                        value={editDocModal.dob}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, dob: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        License Expiry Date <span style={{ color: 'var(--accent-pink)' }}>*</span>
+                      </label>
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={editDocModal.expiresAt}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, expiresAt: e.target.value }))}
+                      />
+                    </div>
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Issuing Authority / RTO
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. RTO, BANDA"
+                        value={editDocModal.issuing_authority}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, issuing_authority: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── 6. Fallback General Document Fields ── */}
+              {!isPhoto && !isAadhaar && !isInsurance && !isRC && !isLicense && (
+                <div style={{ padding: 14, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                  <div className="grid-2" style={{ gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                        Document Number <span style={{ color: 'var(--accent-pink)' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Enter document number"
+                        value={editDocModal.documentNumber.toUpperCase()}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, documentNumber: e.target.value.toUpperCase() }))}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
                         Expiry Date
                       </label>
-                      {editDocModal.expiresAt && (
-                        <button
-                          type="button"
-                          onClick={() => setEditDocModal(prev => ({ ...prev, expiresAt: '' }))}
-                          className="btn btn-ghost btn-xs"
-                          style={{ fontSize: 11, color: 'var(--text-muted)', padding: '0 4px' }}
-                        >
-                          Clear (No Expiry)
-                        </button>
-                      )}
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={editDocModal.expiresAt}
+                        onChange={e => setEditDocModal(prev => ({ ...prev, expiresAt: e.target.value }))}
+                      />
                     </div>
-                    <input
-                      type="date"
-                      className="form-control"
-                      value={editDocModal.expiresAt}
-                      onChange={e => setEditDocModal(prev => ({ ...prev, expiresAt: e.target.value }))}
-                    />
                   </div>
                 </div>
+              )}
 
-                {editDocModal.rejectionReason && (
-                  <div style={{
-                    marginTop: 10,
-                    padding: '8px 10px',
-                    borderRadius: 8,
-                    background: 'rgba(239,68,68,0.1)',
-                    border: '1px solid rgba(239,68,68,0.25)',
-                    color: 'var(--accent-pink)',
-                    fontSize: 12
-                  }}>
-                    <strong>Previous Rejection Note:</strong> {editDocModal.rejectionReason}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── 2. Captain Vehicle Specifications Section (vehicles/models.py) ── */}
-            <div style={{ padding: 14, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 6 }}>
-                <div>
-                  <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-yellow)' }}>
-                    <Car size={16} /> Captain Vehicle Specifications & Details
-                  </h4>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    Directly update the primary vehicle specifications linked to this captain
-                  </span>
-                </div>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                  <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={editDocModal.vehicleApproved}
-                      onChange={e => setEditDocModal(prev => ({ ...prev, vehicleApproved: e.target.checked }))}
-                    />
-                    <span style={{ fontWeight: 600 }}>Vehicle Approved</span>
-                  </label>
-                  <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={editDocModal.vehicleActive}
-                      onChange={e => setEditDocModal(prev => ({ ...prev, vehicleActive: e.target.checked }))}
-                    />
-                    <span style={{ fontWeight: 600 }}>Active on Fleet</span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="grid-2" style={{ gap: 12 }}>
-                {/* Registration Number */}
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
-                    Vehicle Registration Number (RC Plate) <span style={{ color: 'var(--accent-pink)' }}>*</span>
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. DL01AB1234"
-                    value={editDocModal.registrationNumber.toUpperCase()}
-                    onChange={e => setEditDocModal(prev => ({ ...prev, registrationNumber: e.target.value.toUpperCase() }))}
-                  />
-                </div>
-
-                {/* Vehicle Category / Type */}
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
-                    Vehicle Category / Type <span style={{ color: 'var(--accent-pink)' }}>*</span>
-                  </label>
-                  <select
-                    className="form-control"
-                    value={editDocModal.vehicleType}
-                    onChange={e => setEditDocModal(prev => ({ ...prev, vehicleType: e.target.value }))}
-                  >
-                    <option value="Bike">Bike (2-Wheeler)</option>
-                    <option value="Auto">Auto Rickshaw (3-Wheeler)</option>
-                    <option value="Sedan">Sedan (4-Wheeler)</option>
-                    <option value="SUV">SUV (4-Wheeler)</option>
-                    <option value="Cab Economy">Cab Economy</option>
-                    <option value="Cab Premier">Cab Premier</option>
-                    <option value="Parcel">Parcel Express</option>
-                  </select>
-                </div>
-
-                {/* Vehicle Make / Manufacturer */}
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
-                    Manufacturer / Make
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. Honda, Hero, Bajaj, Maruti"
-                    value={Capitalize(editDocModal.make)}
-                    onChange={e => setEditDocModal(prev => ({ ...prev, make: Capitalize(e.target.value) }))}
-                  />
-                </div>
-
-                {/* Vehicle Model */}
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
-                    Model Name
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. Activa 6G, Splendor+, WagonR"
-                    value={Capitalize(editDocModal.model)}
-                    onChange={e => setEditDocModal(prev => ({ ...prev, model: Capitalize(e.target.value) }))}
-                  />
-                </div>
-
-                {/* Manufacturing Year */}
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
-                    Manufacturing Year
-                  </label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    placeholder="e.g. 2023"
-                    value={editDocModal.year}
-                    onChange={e => setEditDocModal(prev => ({ ...prev, year: e.target.value }))}
-                  />
-                </div>
-
-                {/* Vehicle Color */}
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>
-                    Vehicle Color
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. Black, White, Silver, Red"
-                    value={Capitalize(editDocModal.color)}
-                    onChange={e => setEditDocModal(prev => ({ ...prev, color: Capitalize(e.target.value) }))}
-                  />
-                </div>
-              </div>
             </div>
-
-          </div>
-        </Modal>
-      )}
+          </Modal>
+        );
+      })()}
 
       {/* ── Document Preview Lightbox Modal ── */}
       {docPreviewModal.isOpen && (

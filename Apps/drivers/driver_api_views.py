@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 
+from django.core.files.storage import default_storage
 from users.models import User, SystemSetting
 from drivers.models import Driver, DriverDocument, DriverBankAccount, DriverEmergencyContact, get_max_duty_seconds
 from vehicles.models import Vehicle, VehicleType
@@ -99,15 +100,7 @@ def get_driver_from_request(request):
     """Helper to extract Driver instance from request or authentication credentials"""
     user = request.user
     if user and user.is_authenticated:
-        driver = Driver.objects.filter(user=user).first()
-        if not driver:
-            import random
-            driver = Driver.objects.create(
-                user=user,
-                license_number=f"DL{str(user.id).replace('-', '')[:8].upper()}",
-                approval_status=Driver.ApprovalStatus.APPROVED
-            )
-        return driver
+        return Driver.objects.filter(user=user).first()
 
     # If Authorization header is present, extract user_id from token payload
     auth_header = request.headers.get('Authorization') or request.META.get('HTTP_AUTHORIZATION')
@@ -120,14 +113,7 @@ def get_driver_from_request(request):
             if user_id:
                 u = User.objects.filter(id=user_id).first()
                 if u:
-                    d = Driver.objects.filter(user=u).first()
-                    if not d:
-                        d = Driver.objects.create(
-                            user=u,
-                            license_number=f"DL{str(u.id).replace('-', '')[:8].upper()}",
-                            approval_status=Driver.ApprovalStatus.APPROVED
-                        )
-                    return d
+                    return Driver.objects.filter(user=u).first()
         except Exception:
             pass
 
@@ -138,6 +124,19 @@ def get_driver_from_request(request):
 
     if driver_id:
         d = Driver.objects.filter(id=driver_id).first()
+        if d:
+            return d
+
+    # Lookup by phone or email in request body or query params
+    phone = None
+    if hasattr(request, 'data') and isinstance(request.data, dict):
+        phone = request.data.get('phone_number') or request.data.get('phone')
+    if not phone:
+        phone = request.query_params.get('phone_number') or request.query_params.get('phone')
+
+    if phone:
+        clean_phone = str(phone).replace(' ', '').replace('-', '')
+        d = Driver.objects.filter(user__phone_number=clean_phone).first()
         if d:
             return d
 
@@ -256,6 +255,7 @@ class DriverRegisterView(APIView):
 
 
 class DriverProfileView(APIView):
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
@@ -412,6 +412,7 @@ class DriverOnboardingStatusView(APIView):
 # ============================================================================
 
 class DriverDocumentsView(APIView):
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
@@ -433,19 +434,33 @@ class DriverDocumentsView(APIView):
     def post(self, request):
         driver = get_driver_from_request(request)
         if not driver:
-            return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'Driver not found. Please provide valid driver_id, Authorization token, or phone number.'}, status=status.HTTP_404_NOT_FOUND)
 
         doc_type = request.data.get('document_type', DriverDocument.DocumentType.LICENSE)
         doc_num = request.data.get('document_number', '')
-        doc_url = request.data.get('document_url', 'https://storage.raahgo.com/docs/default.pdf')
 
-        doc = DriverDocument.objects.create(
+        # Handle file upload if sent in request.FILES
+        uploaded_file = request.FILES.get('document') or request.FILES.get('file') or request.FILES.get('document_file')
+        if uploaded_file:
+            storage_path = default_storage.save(
+                f'driver_docs/{driver.id}/{doc_type}_{uploaded_file.name}',
+                uploaded_file
+            )
+            doc_url = request.build_absolute_uri(default_storage.url(storage_path))
+        else:
+            doc_url = request.data.get('document_url') or 'https://storage.raahgo.com/docs/default.pdf'
+
+        # Use update_or_create to prevent IntegrityError on unique_together = ('driver', 'document_type')
+        doc, _ = DriverDocument.objects.update_or_create(
             driver=driver,
             document_type=doc_type,
-            document_number=doc_num,
-            document_url=doc_url,
-            verification_status=DriverDocument.VerificationStatus.PENDING
+            defaults={
+                'document_number': doc_num,
+                'document_url': doc_url,
+                'verification_status': DriverDocument.VerificationStatus.PENDING
+            }
         )
+
         # If driver was previously rejected or pending, keep/set to pending for admin re-review
         if driver.approval_status != Driver.ApprovalStatus.APPROVED:
             driver.approval_status = Driver.ApprovalStatus.PENDING
@@ -454,11 +469,14 @@ class DriverDocumentsView(APIView):
         return Response({
             'message': 'Document uploaded successfully and queued for admin review',
             'id': str(doc.id),
-            'verification_status': doc.verification_status
+            'verification_status': doc.verification_status,
+            'document_url': doc.document_url,
+            'document_type': doc.document_type
         }, status=status.HTTP_201_CREATED)
 
 
 class DriverDocumentDetailView(APIView):
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, document_id):
@@ -536,6 +554,7 @@ class DriverDocumentDetailView(APIView):
 # ============================================================================
 
 class DriverVehicleView(APIView):
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
@@ -644,6 +663,7 @@ class DriverVehicleView(APIView):
 
 
 class DriverBankView(APIView):
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
@@ -1561,16 +1581,45 @@ class DriverSosView(APIView):
 
 
 class DriverEmergencyContactsView(APIView):
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
-        return Response([
-            {'id': '1', 'name': 'Police Emergency Hotline', 'phone': '112', 'relation': 'Emergency'},
-            {'id': '2', 'name': 'RaahGo Safety Support', 'phone': '+91-800-00-RAAH', 'relation': 'Helpline'}
-        ], status=status.HTTP_200_OK)
+        driver = get_driver_from_request(request)
+        contact = DriverEmergencyContact.objects.filter(driver=driver).first() if driver else None
+        if not contact:
+            return Response(None, status=status.HTTP_200_OK)
+        return Response({
+            'id': str(contact.id),
+            'name': contact.name,
+            'relationship': contact.relationship,
+            'phone_number': contact.phone_number,
+        }, status=status.HTTP_200_OK)
 
     def post(self, request):
-        return Response({'message': 'Emergency contact saved successfully'}, status=status.HTTP_201_CREATED)
+        driver = get_driver_from_request(request)
+        if not driver:
+            return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        name = request.data.get('name', '').strip()
+        relationship = request.data.get('relationship', '').strip()
+        phone_number = request.data.get('phone_number', '').strip()
+
+        contact, _ = DriverEmergencyContact.objects.update_or_create(
+            driver=driver,
+            defaults={
+                'name': name,
+                'relationship': relationship,
+                'phone_number': phone_number,
+            }
+        )
+        return Response({
+            'message': 'Emergency contact saved successfully',
+            'id': str(contact.id),
+            'name': contact.name,
+            'relationship': contact.relationship,
+            'phone_number': contact.phone_number,
+        }, status=status.HTTP_200_OK)
 
 
 # ============================================================================

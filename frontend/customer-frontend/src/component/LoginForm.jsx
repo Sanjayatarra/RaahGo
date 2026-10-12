@@ -390,7 +390,7 @@ export default function LoginForm({ onSuccess, onSwitchToSignup }) {
             Don't have an account?{' '}
             <button
               type="button"
-              onClick={onSwitchToSignup}
+              onClick={() => onSwitchToSignup?.(identifier)}
               className="text-gray-900 font-bold hover:underline transition-colors"
             >
               Sign up now

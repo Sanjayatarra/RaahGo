@@ -3,10 +3,12 @@ import {
   Car, Navigation, Power, DollarSign, Star, CheckCircle, Clock, ShieldCheck,
   MapPin, Phone, User, LogOut, RefreshCw, KeyRound, ArrowRight, Compass,
   AlertCircle, X, Sliders, MoveLeft, MoveRight, Volume2, VolumeX, Bell,
-  Sparkles, Award, TrendingUp, Check, Layers, Zap, Package, Truck
+  Sparkles, Award, TrendingUp, Check, Layers, Zap, Package, Truck, LocateFixed,
+  Search, Building2, ChevronRight
 } from 'lucide-react';
 import { fetchWithAuth } from '../common/apiClient';
 import { startIncomingRideRingtone, stopIncomingRideRingtone, playRideAcceptedChime } from '../common/soundService';
+import { getDriverDeviceLocation, startDriverLocationWatch, clearDriverLocationWatch, fetchLocationSuggestions, reverseGeocodeGps } from '../common/locationService';
 import RealtimeMap from './RealtimeMap';
 import AlertModal from './AlertModal';
 import DriverBottomNav from './DriverBottomNav';
@@ -53,7 +55,25 @@ export default function HomePage({ user, onLogout }) {
   const [activeAcceptedRide, setActiveAcceptedRide] = useState(null);
   const [enteredPin, setEnteredPin] = useState(['', '', '', '']);
   const [pinError, setPinError] = useState('');
-  const [captainLocation, setCaptainLocation] = useState({ lat: 28.4415, lng: 77.0395 });
+  const [captainLocation, setCaptainLocation] = useState(() => {
+    try {
+      const saved = localStorage.getItem('raahgo_driver_location');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.lat && parsed?.lng && !String(parsed.address || '').includes('Kannauj') && parsed.lat !== 27.0602927) {
+          return { lat: Number(parsed.lat), lng: Number(parsed.lng) };
+        }
+      }
+    } catch (e) {}
+    return { lat: 25.290689, lng: 80.570636 };
+  });
+  const [gpsStatus, setGpsStatus] = useState('locked'); // 'locked' | 'manual' | 'detecting' | 'cache'
+  const [gpsAddress, setGpsAddress] = useState('Atarra, Banda, Uttar Pradesh');
+  const [isDetectingGps, setIsDetectingGps] = useState(false);
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
+  const [locationSearchQuery, setLocationSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearchingLocations, setIsSearchingLocations] = useState(false);
   const [dutySeconds, setDutySeconds] = useState(0);
 
   const safeAuthFetch = async (url, options = {}) => {
@@ -85,6 +105,18 @@ export default function HomePage({ user, onLogout }) {
         setIsOnline(data.availability_status === 'Online');
         if (data.duty_seconds_today !== undefined) {
           setDutySeconds(data.duty_seconds_today);
+        }
+        if (data.current_latitude && data.current_longitude) {
+          const cLat = parseFloat(data.current_latitude);
+          const cLng = parseFloat(data.current_longitude);
+          if (!isNaN(cLat) && !isNaN(cLng) && cLat !== 0) {
+            setCaptainLocation((prev) => {
+              if (prev.lat === 28.4415 && prev.lng === 77.0395) {
+                return { lat: cLat, lng: cLng };
+              }
+              return prev;
+            });
+          }
         }
       }
 
@@ -212,42 +244,126 @@ export default function HomePage({ user, onLogout }) {
     };
   }, [activeAcceptedRide?.id, activeAcceptedRide?.status, activeAcceptedRide?.booking_number]);
 
-  // 5-Minute Periodic Driver GPS Location Update Timer (/api/v1/driver/location/)
-  useEffect(() => {
-    let gpsInterval = null;
+  // Detect & Sync Device Location (Device GPS -> Server)
+  const detectAndSyncLocation = async () => {
+    setIsDetectingGps(true);
+    try {
+      const loc = await getDriverDeviceLocation();
+      if (loc && loc.lat && loc.lng) {
+        setCaptainLocation({ lat: loc.lat, lng: loc.lng });
+        setGpsStatus(loc.source === 'gps' ? 'locked' : 'cache');
+        if (loc.address) {
+          setGpsAddress(loc.address);
+        }
 
-    const updateDriverGpsLocation = () => {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            const lat = Number(pos.coords.latitude.toFixed(7));
-            const lng = Number(pos.coords.longitude.toFixed(7));
-            setCaptainLocation({ lat, lng });
-
-            fetchWithAuth('/api/v1/driver/location/', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                latitude: lat,
-                longitude: lng,
-                driver_id: driverProfile?.id
-              })
-            }).catch((err) => console.log('Driver location update notice:', err));
-          },
-          (err) => {
-            console.log('Device Geolocation Notice:', err);
-          }
-        );
+        // Sync coordinates to backend DB
+        fetchWithAuth('/api/v1/driver/location/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            latitude: loc.lat,
+            longitude: loc.lng,
+            driver_id: driverProfile?.id
+          })
+        }).catch((err) => console.log('Driver location update notice:', err));
       }
-    };
+    } catch (err) {
+      console.log('Location detection notice:', err);
+    } finally {
+      setIsDetectingGps(false);
+    }
+  };
+
+  // Handle Location Search Input with Live Autocomplete
+  const handleLocationSearchChange = async (query) => {
+    setLocationSearchQuery(query);
+    if (!query || query.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearchingLocations(true);
+    try {
+      const results = await fetchLocationSuggestions(query, captainLocation);
+      setSearchResults(results || []);
+    } catch (err) {
+      console.log('Search suggestions notice:', err);
+    } finally {
+      setIsSearchingLocations(false);
+    }
+  };
+
+  // Handle Manual Selection of Location / Hub
+  const handleSelectCustomLocation = async (lat, lng, addressName) => {
+    const numLat = Number(Number(lat).toFixed(7));
+    const numLng = Number(Number(lng).toFixed(7));
+    setCaptainLocation({ lat: numLat, lng: numLng });
+    setGpsStatus('manual');
+    setGpsAddress(addressName || 'Custom Location');
+    setIsLocationModalOpen(false);
+    setLocationSearchQuery('');
+    setSearchResults([]);
+
+    try {
+      localStorage.setItem('raahgo_driver_location', JSON.stringify({
+        lat: numLat,
+        lng: numLng,
+        address: addressName,
+        source: 'manual'
+      }));
+    } catch (e) {}
+
+    // Immediately push to backend API
+    fetchWithAuth('/api/v1/driver/location/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        latitude: numLat,
+        longitude: numLng,
+        driver_id: driverProfile?.id
+      })
+    }).catch(() => {});
+  };
+
+  // Continuous Live GPS Location Watcher & Periodic Sync
+  useEffect(() => {
+    let watchId = null;
+    let syncInterval = null;
+
+    // Detect immediately on mount / change
+    detectAndSyncLocation();
 
     if (isOnline) {
-      updateDriverGpsLocation();
-      gpsInterval = setInterval(updateDriverGpsLocation, 300000);
+      // 1. Start continuous high-accuracy GPS watch
+      watchId = startDriverLocationWatch(
+        (pos) => {
+          setCaptainLocation({ lat: pos.lat, lng: pos.lng });
+          setGpsStatus('locked');
+        },
+        (err) => {
+          console.log('Driver live GPS watch notice:', err);
+        }
+      );
+
+      // 2. Periodic sync to backend (every 30 seconds while Online)
+      syncInterval = setInterval(() => {
+        if (captainLocation?.lat && captainLocation?.lng) {
+          fetchWithAuth('/api/v1/driver/location/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              latitude: captainLocation.lat,
+              longitude: captainLocation.lng,
+              driver_id: driverProfile?.id
+            })
+          }).catch(() => {});
+        }
+      }, 30000);
     }
 
     return () => {
-      if (gpsInterval) clearInterval(gpsInterval);
+      if (watchId !== null) clearDriverLocationWatch(watchId);
+      if (syncInterval) clearInterval(syncInterval);
     };
   }, [isOnline, driverProfile?.id]);
 
@@ -756,14 +872,47 @@ export default function HomePage({ user, onLogout }) {
 
             {/* Live Interactive Map */}
             <div className="bg-white rounded-3xl border border-gray-200 p-3 sm:p-4 shadow-xs space-y-2">
-              <div className="flex items-center justify-between px-1">
-                <span className="text-xs font-bold text-gray-700 flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-emerald-500" />
-                  Live GPS Positioning (Sector 29, Gurugram)
-                </span>
-                <span className="text-[10px] text-gray-400 font-mono">
-                  {captainLocation.lat.toFixed(4)}, {captainLocation.lng.toFixed(4)}
-                </span>
+              <div className="flex items-center justify-between px-1 gap-2">
+                <div
+                  onClick={() => setIsLocationModalOpen(true)}
+                  className="flex items-center gap-2 overflow-hidden min-w-0 cursor-pointer group hover:opacity-90 transition-opacity"
+                  title="Click to change operating location"
+                >
+                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                    gpsStatus === 'locked' ? 'bg-emerald-500 animate-pulse' :
+                    gpsStatus === 'manual' ? 'bg-amber-500' :
+                    'bg-blue-500 animate-ping'
+                  }`} />
+                  <span className="text-xs font-extrabold text-gray-800 truncate group-hover:text-amber-600 flex items-center gap-1">
+                    <span className="text-gray-500 font-normal">{gpsStatus === 'locked' ? 'GPS:' : 'Location:'}</span>
+                    <span>{gpsAddress || 'Sector 29, Gurugram'}</span>
+                    <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-bold border border-amber-200">Change</span>
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] text-gray-500 font-mono hidden md:inline">
+                    {captainLocation.lat.toFixed(4)}, {captainLocation.lng.toFixed(4)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsLocationModalOpen(true)}
+                    className="p-1.5 px-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors flex items-center gap-1 text-[11px] font-bold shadow-xs active:scale-95 cursor-pointer"
+                    title="Search & Set Location"
+                  >
+                    <Search className="w-3.5 h-3.5 text-gray-600" />
+                    <span className="hidden xs:inline">Search</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={detectAndSyncLocation}
+                    disabled={isDetectingGps}
+                    className="p-1.5 px-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-500 text-black transition-colors flex items-center gap-1 text-[11px] font-bold shadow-xs active:scale-95 cursor-pointer"
+                    title="Refresh Live Device GPS"
+                  >
+                    <LocateFixed className={`w-3.5 h-3.5 text-emerald-800 ${isDetectingGps ? 'animate-spin' : ''}`} />
+                    <span className="hidden xs:inline">{isDetectingGps ? 'Locating...' : 'GPS'}</span>
+                  </button>
+                </div>
               </div>
               <div className="h-64 sm:h-80 rounded-2xl overflow-hidden border border-gray-100 relative">
                 <RealtimeMap
@@ -962,6 +1111,115 @@ export default function HomePage({ user, onLogout }) {
         activeRidesCount={activeAcceptedRide ? 1 : 0}
         unreadAlertsCount={unreadAlerts}
       />
+
+      {/* Location Selection & Search Modal */}
+      {isLocationModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white w-full max-w-lg rounded-3xl p-5 sm:p-6 shadow-2xl border border-gray-100 space-y-4 max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-yellow-400 text-black">
+                  <MapPin className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base sm:text-lg text-gray-900">Set Driver Location</h3>
+                  <p className="text-xs text-gray-500">Pick or search your active operating hub</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsLocationModalOpen(false)}
+                className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* GPS Locate Me Button */}
+            <button
+              type="button"
+              onClick={() => {
+                detectAndSyncLocation();
+                setIsLocationModalOpen(false);
+              }}
+              className="w-full p-3 rounded-2xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold text-xs sm:text-sm flex items-center justify-between transition-colors shadow-2xs cursor-pointer active:scale-98"
+            >
+              <div className="flex items-center gap-2.5">
+                <LocateFixed className="w-4 h-4 text-emerald-600 animate-pulse" />
+                <span>Use My Exact Device GPS (Auto-detect)</span>
+              </div>
+              <span className="text-[11px] bg-emerald-200/60 px-2 py-0.5 rounded-md font-extrabold text-emerald-900">GPS</span>
+            </button>
+
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search city, area, or landmark (e.g. Noida 62, Connaught Place)..."
+                value={locationSearchQuery}
+                onChange={(e) => handleLocationSearchChange(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-2xl text-xs sm:text-sm font-medium text-gray-900 focus:outline-hidden focus:ring-2 focus:ring-yellow-400"
+                autoFocus
+              />
+              {isSearchingLocations && (
+                <RefreshCw className="w-3.5 h-3.5 text-gray-400 animate-spin absolute right-3.5 top-1/2 -translate-y-1/2" />
+              )}
+            </div>
+
+            {/* Autocomplete Search Results List */}
+            {searchResults.length > 0 && (
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1">Search Results</span>
+                {searchResults.map((item, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => handleSelectCustomLocation(item.lat, item.lng, item.title || item.display_name)}
+                    className="p-2.5 rounded-xl bg-gray-50 hover:bg-yellow-50 border border-gray-100 hover:border-yellow-300 transition-colors cursor-pointer flex items-start gap-2.5"
+                  >
+                    <MapPin className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-gray-900 truncate">{item.title}</p>
+                      <p className="text-[10px] text-gray-500 truncate">{item.subtitle || item.display_name}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Popular Hubs / Presets */}
+            <div className="space-y-2 flex-1 overflow-y-auto">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1">Popular Locations & Operating Hubs</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {[
+                  { name: 'Atarra, Banda', area: 'Buzurg / NH35 Region', lat: 25.290689, lng: 80.570636 },
+                  { name: 'Banda Central', area: 'Banda District Hub', lat: 25.4754, lng: 80.3346 },
+                  { name: 'Chitrakoot Dham', area: 'Karwi / Chitrakoot Hub', lat: 25.2104, lng: 80.8667 },
+                  { name: 'Sector 29, Gurugram', area: 'Gurugram Central Hub', lat: 28.4682, lng: 77.0632 },
+                  { name: 'Cyber City, Gurugram', area: 'DLF Phase 2 / Cyber Hub', lat: 28.4952, lng: 77.0891 },
+                  { name: 'Noida Sector 62', area: 'Electronic City / Tech Hub', lat: 28.6279, lng: 77.3734 },
+                  { name: 'Connaught Place, Delhi', area: 'Central Delhi', lat: 28.6315, lng: 77.2167 },
+                  { name: 'Saket, South Delhi', area: 'Select Citywalk Hub', lat: 28.5244, lng: 77.2155 },
+                ].map((preset, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleSelectCustomLocation(preset.lat, preset.lng, preset.name)}
+                    className="p-2.5 rounded-xl border border-gray-200 hover:border-black hover:bg-yellow-400/10 text-left transition-all flex items-center justify-between group cursor-pointer"
+                  >
+                    <div>
+                      <p className="text-xs font-bold text-gray-900 group-hover:text-black">{preset.name}</p>
+                      <p className="text-[10px] text-gray-500">{preset.area}</p>
+                    </div>
+                    <span className="text-xs text-gray-400 group-hover:text-black">→</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Common Accessible Alert Modal */}
       <AlertModal

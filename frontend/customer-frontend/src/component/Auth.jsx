@@ -173,7 +173,13 @@ export default function Auth() {
               ) : (
                 <LoginForm
                   onSuccess={handleAuthSuccess}
-                  onSwitchToSignup={(prefill) => navigate('/signup', { state: { prefill } })}
+                  onSwitchToSignup={(prefill) => {
+                    if (typeof prefill === 'string' && prefill.trim()) {
+                      navigate('/signup', { state: { prefill } });
+                    } else {
+                      navigate('/signup');
+                    }
+                  }}
                 />
               )}
             </div>

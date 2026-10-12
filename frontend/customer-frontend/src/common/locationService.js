@@ -136,7 +136,7 @@ export const reverseGeocodeGps = async (lat, lon) => {
   return `Location (${parseFloat(lat).toFixed(4)}, ${parseFloat(lon).toFixed(4)})`;
 };
 
-// 3. Get Device GPS Location (Uses True Device GPS with accurate fallback, removing inaccurate IP lookup)
+// 3. Get Device GPS Location (Uses True Device GPS with saved location fallback)
 let lastCachedGpsLocation = null;
 let lastGpsFetchTime = 0;
 
@@ -150,6 +150,7 @@ export const getDeviceGpsLocation = () => {
     }
 
     const fallbackLocation = async () => {
+      // 1. Check localStorage
       try {
         const saved = localStorage.getItem('raahgo_last_gps_location');
         if (saved) {
@@ -171,17 +172,17 @@ export const getDeviceGpsLocation = () => {
         }
       } catch (e) {}
 
-      // Default to Sector 38, Gurgaon (28.440886, 77.038938)
-      const defaultLat = 28.440886;
-      const defaultLon = 77.038938;
+      // 2. Default to Atarra, Banda, Uttar Pradesh (25.290689, 80.570636)
+      const defaultLat = 25.290689;
+      const defaultLon = 80.570636;
       const defaultAddress = await reverseGeocodeGps(defaultLat, defaultLon);
 
       const result = {
         lat: defaultLat,
         lon: defaultLon,
         accuracy: '10',
-        address: defaultAddress || 'Guru Haridas Road, Sector 38, Gurgaon',
-        displayStatus: `GPS Active: Guru Haridas Road, Sector 38, Gurgaon`
+        address: defaultAddress || 'Atarra, Banda, Uttar Pradesh',
+        displayStatus: `GPS Active: Atarra, Banda, Uttar Pradesh`
       };
       lastCachedGpsLocation = result;
       lastGpsFetchTime = Date.now();
@@ -220,7 +221,7 @@ export const getDeviceGpsLocation = () => {
       () => {
         fallbackLocation();
       },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
     );
   });
 };

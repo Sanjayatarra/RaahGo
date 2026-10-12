@@ -4,6 +4,8 @@ import {
   FileText, ArrowRight, ArrowLeft, Check, Sparkles, AlertCircle, Clock, Award, Power, RefreshCw
 } from 'lucide-react';
 
+import { getDriverDeviceLocation } from '../common/locationService';
+
 const formatPhone = (val) => {
   const digits = val.replace(/\D/g, '').slice(0, 10);
   if (digits.length <= 5) return digits;
@@ -282,26 +284,19 @@ export default function CompleteProfileForm({ initialData, onComplete }) {
   // GPS Location State & Silent Coordinates Capture on Step 9 Next Button
   const [gpsLocation, setGpsLocation] = useState(null);
 
-  const getGpsCoordinatesAsync = () => {
-    return new Promise((resolve) => {
-      if (!navigator.geolocation) {
-        resolve(null);
-        return;
+  const getGpsCoordinatesAsync = async () => {
+    try {
+      const loc = await getDriverDeviceLocation();
+      if (loc && loc.lat && loc.lng) {
+        return {
+          latitude: loc.lat,
+          longitude: loc.lng,
+        };
       }
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          resolve({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-          });
-        },
-        (err) => {
-          console.log('GPS detection notice:', err.message);
-          resolve(null);
-        },
-        { enableHighAccuracy: true, timeout: 3500, maximumAge: 0 }
-      );
-    });
+    } catch (err) {
+      console.log('GPS detection notice:', err);
+    }
+    return null;
   };
 
   const stepsList = [
