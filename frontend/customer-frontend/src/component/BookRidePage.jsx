@@ -5,7 +5,7 @@ import {
   CreditCard, Tag, CheckCircle2, ChevronRight, ChevronDown, ChevronUp, LogOut, User, RefreshCw, Zap,
   LocateFixed, Loader2, KeyRound, Lock, Unlock, AlertCircle, X, Info, Phone, MessageSquare, Shield, Share2, AlertTriangle
 } from 'lucide-react';
-import { fetchLocationSuggestions, getDeviceGpsLocation } from '../common/locationService';
+import { fetchLocationSuggestions, getDeviceGpsLocation, getPopularDestinations } from '../common/locationService';
 import { fetchWithAuth } from '../common/apiClient';
 import RealtimeMap from './RealtimeMap';
 import Navbar from './Navbar';
@@ -48,7 +48,7 @@ export default function BookRidePage({ user, onLogout }) {
   const [pickupError, setPickupError] = useState('');
   const [destError, setDestError] = useState('');
   const [selectedRide, setSelectedRide] = useState(initialRide);
-  const [showFares, setShowFares] = useState(false);
+  const [showFares, setShowFares] = useState(Boolean(location.state?.prefillPickup && location.state?.prefillDrop));
   const [paymentMethod, setPaymentMethod] = useState('COD'); // 'COD' | 'Online' | 'RaahGo Wallet'
   const [isBooking, setIsBooking] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
@@ -79,6 +79,7 @@ export default function BookRidePage({ user, onLogout }) {
 
   const [pickupSuggestions, setPickupSuggestions] = useState([]);
   const [destSuggestions, setDestSuggestions] = useState([]);
+  const [recentDestinations, setRecentDestinations] = useState([]);
   const [isSearchingPickup, setIsSearchingPickup] = useState(false);
   const [isSearchingDest, setIsSearchingDest] = useState(false);
   const [showPickupDropdown, setShowPickupDropdown] = useState(false);
@@ -150,7 +151,9 @@ export default function BookRidePage({ user, onLogout }) {
       try {
         const res = await fetchWithAuth('/api/v1/bookings/bookings/active/');
         if (res.ok) {
-          const data = await res.json();
+          const text = await res.text();
+          if (!text || !text.trim()) return;
+          const data = JSON.parse(text);
           if (data && !data.auto_cancelled && data.id) {
             setActiveBookingData(data);
             if (data.status === 'Searching') {
@@ -174,7 +177,48 @@ export default function BookRidePage({ user, onLogout }) {
       }
     };
 
+    const fetchRecentDropLocations = async () => {
+      if (!user) return;
+      try {
+        const res = await fetchWithAuth('/api/v1/bookings/bookings/');
+        if (res.ok) {
+          const text = await res.text();
+          if (!text || !text.trim()) return;
+          const data = JSON.parse(text);
+          const list = Array.isArray(data) ? data : (data.results || []);
+          const seen = new Set();
+          const recents = [];
+          for (const r of list) {
+            const drop = r.dropoff_address || r.dropoff;
+            if (drop && !seen.has(drop.trim())) {
+              seen.add(drop.trim());
+              const parts = drop.split(',');
+              const title = parts[0]?.trim() || drop;
+              const subtitle = parts.slice(1, 3).join(', ')?.trim() || 'Saved Destination';
+              recents.push({
+                title,
+                subtitle,
+                display_name: drop,
+                icon: '🕒',
+                tag: 'Recent Trip',
+                coordinates: (r.dropoff_latitude && r.dropoff_longitude)
+                  ? [parseFloat(r.dropoff_longitude), parseFloat(r.dropoff_latitude)]
+                  : null,
+                lat: r.dropoff_latitude ? parseFloat(r.dropoff_latitude) : null,
+                lon: r.dropoff_longitude ? parseFloat(r.dropoff_longitude) : null
+              });
+              if (recents.length >= 4) break;
+            }
+          }
+          setRecentDestinations(recents);
+        }
+      } catch (err) {
+        console.log('Notice fetching recent bookings for drop suggestions:', err);
+      }
+    };
+
     restoreActiveBookingOnMount();
+    fetchRecentDropLocations();
   }, [user, customerWaitMinutes]);
 
   // Auto-geocode pickup address text to coordinates if pickupCoords is null
@@ -325,7 +369,7 @@ export default function BookRidePage({ user, onLogout }) {
     setLocationStatus('Accessing device GPS location...');
 
     try {
-      const loc = await getDeviceGpsLocation();
+      const loc = await getDeviceGpsLocation(true);
       setPickup(loc.address);
       setPickupCoords({ lat: loc.lat, lng: loc.lon });
       setPickupError('');
@@ -373,34 +417,48 @@ export default function BookRidePage({ user, onLogout }) {
 
     if (val.trim().length < 1) {
       setDestSuggestions([]);
-      setShowDestDropdown(false);
+      setShowDestDropdown(true);
+      setIsSearchingDest(false);
       return;
     }
 
     setIsSearchingDest(true);
+    setShowDestDropdown(true);
     searchTimeoutRef.current = setTimeout(async () => {
       const userCoords = pickupCoords ? { lat: pickupCoords.lat, lon: pickupCoords.lng } : null;
       const results = await fetchLocationSuggestions(val, userCoords);
       setDestSuggestions(results);
-      setShowDestDropdown(results.length > 0);
+      setShowDestDropdown(true);
       setIsSearchingDest(false);
-    }, 600);
+    }, 250);
   };
 
   const selectPickupSuggestion = (loc) => {
-    setPickup(`${loc.title}, ${loc.subtitle}`);
+    const title = loc.title || loc.display_name?.split(',')[0] || '';
+    const subtitle = loc.subtitle || loc.display_name?.split(',').slice(1, 3).join(', ') || '';
+    const fullText = loc.display_name || (subtitle ? `${title}, ${subtitle}` : title);
+    setPickup(fullText);
     setPickupError('');
-    if (loc.coordinates) {
+
+    if (loc.coordinates && loc.coordinates.length === 2) {
       setPickupCoords({ lat: parseFloat(loc.coordinates[1]), lng: parseFloat(loc.coordinates[0]) });
+    } else if (loc.lat && (loc.lon || loc.lng)) {
+      setPickupCoords({ lat: parseFloat(loc.lat), lng: parseFloat(loc.lon || loc.lng) });
     }
     setShowPickupDropdown(false);
   };
 
   const selectDestSuggestion = (loc) => {
-    setDestination(`${loc.title}, ${loc.subtitle}`);
+    const title = loc.title || loc.display_name?.split(',')[0] || '';
+    const subtitle = loc.subtitle || loc.display_name?.split(',').slice(1, 3).join(', ') || '';
+    const fullText = loc.display_name || (subtitle ? `${title}, ${subtitle}` : title);
+    setDestination(fullText);
     setDestError('');
-    if (loc.coordinates) {
+
+    if (loc.coordinates && loc.coordinates.length === 2) {
       setDestCoords({ lat: parseFloat(loc.coordinates[1]), lng: parseFloat(loc.coordinates[0]) });
+    } else if (loc.lat && (loc.lon || loc.lng)) {
+      setDestCoords({ lat: parseFloat(loc.lat), lng: parseFloat(loc.lon || loc.lng) });
     }
     setShowDestDropdown(false);
   };
@@ -636,7 +694,7 @@ export default function BookRidePage({ user, onLogout }) {
       <div className="flex-1 w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-0 lg:gap-6 p-0 lg:p-6 relative">
 
         {/* Left Sidebar */}
-        <div className="w-full lg:w-[460px] bg-white h-screen lg:h-[calc(100vh-140px)] lg:rounded-3xl lg:shadow-xl lg:border lg:border-gray-200 flex flex-col relative overflow-hidden shrink-0 z-10 lg:mt-0">
+        <div className="w-full lg:w-[460px] bg-white h-[100dvh] lg:h-[calc(100vh-140px)] lg:rounded-3xl lg:shadow-xl lg:border lg:border-gray-200 flex flex-col relative overflow-hidden shrink-0 z-10 lg:mt-0">
 
           {/* Floating Notification Toast */}
           {rideNotification && (
@@ -1035,7 +1093,7 @@ export default function BookRidePage({ user, onLogout }) {
             /* ═════════════════════════════════════════════════════════════════════ */
             <>
               {/* Header Bar */}
-              <div className="flex items-center justify-between px-5 pt-6 pb-4 border-b border-gray-200 bg-white shrink-0 z-30">
+              <div className="flex items-center justify-between px-2 pt-2 pb-2 border-b border-gray-200 bg-white shrink-0 z-30">
                 <button
                   type="button"
                   onClick={() => navigate('/home')}
@@ -1182,14 +1240,17 @@ export default function BookRidePage({ user, onLogout }) {
                           value={destination}
                           onChange={handleDestChange}
                           onFocus={() => {
-                            destSuggestions.length > 0 && setShowDestDropdown(true);
+                            setShowDestDropdown(true);
                             setDestError('');
                           }}
+                          onClick={() => setShowDestDropdown(true)}
                           placeholder="Drop location"
                           className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
                         />
                       </div>
-                      {destination && (
+                      {isSearchingDest ? (
+                        <Loader2 className="w-4 h-4 text-emerald-600 animate-spin shrink-0" />
+                      ) : destination ? (
                         <button
                           type="button"
                           onClick={() => {
@@ -1197,13 +1258,14 @@ export default function BookRidePage({ user, onLogout }) {
                             setDestCoords(null);
                             setDestSuggestions([]);
                             setCalculatedRouteInfo(null);
+                            setShowDestDropdown(true);
                           }}
                           className="w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center shrink-0"
                           title="Clear drop location"
                         >
                           <X className="w-4 h-4" />
                         </button>
-                      )}
+                      ) : null}
                     </div>
 
                     {destError && (
@@ -1213,26 +1275,105 @@ export default function BookRidePage({ user, onLogout }) {
                       </p>
                     )}
 
-                    {showDestDropdown && destSuggestions.length > 0 && (
-                      <div className="absolute left-0 right-0 glass-panel border border-white/80 mt-2 rounded-2xl shadow-2xl z-50 max-h-56 overflow-y-auto text-left p-1.5 divide-y divide-gray-100/60">
-                        {destSuggestions.map((loc, idx) => (
-                          <div
-                            key={idx}
-                            onClick={() => selectDestSuggestion(loc)}
-                            className="p-2.5 hover:bg-emerald-50/60 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-colors"
-                          >
-                            <span className="text-base shrink-0">{loc.icon || '📍'}</span>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between">
-                                <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
-                                {loc.distanceKm < 999 && (
-                                  <span className="text-xs text-gray-500 font-bold shrink-0 ml-1">{loc.distanceKm.toFixed(1)} km</span>
-                                )}
-                              </div>
-                              <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
-                            </div>
+                    {showDestDropdown && (
+                      <div className="absolute left-0 right-0 glass-panel border border-white/80 mt-2 rounded-2xl shadow-2xl z-50 max-h-72 overflow-y-auto text-left p-2 divide-y divide-gray-100/60 bg-white/95 backdrop-blur-md">
+                        {/* Live search loading */}
+                        {isSearchingDest && (
+                          <div className="p-3 flex items-center justify-center gap-2 text-xs font-bold text-gray-500">
+                            <Loader2 className="w-4 h-4 text-emerald-600 animate-spin" />
+                            <span>Searching destinations...</span>
                           </div>
-                        ))}
+                        )}
+
+                        {/* Search results when typing */}
+                        {destination.trim().length > 0 && !isSearchingDest && destSuggestions.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-700">
+                              Search Results ({destSuggestions.length})
+                            </p>
+                            {destSuggestions.map((loc, idx) => (
+                              <div
+                                key={idx}
+                                onClick={() => selectDestSuggestion(loc)}
+                                className="p-2.5 hover:bg-emerald-50/80 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-all active:scale-[0.99]"
+                              >
+                                <span className="text-base shrink-0">{loc.icon || '📍'}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
+                                    {loc.distanceKm < 999 && (
+                                      <span className="text-xs text-emerald-700 font-extrabold shrink-0 ml-1 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200/60">
+                                        {loc.distanceKm.toFixed(1)} km
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* If user typed but no results matched */}
+                        {destination.trim().length > 0 && !isSearchingDest && destSuggestions.length === 0 && (
+                          <div className="p-3 text-center text-xs text-gray-500 font-medium">
+                            <p className="font-bold text-gray-700">No direct matches for "{destination}"</p>
+                            <p className="text-[11px] text-gray-400 mt-0.5">Pick a popular destination below or try another landmark</p>
+                          </div>
+                        )}
+
+                        {/* Recent Destinations (shown when input is empty or as fallback) */}
+                        {(!destination.trim() || destSuggestions.length === 0) && recentDestinations.length > 0 && (
+                          <div className="space-y-1 pt-1">
+                            <p className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-gray-400">
+                              Recent Trips
+                            </p>
+                            {recentDestinations.map((loc, idx) => (
+                              <div
+                                key={idx}
+                                onClick={() => selectDestSuggestion(loc)}
+                                className="p-2.5 hover:bg-emerald-50/70 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-all"
+                              >
+                                <div className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 text-gray-600">
+                                  <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
+                                  <p className="text-xs text-gray-500 truncate font-medium">{loc.subtitle}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Popular Drop Destinations / Hotspots (always available on selecting drop location) */}
+                        {(!destination.trim() || destSuggestions.length === 0) && (
+                          <div className="space-y-1 pt-1">
+                            <p className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-gray-400">
+                              Popular Destinations
+                            </p>
+                            {getPopularDestinations(pickupCoords).map((loc, idx) => (
+                              <div
+                                key={idx}
+                                onClick={() => selectDestSuggestion(loc)}
+                                className="p-2.5 hover:bg-emerald-50/80 cursor-pointer text-xs font-semibold flex items-center gap-3 rounded-xl transition-all"
+                              >
+                                <span className="text-base shrink-0">{loc.icon || '📍'}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-gray-900 font-extrabold truncate">{loc.title}</p>
+                                    {loc.distanceKm < 999 && (
+                                      <span className="text-xs text-gray-500 font-bold shrink-0 ml-1">
+                                        ~{loc.distanceKm} km
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-gray-500 truncate mt-0.5 font-medium">{loc.subtitle}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1246,36 +1387,55 @@ export default function BookRidePage({ user, onLogout }) {
                   />
                 </div>
 
-                {/* Show Fare Estimates Button */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    let hasErr = false;
-                    if (!pickup || !pickup.trim()) {
-                      setPickupError('Please enter pickup location');
-                      hasErr = true;
-                    } else {
-                      setPickupError('');
-                    }
+                {/* Show Fare Estimates Button / Active Route indicator */}
+                {!showFares ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let hasErr = false;
+                      if (!pickup || !pickup.trim()) {
+                        setPickupError('Please enter pickup location');
+                        hasErr = true;
+                      } else {
+                        setPickupError('');
+                      }
 
-                    if (!destination || !destination.trim()) {
-                      setDestError('Please enter destination location');
-                      hasErr = true;
-                    } else {
-                      setDestError('');
-                    }
+                      if (!destination || !destination.trim()) {
+                        setDestError('Please enter destination location');
+                        hasErr = true;
+                      } else {
+                        setDestError('');
+                      }
 
-                    if (hasErr) return;
-                    setShowFares(true);
-                  }}
-                  className="w-full py-4 bg-[#063B28] hover:bg-[#084A33] active:scale-[0.98] text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-[#063B28]/20 transition-all text-center cursor-pointer border-none"
-                >
-                  Show Fare Estimates
-                </button>
+                      if (hasErr) return;
+                      setShowFares(true);
+                      setTimeout(() => {
+                        fareEstimatesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                      }, 100);
+                    }}
+                    className="w-full py-4 bg-[#063B28] hover:bg-[#084A33] active:scale-[0.98] text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-[#063B28]/20 transition-all text-center cursor-pointer border-none"
+                  >
+                    Show Fare Estimates
+                  </button>
+                ) : (
+                  <div className="flex items-center justify-between px-3 py-2 bg-emerald-50/70 border border-emerald-200/60 rounded-xl">
+                    <div className="flex items-center gap-2">
+                      <span className="text-emerald-700 font-extrabold text-xs">Distance:</span>
+                      <span className="text-xs font-black text-gray-900">{currentDist} km</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowFares(false)}
+                      className="text-xs font-bold text-emerald-700 hover:text-emerald-900 underline bg-transparent border-none cursor-pointer p-0"
+                    >
+                      Change Route
+                    </button>
+                  </div>
+                )}
 
                 {/* Vehicle Fare Options List */}
                 {showFares && (
-                  <div ref={fareEstimatesRef} className="space-y-3 pt-2 animate-fade-in">
+                  <div ref={fareEstimatesRef} className="space-y-3 pt-2 animate-fade-in pb-4">
                     <h3 className="text-sm font-black text-gray-900">Choose vehicle · {currentDist} km</h3>
                     <div className="space-y-2.5">
                       {rideTypes.map((ride) => {
@@ -1359,28 +1519,51 @@ export default function BookRidePage({ user, onLogout }) {
                         })}
                       </div>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={handleBookRide}
-                      disabled={isBooking}
-                      className="w-full py-4 bg-gradient-to-r from-[#063B28] to-[#0D5B3E] hover:from-[#084A33] hover:to-[#106A49] text-white font-black text-base rounded-2xl shadow-xl shadow-[#063B28]/25 active:scale-[0.98] transition-all cursor-pointer border-none flex items-center justify-center gap-2 mt-4"
-                    >
-                      {isBooking ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          <span>Requesting Captain...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>Book {selectedRide.toUpperCase()} Now</span>
-                          <ArrowRight className="w-5 h-5" />
-                        </>
-                      )}
-                    </button>
                   </div>
                 )}
               </div>
+
+              {/* Dedicated Sticky Bottom Booking Action Card (Always visible once fares are shown) */}
+              {showFares && (
+                <div className="shrink-0 p-3.5 sm:p-4 bg-white/95 backdrop-blur-md border-t border-gray-200/80 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] z-30 animate-fade-in">
+                  <div className="flex items-center justify-between mb-2.5 px-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Ride:</span>
+                      <span className="text-xs font-black text-gray-900 capitalize flex items-center gap-1.5 bg-gray-50 px-2 py-0.5 rounded-lg border border-gray-200/60">
+                        <span>{rideTypes.find(r => r.id === selectedRide)?.icon || '🚗'}</span>
+                        <span>{rideTypes.find(r => r.id === selectedRide)?.name || selectedRide}</span>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
+                        {paymentMethod === 'COD' ? '💵 Cash' : paymentMethod === 'Online' ? '💳 Online' : '👛 Wallet'}
+                      </span>
+                      <span className="text-base font-black text-[#16A34A]">
+                        {rideTypes.find(r => r.id === selectedRide)?.price || `₹${calculateFare(selectedRide, currentDist)}`}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleBookRide}
+                    disabled={isBooking}
+                    className="w-full py-3.5 sm:py-4 bg-gradient-to-r from-[#063B28] to-[#0D5B3E] hover:from-[#084A33] hover:to-[#106A49] text-white font-black text-base rounded-2xl shadow-xl shadow-[#063B28]/25 active:scale-[0.98] transition-all cursor-pointer border-none flex items-center justify-center gap-2"
+                  >
+                    {isBooking ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span>Requesting Captain...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Book {(rideTypes.find(r => r.id === selectedRide)?.name || selectedRide).toUpperCase()} Now</span>
+                        <ArrowRight className="w-5 h-5" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </>
           )}
 

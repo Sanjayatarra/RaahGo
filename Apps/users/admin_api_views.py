@@ -183,27 +183,46 @@ def check_admin_password(stored_password, input_password):
 
 
 def serialize_booking(b):
-    driver_name = None
+    driver_name = '—'
+    driver_phone = '—'
     if b.driver and hasattr(b.driver, 'user') and b.driver.user:
         driver_name = f"{b.driver.user.first_name or ''} {b.driver.user.last_name or ''}".strip() or b.driver.user.username
+        driver_phone = b.driver.user.phone_number or '—'
     customer_name = '—'
+    customer_phone = '—'
     if b.customer:
         customer_name = f"{b.customer.first_name or ''} {b.customer.last_name or ''}".strip() or b.customer.username
+        customer_phone = b.customer.phone_number or '—'
 
     return {
-        # 'id': str(b.id),
+        'id': str(b.id),
         'ride_id': b.booking_number or f"RD{str(b.id)[:6].upper()}",
+        'customer': customer_name,
         'customer_name': customer_name,
-        # 'driver': driver_name,
+        'customer_phone': customer_phone,
+        'driver': driver_name,
+        'driver_name': driver_name,
+        'driver_phone': driver_phone,
         'captain_name': driver_name,
-        # 'pickup_address': b.pickup_address,
-        # 'drop_address': b.dropoff_address,
+        'pickup_address': b.pickup_address or '—',
+        'drop_address': b.dropoff_address or '—',
+        'dropoff_address': b.dropoff_address or '—',
+        'pickup_latitude': float(b.pickup_latitude) if b.pickup_latitude else None,
+        'pickup_longitude': float(b.pickup_longitude) if b.pickup_longitude else None,
+        'dropoff_latitude': float(b.dropoff_latitude) if b.dropoff_latitude else None,
+        'dropoff_longitude': float(b.dropoff_longitude) if b.dropoff_longitude else None,
         'vehicle_type': b.vehicle_type.name if b.vehicle_type else '—',
         'fare': float(b.total_fare) if b.total_fare else 0,
+        'base_fare': float(b.base_fare) if b.base_fare else 0,
+        'tax_amount': float(b.tax_amount) if b.tax_amount else 0,
         'distance': float(b.distance_km) if hasattr(b, 'distance_km') and b.distance_km else 0,
-        'payment_method': b.payment_method,
+        'estimated_duration_mins': getattr(b, 'estimated_duration_mins', 0),
+        'payment_method': b.payment_method or 'COD',
+        'payment_status': b.payment_status or 'Pending',
         'status': str(b.status).lower(),
+        'ride_pin': b.ride_pin or '—',
         'created_at': b.created_at.strftime('%Y-%m-%d %H:%M') if b.created_at else '—',
+        'updated_at': b.updated_at.strftime('%Y-%m-%d %H:%M') if hasattr(b, 'updated_at') and b.updated_at else '—',
     }
 
 
@@ -2251,6 +2270,45 @@ class AdminCancelledRidesView(APIView):
             status=Booking.BookingStatus.CANCELLED
         ).select_related('customer', 'driver__user', 'vehicle_type').order_by('-created_at')
         return Response([serialize_booking(b) for b in qs])
+
+
+class AdminRideDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            b = Booking.objects.select_related('customer', 'driver__user', 'vehicle_type').get(pk=pk)
+            return Response(serialize_booking(b))
+        except Booking.DoesNotExist:
+            return Response({'error': 'Ride not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+class AdminRideCancelView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            b = Booking.objects.get(pk=pk)
+            b.status = Booking.BookingStatus.CANCELLED
+            b.save(update_fields=['status', 'updated_at'])
+            return Response({'message': 'Ride cancelled successfully', 'ride': serialize_booking(b)})
+        except Booking.DoesNotExist:
+            return Response({'error': 'Ride not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+class AdminRideCompleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            b = Booking.objects.get(pk=pk)
+            b.status = Booking.BookingStatus.COMPLETED
+            b.payment_status = Booking.PaymentStatus.PAID
+            b.save(update_fields=['status', 'payment_status', 'updated_at'])
+            return Response({'message': 'Ride marked as completed', 'ride': serialize_booking(b)})
+        except Booking.DoesNotExist:
+            return Response({'error': 'Ride not found'}, status=status.HTTP_404_NOT_FOUND)
+
 
 
 # ── 8. PAYMENTS & WALLETS & EARNINGS ───────────────────────────────────────────

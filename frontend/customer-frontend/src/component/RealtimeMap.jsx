@@ -453,7 +453,7 @@ export default function RealtimeMap({ pickup, destination, pickupCoords, destCoo
               onLocateMe();
             }
             try {
-              const gps = await getDeviceGpsLocation();
+              const gps = await getDeviceGpsLocation(true);
               if (gps?.lat && gps?.lon) {
                 if (onPickupChange) {
                   onPickupChange(gps.address, { lat: gps.lat, lng: gps.lon });

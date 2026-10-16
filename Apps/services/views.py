@@ -15,53 +15,66 @@ from users.models import SystemSetting
 INDIA_BBOX = '68.1,6.5,97.4,35.5'
 
 
+EMPTY_TILE_PNG = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+
+
 @cache_page(60 * 60 * 24)
 def tile_proxy_view(request, z, x, y):
     """
     Backend Dynamic Map Tile Proxy API
-    Fetches map tiles dynamically based on SystemSetting ('maps_provider': 'google' vs 'openstreetmap' vs 'cartodb').
+    Fetches map tiles dynamically based on SystemSetting ('maps_provider': 'cartodb' vs 'google' vs 'openstreetmap').
     URL: /api/v1/services/tiles/<z>/<x>/<y>.png
     """
-    provider = (SystemSetting.get_setting('maps_provider') or 'openstreetmap').lower()
+    provider = (SystemSetting.get_setting('maps_provider') or 'cartodb').lower()
+
+    urls_to_try = []
 
     if 'google' in provider:
-        tile_url = f"https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
-        headers = {
+        urls_to_try.append((
+            f"https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
+            {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://maps.google.com/'
+            }
+        ))
+
+    # 1. CartoDB Voyager: Highly reliable, fast global CDN, no rate limit
+    sub = random.choice(['a', 'b', 'c', 'd'])
+    urls_to_try.append((
+        f"https://{sub}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        {'User-Agent': 'RaahGo-Map-Service/2.0'}
+    ))
+
+    # 2. Google Tiles
+    urls_to_try.append((
+        f"https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
+        {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Referer': 'https://maps.google.com/'
         }
-    elif 'carto' in provider:
-        tile_url = f"https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
-        headers = {
-            'User-Agent': 'RaahGo-Map-Service/1.0 (https://raahgo.com; contact@raahgo.com)'
-        }
-    else:
-        # Default OpenStreetMap
-        subdomain = random.choice(['a', 'b', 'c'])
-        tile_url = f"https://{subdomain}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        headers = {
-            'User-Agent': 'RaahGo-Map-Service/1.0 (https://raahgo.com; contact@raahgo.com)'
-        }
+    ))
 
-    try:
-        resp = requests.get(tile_url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            response = HttpResponse(resp.content, content_type=resp.headers.get('Content-Type', 'image/png'))
-            response['Cache-Control'] = 'public, max-age=86400'
-            return response
-        else:
-            # Fallback to OpenStreetMap
-            subdomain = random.choice(['a', 'b', 'c'])
-            fallback_url = f"https://{subdomain}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            fallback_resp = requests.get(fallback_url, headers={'User-Agent': 'RaahGo-Map-Fallback/1.0'}, timeout=5)
-            if fallback_resp.status_code == 200:
-                response = HttpResponse(fallback_resp.content, content_type='image/png')
+    # 3. OpenStreetMap
+    subdomain = random.choice(['a', 'b', 'c'])
+    urls_to_try.append((
+        f"https://{subdomain}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 RaahGo/2.0'}
+    ))
+
+    for tile_url, headers in urls_to_try:
+        try:
+            resp = requests.get(tile_url, headers=headers, timeout=3.5)
+            if resp.status_code == 200 and resp.content:
+                response = HttpResponse(resp.content, content_type=resp.headers.get('Content-Type', 'image/png'))
                 response['Cache-Control'] = 'public, max-age=86400'
                 return response
-            return HttpResponse(status=resp.status_code)
-    except Exception as e:
-        print(f"[Tile Proxy Error]: {e}")
-        return HttpResponse(status=502)
+        except Exception:
+            continue
+
+    # Graceful 200 OK fallback with transparent tile to prevent browser 502 error spam
+    response = HttpResponse(EMPTY_TILE_PNG, content_type='image/png')
+    response['Cache-Control'] = 'public, max-age=3600'
+    return response
 
 
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -165,16 +178,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
                         except Exception:
                             pass
 
-                    # max_radius km restriction from Database SystemSetting
-                    radius_str = SystemSetting.get_setting('location_suggestion_radius_km') or SystemSetting.get_setting('LOCATION_SUGGESTION_RADIUS_KM') or os.getenv('LOCATION_SUGGESTION_RADIUS_KM', '50')
-                    try:
-                        max_radius = float(radius_str)
-                    except (ValueError, TypeError):
-                        max_radius = 50.0
-
-                    if user_lat and user_lon and dist_km > max_radius:
-                        continue
-
                     # Determine icon & tag
                     osm_val = str(props.get('osm_value', '')).lower()
                     osm_key = str(props.get('osm_key', '')).lower()
@@ -244,16 +247,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
                             except Exception:
                                 pass
 
-                        # max_radius km restriction from Database SystemSetting
-                        radius_str = SystemSetting.get_setting('location_suggestion_radius_km') or SystemSetting.get_setting('LOCATION_SUGGESTION_RADIUS_KM') or os.getenv('LOCATION_SUGGESTION_RADIUS_KM', '50')
-                        try:
-                            max_radius = float(radius_str)
-                        except (ValueError, TypeError):
-                            max_radius = 50.0
-
-                        if user_lat and user_lon and dist_km > max_radius:
-                            continue
-
                         icon = '✈️' if item.get('type') == 'aeroway' else '🚆' if item.get('type') == 'railway' else '📍'
 
                         results.append({
@@ -269,7 +262,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
                 print(f"[Backend Location Nominatim Search Error]: {e}")
 
         results.sort(key=lambda x: x['distanceKm'])
-        return Response(results[:6], status=status.HTTP_200_OK)
+        return Response(results[:10], status=status.HTTP_200_OK)
 
     # 2. Backend Reverse Geocoding API Endpoint
     @action(detail=False, methods=['get'], url_path='location/reverse', permission_classes=[AllowAny])

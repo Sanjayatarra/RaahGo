@@ -62,6 +62,10 @@ urlpatterns = [
     path('rides/scheduled/', admin_api_views.AdminScheduledRidesView.as_view(), name='admin-rides-scheduled'),
     path('rides/completed/', admin_api_views.AdminCompletedRidesView.as_view(), name='admin-rides-completed'),
     path('rides/cancelled/', admin_api_views.AdminCancelledRidesView.as_view(), name='admin-rides-cancelled'),
+    path('rides/<uuid:pk>/', admin_api_views.AdminRideDetailView.as_view(), name='admin-ride-detail'),
+    path('rides/<uuid:pk>/cancel/', admin_api_views.AdminRideCancelView.as_view(), name='admin-ride-cancel'),
+    path('rides/<uuid:pk>/complete/', admin_api_views.AdminRideCompleteView.as_view(), name='admin-ride-complete'),
+
 
     # ── 8. Pricing & Surge ────────────────────────────────────
     path('pricing/', admin_api_views.AdminPricingListView.as_view(), name='admin-pricing-list'),

@@ -580,16 +580,6 @@ class LocationSuggestionView(APIView):
                             except Exception:
                                 pass
                                 
-                        # max_radius km restriction from Database SystemSetting
-                        radius_str = SystemSetting.get_setting('location_suggestion_radius_km') or SystemSetting.get_setting('LOCATION_SUGGESTION_RADIUS_KM') or os.getenv('LOCATION_SUGGESTION_RADIUS_KM', '50')
-                        try:
-                            max_radius = float(radius_str)
-                        except (ValueError, TypeError):
-                            max_radius = 50.0
-
-                        if lat and lon and dist_km > max_radius:
-                            continue
-
                         suggestions.append({
                             'display_name': display_name,
                             'lat': coords[1], # Photon returns [lon, lat]
@@ -597,7 +587,8 @@ class LocationSuggestionView(APIView):
                             'type': props.get('osm_value', 'location'),
                             'distanceKm': dist_km
                         })
-                return Response({'suggestions': suggestions}, status=status.HTTP_200_OK)
+                suggestions.sort(key=lambda x: x.get('distanceKm', 99999))
+                return Response({'suggestions': suggestions[:10]}, status=status.HTTP_200_OK)
         except Exception as e:
             print('Location autocomplete error:', e)
             return Response({'suggestions': []}, status=status.HTTP_200_OK)

@@ -6,7 +6,7 @@ import {
   LocateFixed, Loader2, KeyRound, Lock, Unlock, AlertCircle, X, Menu, Ticket, Package,
   Apple, Play, Train, Luggage, Coins, Bell, Shield, Settings, ChevronLeft
 } from 'lucide-react';
-import { getDeviceGpsLocation, reverseGeocodeGps } from '../common/locationService';
+import { getDeviceGpsLocation, reverseGeocodeGps, fetchLocationSuggestions, getPopularDestinations } from '../common/locationService';
 import { fetchWithAuth } from '../common/apiClient';
 import Navbar from './Navbar';
 import Footer from './Footer';
@@ -21,6 +21,8 @@ export default function HomePage({ user, onLogout }) {
   const [pickup, setPickup] = useState('');
   const [pickupCoords, setPickupCoords] = useState(null);
   const [currentGpsName, setCurrentGpsName] = useState('');
+  const [gpsDetails, setGpsDetails] = useState(null);
+  const [showGpsHintModal, setShowGpsHintModal] = useState(false);
   const [isLocatingGps, setIsLocatingGps] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [drop, setDrop] = useState('');
@@ -30,11 +32,15 @@ export default function HomePage({ user, onLogout }) {
   
   const [pickupSuggestions, setPickupSuggestions] = useState([]);
   const [dropSuggestions, setDropSuggestions] = useState([]);
+  const [showPickupDropdown, setShowPickupDropdown] = useState(false);
+  const [showDropDropdown, setShowDropDropdown] = useState(false);
   const [isSearchingPickup, setIsSearchingPickup] = useState(false);
   const [isSearchingDrop, setIsSearchingDrop] = useState(false);
 
   const pickupTimeoutRef = useRef(null);
   const dropTimeoutRef = useRef(null);
+  const pickupContainerRef = useRef(null);
+  const dropContainerRef = useRef(null);
 
   const miniMapRef = useRef(null);
   const miniMapInstance = useRef(null);
@@ -95,7 +101,8 @@ export default function HomePage({ user, onLogout }) {
     const detectGps = async () => {
       setIsLocatingGps(true);
       try {
-        const loc = await getDeviceGpsLocation();
+        const loc = await getDeviceGpsLocation(false);
+        setGpsDetails(loc);
         setCurrentGpsName(loc.address);
         setPickupCoords({ lat: loc.lat, lng: loc.lon });
         setPickup(loc.address);
@@ -115,7 +122,8 @@ export default function HomePage({ user, onLogout }) {
     setIsLocatingGps(true);
     setCurrentGpsName('Locating GPS...');
     try {
-      const loc = await getDeviceGpsLocation();
+      const loc = await getDeviceGpsLocation(true);
+      setGpsDetails(loc);
       setCurrentGpsName(loc.address);
       setPickupCoords({ lat: loc.lat, lng: loc.lon });
       setPickup(loc.address);
@@ -321,65 +329,88 @@ export default function HomePage({ user, onLogout }) {
     return list;
   }, [rideHistory]);
 
-  const fetchSuggestions = async (query, type) => {
-    if (!query || query.length < 3) {
-      if (type === 'pickup') setPickupSuggestions([]);
-      else setDropSuggestions([]);
-      return;
-    }
-    
-    if (type === 'pickup') setIsSearchingPickup(true);
-    else setIsSearchingDrop(true);
-
-    try {
-      let url = `/api/v1/bookings/location-suggestions/?q=${encodeURIComponent(query)}`;
-      if (pickupCoords) {
-        url += `&lat=${pickupCoords.lat}&lon=${pickupCoords.lng}`;
+  // Close suggestion dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (pickupContainerRef.current && !pickupContainerRef.current.contains(e.target)) {
+        setShowPickupDropdown(false);
       }
-      const res = await fetchWithAuth(url);
-      if (res.ok) {
-        const data = await res.json();
-        if (type === 'pickup') setPickupSuggestions(data.suggestions || []);
-        else setDropSuggestions(data.suggestions || []);
+      if (dropContainerRef.current && !dropContainerRef.current.contains(e.target)) {
+        setShowDropDropdown(false);
       }
-    } catch (e) {
-      console.log('Error fetching suggestions', e);
-    } finally {
-      if (type === 'pickup') setIsSearchingPickup(false);
-      else setIsSearchingDrop(false);
-    }
-  };
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handlePickupChange = (e) => {
     const val = e.target.value;
     setPickup(val);
+    setShowPickupDropdown(true);
     
     if (pickupTimeoutRef.current) clearTimeout(pickupTimeoutRef.current);
-    pickupTimeoutRef.current = setTimeout(() => {
-      fetchSuggestions(val, 'pickup');
-    }, 600);
+    if (!val.trim()) {
+      setPickupSuggestions([]);
+      setIsSearchingPickup(false);
+      return;
+    }
+
+    setIsSearchingPickup(true);
+    pickupTimeoutRef.current = setTimeout(async () => {
+      const results = await fetchLocationSuggestions(val, pickupCoords);
+      setPickupSuggestions(results);
+      setIsSearchingPickup(false);
+    }, 250);
   };
 
   const handleDropChange = (e) => {
     const val = e.target.value;
     setDrop(val);
+    setShowDropDropdown(true);
     
     if (dropTimeoutRef.current) clearTimeout(dropTimeoutRef.current);
-    dropTimeoutRef.current = setTimeout(() => {
-      fetchSuggestions(val, 'drop');
-    }, 600);
+    if (!val.trim()) {
+      setDropSuggestions([]);
+      setIsSearchingDrop(false);
+      return;
+    }
+
+    setIsSearchingDrop(true);
+    dropTimeoutRef.current = setTimeout(async () => {
+      const results = await fetchLocationSuggestions(val, pickupCoords);
+      setDropSuggestions(results);
+      setIsSearchingDrop(false);
+    }, 250);
   };
 
   const handleSelectPickup = (item) => {
-    setPickup(item.display_name);
-    setPickupCoords({ lat: item.lat, lng: item.lon });
+    const title = item.title || item.display_name?.split(',')[0] || '';
+    const subtitle = item.subtitle || item.display_name?.split(',').slice(1, 3).join(', ') || '';
+    const fullText = item.display_name || (subtitle ? `${title}, ${subtitle}` : title);
+    setPickup(fullText);
+
+    const lat = item.lat || (item.coordinates ? item.coordinates[1] : null);
+    const lng = item.lon || (item.coordinates ? item.coordinates[0] : null);
+    if (lat && lng) {
+      setPickupCoords({ lat: parseFloat(lat), lng: parseFloat(lng) });
+    }
     setPickupSuggestions([]);
+    setShowPickupDropdown(false);
   };
 
   const handleSelectDrop = (item) => {
-    setDrop(item.display_name);
-    setDropCoords({ lat: item.lat, lng: item.lon });
+    const title = item.title || item.display_name?.split(',')[0] || '';
+    const subtitle = item.subtitle || item.display_name?.split(',').slice(1, 3).join(', ') || '';
+    const fullText = item.display_name || (subtitle ? `${title}, ${subtitle}` : title);
+    setDrop(fullText);
+
+    const lat = item.lat || (item.coordinates ? item.coordinates[1] : null);
+    const lng = item.lon || (item.coordinates ? item.coordinates[0] : null);
+    if (lat && lng) {
+      setDropCoords({ lat: parseFloat(lat), lng: parseFloat(lng) });
+    }
     setDropSuggestions([]);
+    setShowDropDropdown(false);
   };
 
   const handleDesktopBookRide = (e) => {
@@ -448,7 +479,7 @@ export default function HomePage({ user, onLogout }) {
             onClick={() => navigate('/book-ride')}
             className="flex-1 glass-panel rounded-full px-4 py-3 shadow-lg pointer-events-auto flex items-center gap-2.5 cursor-pointer hover:bg-white/95 transition-all border border-white/80"
           >
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
+            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${gpsDetails?.source === 'gps' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)] animate-pulse'}`}></span>
             <span className="text-xs font-bold text-gray-900 truncate">
               {isLocatingGps ? 'Locating GPS...' : isGeocoding ? 'Detecting place...' : (currentGpsName || 'Locating...')}
             </span>
@@ -466,6 +497,25 @@ export default function HomePage({ user, onLogout }) {
             )}
           </button>
         </div>
+
+        {/* Mobile Insecure Origin GPS Helper Banner */}
+        {gpsDetails?.isApproximate && !gpsDetails?.isSecureContext && (
+          <div className="absolute top-[72px] left-4 right-4 z-30 pointer-events-auto animate-fade-in">
+            <button
+              type="button"
+              onClick={() => setShowGpsHintModal(true)}
+              className="w-full bg-amber-500/95 backdrop-blur-md text-amber-950 px-3.5 py-2 rounded-2xl shadow-lg border border-amber-300 text-[11px] font-bold flex items-center justify-between gap-2 cursor-pointer transition-all active:scale-[0.98]"
+            >
+              <div className="flex items-center gap-2 truncate text-left">
+                <span className="text-sm">📍</span>
+                <span className="truncate">Network IP Location active · Tap for Phone GPS fix</span>
+              </div>
+              <span className="bg-white/90 text-amber-900 font-black px-2 py-0.5 rounded-lg text-[10px] shrink-0 shadow-2xs">
+                Fix GPS
+              </span>
+            </button>
+          </div>
+        )}
 
         {/* Scrollable Bottom Sheet Content */}
         <div 
@@ -689,6 +739,71 @@ export default function HomePage({ user, onLogout }) {
           onLogout={onLogout}
           activeNav="profile"
         />
+
+        {/* Mobile GPS Help Modal */}
+        {showGpsHintModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl border border-gray-100 text-left animate-fade-in">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-base">
+                    📍
+                  </span>
+                  <h3 className="text-base font-black text-gray-900">Phone GPS Setup</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowGpsHintModal(false)}
+                  className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 cursor-pointer border-none"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs text-gray-600 leading-relaxed">
+                <p>
+                  <strong className="text-gray-900">Why does this happen?</strong><br/>
+                  Mobile browsers (Chrome / Safari) strictly block hardware GPS on <code className="bg-gray-100 px-1 py-0.5 rounded text-red-600 font-mono">http://</code> connections. We are currently using your <span className="text-emerald-700 font-bold">Network IP location</span> as a fallback.
+                </p>
+
+                <div className="p-3 bg-emerald-50/70 rounded-2xl border border-emerald-200/80 space-y-2">
+                  <p className="font-extrabold text-emerald-900 text-[11px] uppercase tracking-wider">
+                    Option 1: Switch to HTTPS (Recommended)
+                  </p>
+                  <p className="text-[11px] text-emerald-800">
+                    Switch to HTTPS on your phone. If prompted about self-signed certificate, tap <em>Advanced &rarr; Proceed</em>.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.location.protocol = 'https:';
+                    }}
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs rounded-xl shadow-xs transition-all cursor-pointer border-none"
+                  >
+                    Switch to HTTPS Now
+                  </button>
+                </div>
+
+                <div className="p-3 bg-gray-50 rounded-2xl border border-gray-200 space-y-1.5">
+                  <p className="font-extrabold text-gray-800 text-[11px] uppercase tracking-wider">
+                    Option 2: Android Chrome Flag
+                  </p>
+                  <p className="text-[11px] text-gray-600">
+                    Open <code className="bg-white px-1 py-0.5 rounded text-gray-800 border font-mono">chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> in Chrome, add this address, enable it, and relaunch.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowGpsHintModal(false)}
+                className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold text-xs rounded-xl transition-all cursor-pointer border-none"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
 
@@ -717,44 +832,51 @@ export default function HomePage({ user, onLogout }) {
 
               {/* Desktop Booking Form */}
               <form onSubmit={handleDesktopBookRide} className="bg-white rounded-3xl p-6 shadow-[0_10px_40px_rgba(0,0,0,0.08)] border border-gray-100 space-y-4 max-w-md relative z-10">
-                <div className="relative">
+                {/* Pickup Location Input */}
+                <div className="relative" ref={pickupContainerRef}>
                   <div className="absolute left-4 top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-gray-900 rounded-full"></div>
                   <input 
                     type="text" 
                     placeholder="Enter Pickup Location" 
                     value={pickup}
                     onChange={handlePickupChange}
+                    onFocus={() => setShowPickupDropdown(true)}
+                    onClick={() => setShowPickupDropdown(true)}
                     required
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl py-4 pl-12 pr-10 text-gray-900 font-bold focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-all"
                   />
-                  {pickup && (
+                  {isSearchingPickup ? (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+                    </div>
+                  ) : pickup ? (
                     <button
                       type="button"
                       onClick={() => {
                         setPickup('');
                         setPickupCoords(null);
                         setPickupSuggestions([]);
+                        setShowPickupDropdown(true);
                       }}
                       className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center"
                       title="Clear pickup"
                     >
                       <X className="w-4 h-4" />
                     </button>
-                  )}
-                  {isSearchingPickup && !pickup && <div className="absolute right-4 top-1/2 -translate-y-1/2"><Loader2 className="w-5 h-5 text-gray-400 animate-spin" /></div>}
+                  ) : null}
                   
-                  {pickupSuggestions.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden z-50">
+                  {showPickupDropdown && pickupSuggestions.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden z-50 max-h-60 overflow-y-auto">
                       {pickupSuggestions.map((item, idx) => (
                         <div 
                           key={idx} 
                           onClick={() => handleSelectPickup(item)}
                           className="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 flex items-center gap-3"
                         >
-                          <MapPin className="w-4 h-4 text-gray-400 shrink-0" />
-                          <div className="truncate">
-                            <p className="text-sm font-bold text-gray-900 truncate">{item.display_name.split(',')[0]}</p>
-                            <p className="text-xs text-gray-500 truncate">{item.display_name}</p>
+                          <span className="text-base shrink-0">{item.icon || '📍'}</span>
+                          <div className="truncate flex-1 min-w-0">
+                            <p className="text-sm font-bold text-gray-900 truncate">{item.title || item.display_name.split(',')[0]}</p>
+                            <p className="text-xs text-gray-500 truncate">{item.subtitle || item.display_name}</p>
                           </div>
                         </div>
                       ))}
@@ -762,47 +884,141 @@ export default function HomePage({ user, onLogout }) {
                   )}
                 </div>
                 
-                <div className="relative">
+                {/* Drop Location Input */}
+                <div className="relative" ref={dropContainerRef}>
                   <div className="absolute left-4 top-1/2 -translate-y-1/2 w-2.5 h-2.5 border-2 border-gray-900 bg-white rounded-full"></div>
                   <input 
                     type="text" 
                     placeholder="Enter Drop Location" 
                     value={drop}
                     onChange={handleDropChange}
+                    onFocus={() => setShowDropDropdown(true)}
+                    onClick={() => setShowDropDropdown(true)}
                     required
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl py-4 pl-12 pr-10 text-gray-900 font-bold focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition-all"
                   />
-                  {drop && (
+                  {isSearchingDrop ? (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+                    </div>
+                  ) : drop ? (
                     <button
                       type="button"
                       onClick={() => {
                         setDrop('');
                         setDropCoords(null);
                         setDropSuggestions([]);
+                        setShowDropDropdown(true);
                       }}
                       className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors border-none bg-transparent cursor-pointer flex items-center justify-center"
                       title="Clear drop"
                     >
                       <X className="w-4 h-4" />
                     </button>
-                  )}
-                  {isSearchingDrop && !drop && <div className="absolute right-4 top-1/2 -translate-y-1/2"><Loader2 className="w-5 h-5 text-gray-400 animate-spin" /></div>}
+                  ) : null}
                   
-                  {dropSuggestions.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden z-50">
-                      {dropSuggestions.map((item, idx) => (
-                        <div 
-                          key={idx} 
-                          onClick={() => handleSelectDrop(item)}
-                          className="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 flex items-center gap-3"
-                        >
-                          <MapPin className="w-4 h-4 text-gray-400 shrink-0" />
-                          <div className="truncate">
-                            <p className="text-sm font-bold text-gray-900 truncate">{item.display_name.split(',')[0]}</p>
-                            <p className="text-xs text-gray-500 truncate">{item.display_name}</p>
-                          </div>
+                  {/* Rich Drop Location Suggestions Dropdown */}
+                  {showDropDropdown && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-2xl z-50 max-h-72 overflow-y-auto divide-y divide-gray-100">
+                      {/* Live Searching Indicator */}
+                      {isSearchingDrop && (
+                        <div className="p-3 flex items-center justify-center gap-2 text-xs font-bold text-gray-500">
+                          <Loader2 className="w-4 h-4 text-emerald-600 animate-spin" />
+                          <span>Searching destinations...</span>
                         </div>
-                      ))}
+                      )}
+
+                      {/* Live matching results when user typed */}
+                      {drop.trim().length > 0 && !isSearchingDrop && dropSuggestions.length > 0 && (
+                        <div>
+                          <div className="px-4 py-1.5 bg-gray-50 text-[10px] font-black uppercase tracking-wider text-gray-500">
+                            Search Results ({dropSuggestions.length})
+                          </div>
+                          {dropSuggestions.map((item, idx) => (
+                            <div 
+                              key={idx} 
+                              onClick={() => handleSelectDrop(item)}
+                              className="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 flex items-center gap-3 transition-colors"
+                            >
+                              <span className="text-base shrink-0">{item.icon || '📍'}</span>
+                              <div className="truncate flex-1 min-w-0">
+                                <p className="text-sm font-bold text-gray-900 truncate">{item.title || item.display_name.split(',')[0]}</p>
+                                <p className="text-xs text-gray-500 truncate">{item.subtitle || item.display_name}</p>
+                              </div>
+                              {item.distanceKm < 999 && (
+                                <span className="text-xs text-emerald-700 font-extrabold shrink-0 bg-emerald-50 px-2 py-0.5 rounded-md">
+                                  {typeof item.distanceKm === 'number' ? item.distanceKm.toFixed(1) : item.distanceKm} km
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* If user typed text but no match */}
+                      {drop.trim().length > 0 && !isSearchingDrop && dropSuggestions.length === 0 && (
+                        <div className="p-3 text-center text-xs text-gray-500">
+                          <p className="font-bold text-gray-700">No direct matches for "{drop}"</p>
+                          <p className="text-[11px] text-gray-400 mt-0.5">Select a popular location below</p>
+                        </div>
+                      )}
+
+                      {/* Recent Trips (shown on selecting drop or fallback) */}
+                      {(!drop.trim() || dropSuggestions.length === 0) && recentRides.length > 0 && (
+                        <div>
+                          <div className="px-4 py-1.5 bg-gray-50 text-[10px] font-black uppercase tracking-wider text-gray-500">
+                            Recent Destinations
+                          </div>
+                          {recentRides.map((ride, idx) => (
+                            <div
+                              key={ride.id || idx}
+                              onClick={() => handleSelectDrop({
+                                display_name: ride.fullAddress,
+                                title: ride.title,
+                                subtitle: ride.subtitle,
+                                lat: ride.dropCoords?.lat,
+                                lon: ride.dropCoords?.lng
+                              })}
+                              className="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 flex items-center gap-3 transition-colors"
+                            >
+                              <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 text-gray-600">
+                                <Clock className="w-4 h-4 text-emerald-600" />
+                              </div>
+                              <div className="truncate flex-1 min-w-0">
+                                <p className="text-sm font-bold text-gray-900 truncate">{ride.title}</p>
+                                <p className="text-xs text-gray-500 truncate">{ride.subtitle}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Popular Drop Destinations / Hotspots */}
+                      {(!drop.trim() || dropSuggestions.length === 0) && (
+                        <div>
+                          <div className="px-4 py-1.5 bg-gray-50 text-[10px] font-black uppercase tracking-wider text-gray-500">
+                            Popular Drop Locations
+                          </div>
+                          {getPopularDestinations(pickupCoords).map((loc, idx) => (
+                            <div 
+                              key={idx} 
+                              onClick={() => handleSelectDrop(loc)}
+                              className="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 flex items-center gap-3 transition-colors"
+                            >
+                              <span className="text-base shrink-0">{loc.icon || '📍'}</span>
+                              <div className="truncate flex-1 min-w-0">
+                                <p className="text-sm font-bold text-gray-900 truncate">{loc.title}</p>
+                                <p className="text-xs text-gray-500 truncate">{loc.subtitle}</p>
+                              </div>
+                              {loc.distanceKm < 999 && (
+                                <span className="text-xs text-gray-400 font-bold shrink-0">
+                                  ~{loc.distanceKm} km
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

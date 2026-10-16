@@ -117,7 +117,7 @@ export const reverseGeocodeGps = async (lat, lng) => {
 
 // 3. Primary Location Resolver: Device GPS -> Saved Storage -> Default Location (Atarra, Banda, UP)
 export const getDriverDeviceLocation = () => {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     // Check localStorage cache first
     let cachedLocation = null;
     try {
@@ -127,14 +127,9 @@ export const getDriverDeviceLocation = () => {
       }
     } catch (e) {}
 
-    const handleFallback = () => {
-      // 1. If user previously selected a manual/valid location, preserve it
-      if (cachedLocation && cachedLocation.lat && cachedLocation.lng && cachedLocation.source === 'manual') {
-        resolve(cachedLocation);
-        return;
-      }
-
-      if (cachedLocation && cachedLocation.lat && cachedLocation.lng && !String(cachedLocation.address || '').includes('Kannauj') && cachedLocation.lat !== 27.0602927) {
+    const handleFallback = async () => {
+      // 1. If user previously had a valid location in cache
+      if (cachedLocation && cachedLocation.lat && cachedLocation.lng && cachedLocation.lat !== 25.290689) {
         resolve({
           ...cachedLocation,
           source: 'cache'
@@ -142,54 +137,95 @@ export const getDriverDeviceLocation = () => {
         return;
       }
 
-      // 2. Default Service Base (Atarra, Banda, Uttar Pradesh: 25.290689, 80.570636)
+      // 2. IP-based location fallback for mobile on HTTP
+      try {
+        const res = await fetch('https://api.bigdatacloud.net/data/reverse-geocode-client');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.latitude && data.longitude) {
+            const locality = data.locality || data.city || data.principalSubdivision || '';
+            const city = data.city || '';
+            const state = data.principalSubdivision || '';
+            const parts = [locality, city, state].filter((v, i, a) => v && a.indexOf(v) === i);
+            const address = parts.join(', ') || `${city || 'India'}, ${state || ''}`;
+            const ipLoc = {
+              lat: Number(data.latitude.toFixed(7)),
+              lng: Number(data.longitude.toFixed(7)),
+              accuracy: '500',
+              address,
+              source: 'ip'
+            };
+            try {
+              localStorage.setItem('raahgo_driver_location', JSON.stringify(ipLoc));
+            } catch (e) {}
+            resolve(ipLoc);
+            return;
+          }
+        }
+      } catch (e) {}
+
+      // 3. Default fallback
       const defaultLoc = {
-        lat: 25.290689,
-        lng: 80.570636,
-        address: 'Atarra, Banda, Uttar Pradesh',
-        accuracy: '10',
+        lat: 28.6139,
+        lng: 77.2090,
+        address: 'Connaught Place, New Delhi',
+        accuracy: '1000',
         source: 'default'
       };
       resolve(defaultLoc);
     };
 
-    // If browser does not support or allow geolocation
     if (!navigator.geolocation) {
       handleFallback();
       return;
     }
 
+    // High accuracy first, then fallback to low accuracy
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const lat = Number(pos.coords.latitude.toFixed(7));
         const lng = Number(pos.coords.longitude.toFixed(7));
         const accuracy = pos.coords.accuracy ? pos.coords.accuracy.toFixed(0) : '10';
-
         const address = await reverseGeocodeGps(lat, lng);
-
         const result = {
           lat,
           lng,
           accuracy,
-          address: address || `Sector 29, Gurugram`,
+          address: address || `GPS Location`,
           source: 'gps'
         };
-
         try {
           localStorage.setItem('raahgo_driver_location', JSON.stringify(result));
         } catch (e) {}
-
         resolve(result);
       },
       (err) => {
-        console.warn('Browser GPS prompt notice:', err.code, err.message);
-        handleFallback();
+        console.warn('[DriverLocation] High accuracy failed, trying low accuracy fallback:', err.message);
+        navigator.geolocation.getCurrentPosition(
+          async (pos2) => {
+            const lat = Number(pos2.coords.latitude.toFixed(7));
+            const lng = Number(pos2.coords.longitude.toFixed(7));
+            const accuracy = pos2.coords.accuracy ? pos2.coords.accuracy.toFixed(0) : '20';
+            const address = await reverseGeocodeGps(lat, lng);
+            const result = {
+              lat,
+              lng,
+              accuracy,
+              address: address || `Network Location`,
+              source: 'gps'
+            };
+            try {
+              localStorage.setItem('raahgo_driver_location', JSON.stringify(result));
+            } catch (e) {}
+            resolve(result);
+          },
+          () => {
+            handleFallback();
+          },
+          { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }
+        );
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 8000,
-        maximumAge: 10000
-      }
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 10000 }
     );
   });
 };
