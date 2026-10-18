@@ -96,14 +96,19 @@ export default function HomePage({ user, onLogout }) {
       setIsLocatingGps(true);
       try {
         const loc = await getDeviceGpsLocation();
-        setCurrentGpsName(loc.address);
-        setPickupCoords({ lat: loc.lat, lng: loc.lon });
-        setPickup(loc.address);
-        if (miniMapInstance.current) {
-          adjustMapView({ lat: loc.lat, lng: loc.lon }, sheetHeight);
+        if (loc) {
+          setCurrentGpsName(loc.address);
+          setPickupCoords({ lat: loc.lat, lng: loc.lon });
+          setPickup(loc.address);
+          if (miniMapInstance.current) {
+            adjustMapView({ lat: loc.lat, lng: loc.lon }, sheetHeight);
+          }
+        } else {
+          setCurrentGpsName('📍 Enable location to auto-detect');
         }
       } catch (err) {
         console.log('GPS home notice:', err);
+        setCurrentGpsName('📍 Enable location to auto-detect');
       } finally {
         setIsLocatingGps(false);
       }
@@ -116,14 +121,19 @@ export default function HomePage({ user, onLogout }) {
     setCurrentGpsName('Locating GPS...');
     try {
       const loc = await getDeviceGpsLocation();
-      setCurrentGpsName(loc.address);
-      setPickupCoords({ lat: loc.lat, lng: loc.lon });
-      setPickup(loc.address);
-      if (miniMapInstance.current) {
-        adjustMapView({ lat: loc.lat, lng: loc.lon }, sheetHeight);
+      if (loc) {
+        setCurrentGpsName(loc.address);
+        setPickupCoords({ lat: loc.lat, lng: loc.lon });
+        setPickup(loc.address);
+        if (miniMapInstance.current) {
+          adjustMapView({ lat: loc.lat, lng: loc.lon }, sheetHeight);
+        }
+      } else {
+        setCurrentGpsName('📍 Enable location to auto-detect');
       }
     } catch (err) {
       console.log('GPS relocate error:', err);
+      setCurrentGpsName('📍 Enable location to auto-detect');
     } finally {
       setIsLocatingGps(false);
     }

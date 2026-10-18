@@ -21,9 +21,13 @@ from .driver_api_views import (
     DriverStatusOfflineView,
     DriverStatusView,
     DriverLocationView,
+    DriverHeartbeatView,
     DriverRideRequestsView,
     DriverRideAcceptView,
     DriverRideRejectView,
+    DriverOfferAcceptView,
+    DriverOfferRejectView,
+    DriverActiveOfferView,
     DriverCurrentRideView,
     DriverRideArrivedView,
     DriverRideStartView,
@@ -77,8 +81,14 @@ urlpatterns = [
     path('status/offline/', DriverStatusOfflineView.as_view(), name='driver-status-offline'),
     path('status/', DriverStatusView.as_view(), name='driver-status-current'),
 
-    # Location Tracking
+    # Location Tracking & Heartbeat
     path('location/', DriverLocationView.as_view(), name='driver-location'),
+    path('heartbeat/', DriverHeartbeatView.as_view(), name='driver-heartbeat'),
+
+    # Ride Offers & Matching
+    path('offers/active/', DriverActiveOfferView.as_view(), name='driver-offer-active'),
+    path('offers/<uuid:offer_id>/accept/', DriverOfferAcceptView.as_view(), name='driver-offer-accept'),
+    path('offers/<uuid:offer_id>/reject/', DriverOfferRejectView.as_view(), name='driver-offer-reject'),
 
     # Ride Requests & Current Lifecycle
     path('rides/requests/', DriverRideRequestsView.as_view(), name='driver-ride-requests'),

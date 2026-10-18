@@ -1,28 +1,42 @@
-# Python & Django
+# Python & Virtual Environments
 venv/
 env/
 .venv/
 ENV/
+env.bak/
+venv.bak/
+
+# Byte-compiled / optimized / cache files
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
+*/__pycache__/
+**/__pycache__/
+
+# Django database & media
 *.sqlite3
 db.sqlite3
-*.log
 media/
 staticfiles/
+*.log
 
-# Django Migrations Cache
-*/migrations/
-__pycache__/
-*.pyc
+# Migration caches (keep migration .py files, ignore bytecode)
+**/migrations/__pycache__/
+**/migrations/*.pyc
 
-# Environment Files & Credentials
+# Environment Files & Secrets (keep .env.example)
 .env
 .env.*
 !.env.example
 
-# Node.js & React Frontend
+# SSL Certificates & Local Keys
+*.pem
+*.key
+*.crt
+*.cert
+
+# Node.js & React Frontend Builds
 node_modules/
 **/node_modules/
 dist/
@@ -36,20 +50,23 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# IDE & Editor Files
+# IDE & Editor Configurations
 .vscode/
 .idea/
 *.swp
 *.swo
 *.sublime-project
 *.sublime-workspace
+pyrightconfig.json
 
 # OS & Temporary Files
 .DS_Store
 Thumbs.db
 tmp/
 .gemini/
-**/migrations/*.py
-!Apps/users/migrations/0003_user_role_scoped_unique_fields.py
-**/migrations/*.pyc
-*/__pycache__/
+
+# Redis & Celery
+*.rdb
+celerybeat-schedule
+celerybeat.pid
+migrations/

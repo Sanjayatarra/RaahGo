@@ -5,7 +5,7 @@ import {
   CreditCard, Tag, CheckCircle2, ChevronRight, ChevronDown, ChevronUp, LogOut, User, RefreshCw, Zap,
   LocateFixed, Loader2, KeyRound, Lock, Unlock, AlertCircle, X, Info, Phone, MessageSquare, Shield, Share2, AlertTriangle
 } from 'lucide-react';
-import { fetchLocationSuggestions, getDeviceGpsLocation } from '../common/locationService';
+import { fetchLocationSuggestions, getDeviceGpsLocation, getRealtimeGpsLocation } from '../common/locationService';
 import { fetchWithAuth } from '../common/apiClient';
 import RealtimeMap from './RealtimeMap';
 import Navbar from './Navbar';
@@ -322,23 +322,63 @@ export default function BookRidePage({ user, onLogout }) {
   // Detect Device GPS Location via locationService
   const handleDetectGpsLocation = async () => {
     setIsLocating(true);
+    setShowPickupDropdown(false);
     setLocationStatus('Accessing device GPS location...');
 
     try {
-      const loc = await getDeviceGpsLocation();
-      setPickup(loc.address);
-      setPickupCoords({ lat: loc.lat, lng: loc.lon });
-      setPickupError('');
-      setGpsVerified(true);
-      setLocationStatus(loc.displayStatus);
+      const result = await getRealtimeGpsLocation();
+
+      if (!result?.error) {
+        // Success
+        setPickup(result.address);
+        setPickupCoords({ lat: result.lat, lng: result.lon });
+        setPickupError('');
+        setGpsVerified(true);
+        setLocationStatus('');
+        return;
+      }
+
+      // Error — show specific actionable guidance
+      setGpsVerified(false);
+      switch (result.errorCode) {
+        case 'PERMISSION_DENIED':
+          setLocationStatus(
+            'Location permission was denied. Tap the 🔒 or settings icon in your browser address bar → Permissions → Allow Location, then tap again.'
+          );
+          break;
+        case 'INSECURE_CONTEXT':
+          setLocationStatus(
+            'GPS requires HTTPS. Please open the URL starting with https:// (e.g. https://192.168.0.109:5173)'
+          );
+          break;
+        case 'POSITION_UNAVAILABLE':
+          setLocationStatus(
+            'GPS location unavailable. Please ensure Device Location (GPS) is turned ON in your phone quick settings.'
+          );
+          break;
+        case 'TIMEOUT':
+          setLocationStatus(
+            'GPS request timed out. Please check your signal and try again.'
+          );
+          break;
+        case 'UNSUPPORTED':
+          setLocationStatus(
+            'Your browser does not support GPS. Please search for your pickup location manually.'
+          );
+          break;
+        default:
+          setLocationStatus(
+            'Could not determine your location. Please search for your pickup point manually.'
+          );
+      }
     } catch (err) {
       setGpsVerified(false);
-      const errMsg = err.message || 'Unable to access GPS location. Please enable location permissions or search your pickup point.';
-      setLocationStatus(errMsg);
+      setLocationStatus('Unable to access GPS location. Please check browser permissions.');
     } finally {
       setIsLocating(false);
     }
   };
+
 
   // Live Location Autocomplete via OpenStreetMap API
   const handlePickupChange = (e) => {
@@ -1058,7 +1098,7 @@ export default function BookRidePage({ user, onLogout }) {
               </div>
 
               {/* Scrollable Content Area */}
-              <div className="flex-1 overflow-y-auto px-4 pt-4 pb-6 space-y-4 scrollbar-none">
+              <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 space-y-4 scrollbar-none scroll-smooth">
                 {/* Mobile Map View */}
                 <div className="block lg:hidden h-56 sm:h-64 rounded-[24px] overflow-hidden border border-gray-200 relative z-10 shrink-0 shadow-sm">
                   <RealtimeMap
@@ -1079,10 +1119,25 @@ export default function BookRidePage({ user, onLogout }) {
                 </div>
 
                 {/* Location Status / Alert Banner */}
-                {locationStatus && (locationStatus.includes('Unable') || locationStatus.includes('unavailable') || locationStatus.includes('denied') || locationStatus.includes('Please enable')) && (
-                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center gap-2.5 text-xs text-red-500 font-bold animate-fade-in">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
-                    <span className="flex-1">{locationStatus}</span>
+                {locationStatus && !gpsVerified && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-between gap-2.5 text-xs text-amber-700 font-bold animate-fade-in">
+                    <div className="flex items-center gap-2 flex-1">
+                      {isLocating ? (
+                        <Loader2 className="w-4 h-4 shrink-0 text-amber-600 animate-spin" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                      )}
+                      <span className="flex-1 text-xs">{locationStatus}</span>
+                    </div>
+                    {!isLocating && (
+                      <button
+                        type="button"
+                        onClick={() => setLocationStatus('')}
+                        className="p-1 hover:bg-amber-500/20 rounded-full text-amber-700 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -1107,6 +1162,20 @@ export default function BookRidePage({ user, onLogout }) {
                           className="w-full bg-transparent text-sm font-bold text-gray-900 focus:outline-none border-none p-0"
                         />
                       </div>
+                      {/* GPS locate-me button */}
+                      <button
+                        type="button"
+                        onClick={handleDetectGpsLocation}
+                        disabled={isLocating}
+                        title="Detect my current location"
+                        className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 border-none bg-emerald-50 hover:bg-emerald-100 active:scale-90 transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        {isLocating ? (
+                          <Loader2 className="w-4 h-4 text-emerald-600 animate-spin" />
+                        ) : (
+                          <LocateFixed className="w-4 h-4 text-emerald-600" />
+                        )}
+                      </button>
                       {pickup && (
                         <button
                           type="button"
@@ -1360,27 +1429,34 @@ export default function BookRidePage({ user, onLogout }) {
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handleBookRide}
-                      disabled={isBooking}
-                      className="w-full py-4 bg-gradient-to-r from-[#063B28] to-[#0D5B3E] hover:from-[#084A33] hover:to-[#106A49] text-white font-black text-base rounded-2xl shadow-xl shadow-[#063B28]/25 active:scale-[0.98] transition-all cursor-pointer border-none flex items-center justify-center gap-2 mt-4"
-                    >
-                      {isBooking ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          <span>Requesting Captain...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>Book {selectedRide.toUpperCase()} Now</span>
-                          <ArrowRight className="w-5 h-5" />
-                        </>
-                      )}
-                    </button>
                   </div>
                 )}
+
               </div>
+
+              {/* Sticky Book Now button — always visible when fares are shown */}
+              {showFares && !isSearchingDriver && !isAcceptedRide && (
+                <div className="shrink-0 px-4 pb-5 pt-3 bg-gradient-to-t from-white via-white/95 to-transparent border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={handleBookRide}
+                    disabled={isBooking}
+                    className="w-full py-4 bg-gradient-to-r from-[#063B28] to-[#0D5B3E] hover:from-[#084A33] hover:to-[#106A49] text-white font-black text-base rounded-2xl shadow-xl shadow-[#063B28]/30 active:scale-[0.98] transition-all cursor-pointer border-none flex items-center justify-center gap-2"
+                  >
+                    {isBooking ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span>Requesting Captain...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Book {selectedRide.toUpperCase()} Now</span>
+                        <ArrowRight className="w-5 h-5" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </>
           )}
 

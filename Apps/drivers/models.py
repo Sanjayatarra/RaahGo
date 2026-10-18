@@ -46,6 +46,18 @@ class Driver(models.Model):
         choices=AvailabilityStatus.choices,
         default=AvailabilityStatus.OFFLINE
     )
+    is_available = models.BooleanField(
+        default=True,
+        help_text="True if driver is free to accept offers; False if busy with an active ride"
+    )
+    active_ride = models.ForeignKey(
+        'bookings.Booking',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='active_driver_rides',
+        help_text="Currently active assigned booking"
+    )
     current_latitude = models.DecimalField(max_digits=12, decimal_places=7, null=True, blank=True)
     current_longitude = models.DecimalField(max_digits=12, decimal_places=7, null=True, blank=True)
     last_location_update = models.DateTimeField(null=True, blank=True)

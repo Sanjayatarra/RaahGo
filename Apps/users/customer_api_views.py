@@ -10,10 +10,14 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 
+from django.db import transaction
 from users.models import User, UserAddress, OTPVerification, SystemSetting
+from drivers.models import Driver
 from vehicles.models import Vehicle, VehicleType
-from bookings.models import Booking, RideDetail, ParcelDetail, MovingDetail, BookingTracking
+from bookings.models import Booking, RideDetail, ParcelDetail, MovingDetail, BookingTracking, RideOffer
 from bookings.serializers import BookingSerializer
+from bookings.outbox_service import OutboxService
+from bookings.matching_service import MatchingService
 from tracking.models import DriverLocation
 from wallets.models import Wallet, WalletTransaction
 from reviews.models import Rating
@@ -533,6 +537,12 @@ class CustomerRidesView(APIView):
             remarks="Ride created, finding nearest captains."
         )
 
+        # Asynchronously dispatch candidate search & ride offers in background
+        try:
+            MatchingService.start_matching_for_booking(booking.id)
+        except Exception:
+            pass
+
         return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
 
 
@@ -691,19 +701,57 @@ class CustomerRideCancelView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request, ride_id):
-        booking = Booking.objects.filter(Q(id=ride_id) | Q(booking_number=ride_id)).first()
-        if not booking:
-            return Response({'error': 'Ride not found'}, status=status.HTTP_404_NOT_FOUND)
-
         reason = request.data.get('comment') or request.data.get('reason', 'Cancelled by customer')
-        booking.status = Booking.BookingStatus.CANCELLED
-        booking.save()
+        with transaction.atomic():
+            booking = Booking.objects.select_for_update().filter(Q(id=ride_id) | Q(booking_number=ride_id)).first()
+            if not booking:
+                return Response({'error': 'Ride not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        BookingTracking.objects.create(
-            booking=booking,
-            status=Booking.BookingStatus.CANCELLED,
-            remarks=f"Cancelled by customer: {reason}"
-        )
+            if booking.status in [Booking.BookingStatus.COMPLETED, Booking.BookingStatus.CANCELLED]:
+                return Response({'message': f'Ride already {booking.status.lower()}', 'ride_id': booking.booking_number}, status=status.HTTP_200_OK)
+
+            locked_driver = None
+            if booking.driver:
+                locked_driver = Driver.objects.select_for_update().filter(id=booking.driver.id).first()
+
+            # Expire all pending offers for this booking
+            pending_offers = list(RideOffer.objects.select_for_update().filter(
+                booking=booking,
+                status=RideOffer.OfferStatus.PENDING
+            ))
+            for off in pending_offers:
+                off.status = RideOffer.OfferStatus.EXPIRED
+                off.save(update_fields=['status'])
+
+            booking.status = Booking.BookingStatus.CANCELLED
+            booking.save(update_fields=['status'])
+
+            if locked_driver:
+                locked_driver.is_available = True
+                locked_driver.active_ride = None
+                locked_driver.availability_status = Driver.AvailabilityStatus.ONLINE
+                locked_driver.save(update_fields=['is_available', 'active_ride', 'availability_status'])
+
+            BookingTracking.objects.create(
+                booking=booking,
+                status=Booking.BookingStatus.CANCELLED,
+                remarks=f"Cancelled by customer: {reason}"
+            )
+
+            OutboxService.create_message(
+                event_type='ride_cancelled',
+                payload={
+                    'booking_id': str(booking.id),
+                    'ride_id': str(booking.id),
+                    'booking_number': booking.booking_number,
+                    'customer_id': str(booking.customer_id) if booking.customer_id else None,
+                    'driver_id': str(locked_driver.id) if locked_driver else None,
+                    'cancelled_by': 'customer',
+                    'reason': reason,
+                    'pending_driver_ids': [str(po.driver_id) for po in pending_offers],
+                }
+            )
+
         return Response({'message': 'Ride cancelled successfully', 'ride_id': booking.booking_number}, status=status.HTTP_200_OK)
 
 

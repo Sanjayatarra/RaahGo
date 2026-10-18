@@ -503,19 +503,67 @@ export default function HomePage({ user, onLogout }) {
 
   // Toggle Availability via /api/v1/driver/status/online/ & /offline/
   const handleToggleOnline = async () => {
-    const endpoint = isOnline ? '/api/v1/driver/status/offline/' : '/api/v1/driver/status/online/';
+    const goingOnline = !isOnline;
+    const endpoint = goingOnline ? '/api/v1/driver/status/online/' : '/api/v1/driver/status/offline/';
+
+    let coordsToSend = { lat: captainLocation?.lat, lng: captainLocation?.lng };
+
+    if (goingOnline) {
+      setIsDetectingGps(true);
+      try {
+        // Pick rider/driver's live device GPS coordinates
+        const freshLoc = await getDriverDeviceLocation();
+        if (freshLoc && freshLoc.lat && freshLoc.lng) {
+          coordsToSend = { lat: freshLoc.lat, lng: freshLoc.lng };
+          setCaptainLocation({ lat: freshLoc.lat, lng: freshLoc.lng });
+          setGpsStatus(freshLoc.source === 'gps' ? 'locked' : 'cache');
+          if (freshLoc.address) {
+            setGpsAddress(freshLoc.address);
+          }
+        }
+      } catch (locErr) {
+        console.warn('GPS location pick notice:', locErr);
+      } finally {
+        setIsDetectingGps(false);
+      }
+    }
 
     try {
+      const payload = {
+        driver_id: driverProfile?.id,
+        ...(goingOnline && coordsToSend?.lat && coordsToSend?.lng ? {
+          latitude: coordsToSend.lat,
+          longitude: coordsToSend.lng,
+          lat: coordsToSend.lat,
+          lng: coordsToSend.lng,
+        } : {})
+      };
+
       const res = await fetchWithAuth(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ driver_id: driverProfile?.id })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (res.ok) {
         setIsOnline(data.is_online);
         if (data.duty_seconds_today !== undefined) {
           setDutySeconds(data.duty_seconds_today);
+        }
+        if (data.latitude && data.longitude) {
+          setCaptainLocation({ lat: parseFloat(data.latitude), lng: parseFloat(data.longitude) });
+        }
+        // Also ensure /api/v1/driver/location/ receives the updated coordinates immediately
+        if (goingOnline && coordsToSend?.lat && coordsToSend?.lng) {
+          fetchWithAuth('/api/v1/driver/location/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              latitude: coordsToSend.lat,
+              longitude: coordsToSend.lng,
+              driver_id: driverProfile?.id
+            })
+          }).catch(() => {});
         }
       } else {
         setIsOnline(false);
@@ -713,8 +761,23 @@ export default function HomePage({ user, onLogout }) {
                 </div>
               </div>
 
-              {/* Show GO ONLINE button only if currently offline */}
-              {!isOnline && (
+              {/* Action buttons: GO OFFLINE when online, GO ONLINE when offline */}
+              {isOnline ? (
+                <div className="mt-4 pt-3 border-t border-emerald-100 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-800 font-medium">
+                    <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="truncate max-w-[200px] sm:max-w-xs">{gpsAddress || `${captainLocation?.lat?.toFixed(4)}, ${captainLocation?.lng?.toFixed(4)}`}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleToggleOnline}
+                    className="px-4 py-2 rounded-xl font-bold text-xs tracking-wider uppercase transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer bg-red-500 text-white hover:bg-red-600"
+                  >
+                    <Power className="w-3.5 h-3.5" />
+                    <span>GO OFFLINE</span>
+                  </button>
+                </div>
+              ) : (
                 <div className="mt-4 pt-3 border-t border-gray-100">
                   {(() => {
                     const docs = driverProfile?.documents || [];
@@ -746,10 +809,11 @@ export default function HomePage({ user, onLogout }) {
                   <button
                     type="button"
                     onClick={handleToggleOnline}
-                    className="w-full py-3.5 sm:py-4 rounded-2xl font-black text-sm sm:text-base tracking-wider uppercase transition-all shadow-md flex items-center justify-center gap-2.5 active:scale-[0.99] cursor-pointer bg-[#34C759] text-white hover:bg-[#2EB84E] shadow-emerald-500/30"
+                    disabled={isDetectingGps}
+                    className="w-full py-3.5 sm:py-4 rounded-2xl font-black text-sm sm:text-base tracking-wider uppercase transition-all shadow-md flex items-center justify-center gap-2.5 active:scale-[0.99] cursor-pointer bg-[#34C759] text-white hover:bg-[#2EB84E] shadow-emerald-500/30 disabled:opacity-75"
                   >
-                    <Power className="w-5 h-5" />
-                    <span>GO ONLINE</span>
+                    <Power className={`w-5 h-5 ${isDetectingGps ? 'animate-spin' : ''}`} />
+                    <span>{isDetectingGps ? 'PICKING CURRENT LOCATION...' : 'GO ONLINE'}</span>
                   </button>
                 </div>
               )}

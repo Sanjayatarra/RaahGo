@@ -6,13 +6,16 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 
+from django.db import transaction
 from django.core.files.storage import default_storage
 from users.models import User, SystemSetting
 from drivers.models import Driver, DriverDocument, DriverBankAccount, DriverEmergencyContact, get_max_duty_seconds
 from vehicles.models import Vehicle, VehicleType
-from bookings.models import Booking, RideDetail, BookingTracking
+from bookings.models import Booking, RideDetail, BookingTracking, RideOffer, OutboxMessage
 from bookings.serializers import BookingSerializer
+from bookings.outbox_service import OutboxService
 from tracking.models import DriverLocation
+from tracking.redis_client import RedisPresenceService
 import datetime
 from datetime import timedelta, date
 from wallets.models import Wallet, WalletTransaction
@@ -774,20 +777,87 @@ class DriverStatusOnlineView(APIView):
         # ── 5. Driver Goes Online & Ready for Rides ─────────────────────────
         driver.last_online_start = timezone.now()
         driver.availability_status = Driver.AvailabilityStatus.ONLINE
+
+        # Pick and save rider's / driver's current location to DB
+        lat = request.data.get('latitude') or request.data.get('lat') or request.query_params.get('driver_lat') or request.query_params.get('lat')
+        lng = request.data.get('longitude') or request.data.get('lng') or request.data.get('lon') or request.query_params.get('driver_lng') or request.query_params.get('lng')
+        heading = request.data.get('heading', 0)
+        speed = request.data.get('speed', 0)
+
+        location_saved = False
+        if lat is not None and lng is not None:
+            try:
+                lat_val = round(Decimal(str(lat)), 7)
+                lng_val = round(Decimal(str(lng)), 7)
+                driver.current_latitude = lat_val
+                driver.current_longitude = lng_val
+                driver.last_location_update = timezone.now()
+
+                DriverLocation.objects.update_or_create(
+                    driver=driver,
+                    defaults={
+                        'latitude': lat_val,
+                        'longitude': lng_val,
+                        'heading': Decimal(str(heading)),
+                        'speed': Decimal(str(speed)),
+                        'is_online': True
+                    }
+                )
+                location_saved = True
+            except Exception:
+                pass
+        elif driver.current_latitude is not None and driver.current_longitude is not None:
+            try:
+                DriverLocation.objects.update_or_create(
+                    driver=driver,
+                    defaults={
+                        'latitude': driver.current_latitude,
+                        'longitude': driver.current_longitude,
+                        'heading': Decimal(str(heading)),
+                        'speed': Decimal(str(speed)),
+                        'is_online': True
+                    }
+                )
+                location_saved = True
+            except Exception:
+                pass
+
+        driver.is_available = True
         driver.save()
+
+        # Reconcile in-memory Redis presence
+        try:
+            v_type_name = active_vehicle.vehicle_type.name if (active_vehicle and active_vehicle.vehicle_type) else None
+            if driver.current_latitude is not None and driver.current_longitude is not None:
+                RedisPresenceService.update_driver_location(
+                    driver_id=driver.id,
+                    latitude=float(driver.current_latitude),
+                    longitude=float(driver.current_longitude),
+                    vehicle_type=v_type_name,
+                    is_online=True,
+                    is_available=True,
+                    active_ride_id=str(driver.active_ride_id) if driver.active_ride_id else None
+                )
+            else:
+                RedisPresenceService.set_driver_available(driver.id, vehicle_type=v_type_name)
+        except Exception:
+            pass
 
         return Response({
             'status': 'Online',
             'is_online': True,
             'is_available': True,
+            'location_saved': location_saved,
+            'latitude': float(driver.current_latitude) if driver.current_latitude else None,
+            'longitude': float(driver.current_longitude) if driver.current_longitude else None,
             'duty_seconds_today': driver.get_current_daily_online_seconds(),
             'current_daily_online_seconds': driver.get_current_daily_online_seconds(),
             'max_duty_seconds': max_duty_sec,
             'active_vehicle': {
-                'make': active_vehicle.make,
-                'model': active_vehicle.model,
-                'plate': active_vehicle.registration_number,
-                'type': active_vehicle.vehicle_type.name if active_vehicle.vehicle_type else 'Standard'
+                'make': active_vehicle.make if active_vehicle else '',
+                'model': active_vehicle.model if active_vehicle else '',
+                'plate': active_vehicle.registration_number if active_vehicle else '',
+                'type': active_vehicle.vehicle_type.name if active_vehicle and active_vehicle.vehicle_type else 'Standard'
             }
         }, status=status.HTTP_200_OK)
 
@@ -828,7 +898,21 @@ class DriverStatusOfflineView(APIView):
             driver.last_online_start = None
 
         driver.availability_status = Driver.AvailabilityStatus.OFFLINE
+        driver.is_available = False
         driver.save()
+
+        # Update Redis presence
+        try:
+            active_vehicle = Vehicle.objects.filter(driver=driver, is_active=True).first()
+            v_name = active_vehicle.vehicle_type.name if (active_vehicle and active_vehicle.vehicle_type) else None
+            RedisPresenceService.set_driver_offline(driver.id, vehicle_type=v_name)
+        except Exception:
+            pass
+
+        try:
+            DriverLocation.objects.filter(driver=driver).update(is_online=False)
+        except Exception:
+            pass
 
         return Response({
             'status': 'Offline',
@@ -848,10 +932,14 @@ class DriverStatusView(APIView):
         if not driver:
             return Response({'is_online': False, 'is_available': False}, status=status.HTTP_200_OK)
 
+        is_online = (driver.availability_status == Driver.AvailabilityStatus.ONLINE)
+        is_available = driver.is_available and (driver.active_ride is None) and is_online
+
         return Response({
-            'is_online': driver.availability_status == Driver.AvailabilityStatus.ONLINE,
-            'is_available': driver.availability_status == Driver.AvailabilityStatus.ONLINE,
+            'is_online': is_online,
+            'is_available': is_available,
             'availability_status': driver.availability_status,
+            'active_ride_id': str(driver.active_ride_id) if driver.active_ride_id else None,
             'latitude': float(driver.current_latitude) if driver.current_latitude else 28.4415,
             'longitude': float(driver.current_longitude) if driver.current_longitude else 77.0395,
             'duty_seconds_today': driver.get_current_daily_online_seconds()
@@ -859,7 +947,7 @@ class DriverStatusView(APIView):
 
 
 # ============================================================================
-# 5. Driver Location Tracking
+# 5. Driver Location Tracking & Heartbeat
 # ============================================================================
 
 class DriverLocationView(APIView):
@@ -877,24 +965,51 @@ class DriverLocationView(APIView):
 
         if lat is not None and lng is not None:
             try:
-                lat_val = round(Decimal(str(lat)), 7)
-                lng_val = round(Decimal(str(lng)), 7)
-                driver.current_latitude = lat_val
-                driver.current_longitude = lng_val
-                driver.last_location_update = timezone.now()
-                driver.save(update_fields=['current_latitude', 'current_longitude', 'last_location_update'])
+                lat_val = float(lat)
+                lng_val = float(lng)
 
-                # Record/Update tracking history entry in driver_locations table
-                DriverLocation.objects.update_or_create(
-                    driver=driver,
-                    defaults={
-                        'latitude': lat_val,
-                        'longitude': lng_val,
-                        'heading': Decimal(str(heading)),
-                        'speed': Decimal(str(speed)),
-                        'is_online': driver.availability_status == Driver.AvailabilityStatus.ONLINE or driver.availability_status == Driver.AvailabilityStatus.IN_TRIP
-                    }
+                active_vehicle = Vehicle.objects.filter(driver=driver, is_active=True).first()
+                v_name = active_vehicle.vehicle_type.name if (active_vehicle and active_vehicle.vehicle_type) else None
+                is_online = (driver.availability_status == Driver.AvailabilityStatus.ONLINE)
+                is_available = driver.is_available and (driver.active_ride is None) and is_online
+
+                # Fast write to Redis live presence and spatial index (no blocking MySQL write every 5s)
+                RedisPresenceService.update_driver_location(
+                    driver_id=driver.id,
+                    latitude=lat_val,
+                    longitude=lng_val,
+                    heading=float(heading or 0),
+                    speed=float(speed or 0),
+                    vehicle_type=v_name,
+                    is_online=is_online,
+                    is_available=is_available,
+                    active_ride_id=str(driver.active_ride_id) if driver.active_ride_id else None
                 )
+
+                # Persist to MySQL only if throttled (e.g. >= 30 seconds since last MySQL update or no prior update)
+                now = timezone.now()
+                should_update_db = (
+                    driver.last_location_update is None or
+                    (now - driver.last_location_update).total_seconds() >= 30
+                )
+                if should_update_db:
+                    lat_dec = round(Decimal(str(lat_val)), 7)
+                    lng_dec = round(Decimal(str(lng_val)), 7)
+                    driver.current_latitude = lat_dec
+                    driver.current_longitude = lng_dec
+                    driver.last_location_update = now
+                    driver.save(update_fields=['current_latitude', 'current_longitude', 'last_location_update'])
+
+                    DriverLocation.objects.update_or_create(
+                        driver=driver,
+                        defaults={
+                            'latitude': lat_dec,
+                            'longitude': lng_dec,
+                            'heading': Decimal(str(heading or 0)),
+                            'speed': Decimal(str(speed or 0)),
+                            'is_online': is_online or driver.availability_status == Driver.AvailabilityStatus.IN_TRIP
+                        }
+                    )
             except Exception:
                 pass
 
@@ -1028,50 +1143,276 @@ class DriverRideAcceptView(APIView):
 
     def post(self, request, ride_id):
         driver = get_driver_from_request(request)
-        booking = Booking.objects.filter(id=ride_id).first()
-        if not booking:
-            return Response({'error': 'Ride not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not driver:
+            return Response({'error': 'Driver authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        try:
-            wait_time_mins = int(SystemSetting.get_setting('customer_wait_time', '5') or 5)
-        except Exception:
-            wait_time_mins = 5
-        cutoff = timezone.now() - timedelta(minutes=wait_time_mins)
+        # Consistent locking hierarchy: Booking -> Driver -> RideOffer
+        with transaction.atomic():
+            booking = Booking.objects.select_for_update().filter(id=ride_id).first()
+            if not booking:
+                return Response({'error': 'Ride not found', 'code': 'RIDE_NOT_FOUND'}, status=status.HTTP_404_NOT_FOUND)
 
-        if booking.status == Booking.BookingStatus.SEARCHING and booking.created_at <= cutoff:
-            booking.status = Booking.BookingStatus.CANCELLED
-            booking.save()
+            locked_driver = Driver.objects.select_for_update().filter(id=driver.id).first()
+            if not locked_driver:
+                return Response({'error': 'Driver record not found', 'code': 'DRIVER_NOT_FOUND'}, status=status.HTTP_404_NOT_FOUND)
+
+            # Idempotency: if already accepted by this captain, return 200 OK
+            if booking.driver_id == locked_driver.id and booking.status in [
+                Booking.BookingStatus.ACCEPTED,
+                Booking.BookingStatus.ARRIVED,
+                Booking.BookingStatus.IN_TRIP
+            ]:
+                return Response({
+                    'message': 'Ride already accepted by you',
+                    'booking': BookingSerializer(booking).data,
+                    'is_assigned': True
+                }, status=status.HTTP_200_OK)
+
+            # Recheck ride status
+            if booking.status == Booking.BookingStatus.CANCELLED:
+                return Response({
+                    'error': 'This ride request has been cancelled by the customer.',
+                    'code': 'RIDE_CANCELLED'
+                }, status=status.HTTP_409_CONFLICT)
+
+            if booking.status != Booking.BookingStatus.SEARCHING or (booking.driver_id is not None and booking.driver_id != locked_driver.id):
+                return Response({
+                    'error': 'Ride has already been accepted by another captain.',
+                    'code': 'ALREADY_ACCEPTED'
+                }, status=status.HTTP_409_CONFLICT)
+
+            # Recheck driver active ride & busy state
+            if locked_driver.active_ride_id is not None and locked_driver.active_ride_id != booking.id:
+                return Response({
+                    'error': 'You already have an active ride in progress.',
+                    'code': 'DRIVER_BUSY',
+                    'active_ride_id': str(locked_driver.active_ride_id)
+                }, status=status.HTTP_409_CONFLICT)
+
+            # Check offer status
+            offer = RideOffer.objects.select_for_update().filter(
+                booking=booking,
+                driver=locked_driver
+            ).order_by('-created_at').first()
+
+            now = timezone.now()
+            if offer:
+                if offer.status == RideOffer.OfferStatus.EXPIRED or now > offer.expires_at:
+                    offer.status = RideOffer.OfferStatus.EXPIRED
+                    offer.save(update_fields=['status'])
+                    return Response({
+                        'error': 'This ride offer has expired.',
+                        'code': 'OFFER_EXPIRED'
+                    }, status=status.HTTP_409_CONFLICT)
+
+                if offer.status == RideOffer.OfferStatus.REJECTED:
+                    return Response({
+                        'error': 'You have already rejected this ride offer.',
+                        'code': 'OFFER_REJECTED'
+                    }, status=status.HTTP_409_CONFLICT)
+
+                offer.status = RideOffer.OfferStatus.ACCEPTED
+                offer.responded_at = now
+                offer.save(update_fields=['status', 'responded_at'])
+
+            # Expire other competing pending offers for this ride
+            competing_offers = list(RideOffer.objects.select_for_update().filter(
+                booking=booking,
+                status=RideOffer.OfferStatus.PENDING
+            ).exclude(id=offer.id if offer else None))
+            for comp_offer in competing_offers:
+                comp_offer.status = RideOffer.OfferStatus.EXPIRED
+                comp_offer.save(update_fields=['status'])
+
+            # Assign ride & mark driver busy
+            booking.driver = locked_driver
+            booking.status = Booking.BookingStatus.ACCEPTED
+            booking.save(update_fields=['driver', 'status'])
+
+            locked_driver.is_available = False
+            locked_driver.active_ride = booking
+            locked_driver.availability_status = Driver.AvailabilityStatus.IN_TRIP
+            locked_driver.save(update_fields=['is_available', 'active_ride', 'availability_status'])
+
+            driver_name = (' '.join(filter(None, [locked_driver.user.first_name, locked_driver.user.last_name])) or locked_driver.user.username)
             BookingTracking.objects.create(
                 booking=booking,
-                status=Booking.BookingStatus.CANCELLED,
-                remarks=f'Auto-cancelled: no driver found within {wait_time_mins} minutes.'
+                status=Booking.BookingStatus.ACCEPTED,
+                remarks=f"Accepted by driver {driver_name}"
             )
-            return Response({'error': 'This ride request has expired and was auto-cancelled.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if booking.status in [Booking.BookingStatus.ACCEPTED, Booking.BookingStatus.IN_TRIP, Booking.BookingStatus.COMPLETED]:
-            return Response({'error': 'Ride has already been accepted or finished by another captain'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if booking.status == Booking.BookingStatus.CANCELLED:
-            return Response({'error': 'This ride has been cancelled.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        booking.driver = driver
-        booking.status = Booking.BookingStatus.ACCEPTED
-        booking.save()
-
-        BookingTracking.objects.create(
-            booking=booking,
-            status=Booking.BookingStatus.ACCEPTED,
-            remarks=f"Accepted by driver {(' '.join(filter(None, [driver.user.first_name, driver.user.last_name])) or driver.user.username) if driver else 'Captain'}"
-        )
+            # Enqueue transactional outbox event
+            OutboxService.create_message(
+                event_type='ride_assigned',
+                payload={
+                    'booking_id': str(booking.id),
+                    'ride_id': str(booking.id),
+                    'booking_number': booking.booking_number,
+                    'customer_id': str(booking.customer_id) if booking.customer_id else None,
+                    'driver_id': str(locked_driver.id),
+                    'driver_name': driver_name,
+                    'driver_phone': locked_driver.user.phone_number if locked_driver.user else '',
+                    'driver_rating': float(locked_driver.rating) if locked_driver.rating else 5.0,
+                    'offer_id': str(offer.id) if offer else None,
+                    'reservation_token': offer.reservation_token if offer else None,
+                    'competing_driver_ids': [str(co.driver_id) for co in competing_offers],
+                }
+            )
 
         return Response(BookingSerializer(booking).data, status=status.HTTP_200_OK)
+
+
+class DriverOfferAcceptView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, offer_id):
+        driver = get_driver_from_request(request)
+        if not driver:
+            return Response({'error': 'Driver authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        offer = RideOffer.objects.filter(id=offer_id).first()
+        if not offer:
+            return Response({'error': 'Offer not found', 'code': 'OFFER_NOT_FOUND'}, status=status.HTTP_404_NOT_FOUND)
+
+        if offer.driver_id != driver.id:
+            return Response({'error': 'Unauthorized offer access', 'code': 'FORBIDDEN'}, status=status.HTTP_403_FORBIDDEN)
+
+        return DriverRideAcceptView().post(request, ride_id=offer.booking_id)
+
+
+class DriverOfferRejectView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, offer_id):
+        driver = get_driver_from_request(request)
+        if not driver:
+            return Response({'error': 'Driver authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        with transaction.atomic():
+            offer = RideOffer.objects.select_for_update().filter(id=offer_id, driver=driver).first()
+            if not offer:
+                return Response({'error': 'Offer not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            if offer.status == RideOffer.OfferStatus.PENDING:
+                offer.status = RideOffer.OfferStatus.REJECTED
+                offer.responded_at = timezone.now()
+                offer.save(update_fields=['status', 'responded_at'])
+
+                if offer.reservation_token:
+                    RedisPresenceService.release_driver_reservation(driver.id, offer.reservation_token)
+
+        return Response({'message': 'Offer declined successfully', 'offer_id': str(offer_id)}, status=status.HTTP_200_OK)
 
 
 class DriverRideRejectView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request, ride_id):
-        return Response({'message': 'Ride declined successfully', 'ride_id': ride_id}, status=status.HTTP_200_OK)
+        driver = get_driver_from_request(request)
+        if not driver:
+            return Response({'error': 'Driver authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        with transaction.atomic():
+            offer = RideOffer.objects.select_for_update().filter(
+                booking_id=ride_id,
+                driver=driver,
+                status=RideOffer.OfferStatus.PENDING
+            ).first()
+
+            if offer:
+                offer.status = RideOffer.OfferStatus.REJECTED
+                offer.responded_at = timezone.now()
+                offer.save(update_fields=['status', 'responded_at'])
+
+                if offer.reservation_token:
+                    RedisPresenceService.release_driver_reservation(driver.id, offer.reservation_token)
+
+        return Response({'message': 'Ride declined successfully', 'ride_id': str(ride_id)}, status=status.HTTP_200_OK)
+
+
+class DriverActiveOfferView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        driver = get_driver_from_request(request)
+        if not driver:
+            return Response({'offer': None}, status=status.HTTP_200_OK)
+
+        now = timezone.now()
+        offer = RideOffer.objects.filter(
+            driver=driver,
+            status=RideOffer.OfferStatus.PENDING,
+            expires_at__gt=now
+        ).select_related('booking', 'booking__customer', 'booking__vehicle_type').order_by('-created_at').first()
+
+        if not offer:
+            return Response({'offer': None}, status=status.HTTP_200_OK)
+
+        b = offer.booking
+        time_remaining = max(0, int((offer.expires_at - now).total_seconds()))
+
+        return Response({
+            'offer': {
+                'offer_id': str(offer.id),
+                'ride_id': str(b.id),
+                'booking_number': b.booking_number,
+                'status': offer.status,
+                'expires_at': offer.expires_at.isoformat(),
+                'time_remaining_seconds': time_remaining,
+                'pickup': {
+                    'address': b.pickup_address,
+                    'latitude': float(b.pickup_latitude) if b.pickup_latitude else None,
+                    'longitude': float(b.pickup_longitude) if b.pickup_longitude else None,
+                },
+                'drop': {
+                    'address': b.dropoff_address,
+                    'latitude': float(b.dropoff_latitude) if b.dropoff_latitude else None,
+                    'longitude': float(b.dropoff_longitude) if b.dropoff_longitude else None,
+                },
+                'estimated_fare': float(b.total_fare),
+                'distance_km': float(b.distance_km) if b.distance_km else None,
+                'customer_name': b.customer.user.get_full_name() if (b.customer and b.customer.user) else 'Rider',
+                'created_at': offer.created_at.isoformat(),
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class DriverHeartbeatView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        driver = get_driver_from_request(request)
+        if not driver:
+            return Response({'error': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        lat = request.data.get('latitude') or request.data.get('lat')
+        lng = request.data.get('longitude') or request.data.get('lng')
+
+        active_vehicle = driver.vehicles.filter(is_active=True).first()
+        v_name = active_vehicle.vehicle_type.name if (active_vehicle and active_vehicle.vehicle_type) else None
+        is_online = (driver.availability_status == Driver.AvailabilityStatus.ONLINE)
+        is_available = driver.is_available and (driver.active_ride is None) and is_online
+
+        if lat is not None and lng is not None:
+            RedisPresenceService.update_driver_location(
+                driver_id=driver.id,
+                latitude=float(lat),
+                longitude=float(lng),
+                vehicle_type=v_name,
+                is_online=is_online,
+                is_available=is_available,
+                active_ride_id=str(driver.active_ride_id) if driver.active_ride_id else None
+            )
+        else:
+            RedisPresenceService.record_heartbeat(driver.id)
+
+        return Response({
+            'status': 'ok',
+            'server_time': timezone.now().isoformat(),
+            'is_online': is_online,
+            'is_available': is_available,
+            'active_ride_id': str(driver.active_ride_id) if driver.active_ride_id else None,
+        }, status=status.HTTP_200_OK)
 
 
 class DriverCurrentRideView(APIView):
@@ -1140,36 +1481,57 @@ class DriverRideCompleteView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request, ride_id):
-        booking = Booking.objects.filter(id=ride_id).first()
-        if not booking:
-            return Response({'error': 'Ride not found'}, status=status.HTTP_404_NOT_FOUND)
+        with transaction.atomic():
+            booking = Booking.objects.select_for_update().filter(id=ride_id).first()
+            if not booking:
+                return Response({'error': 'Ride not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        booking.status = Booking.BookingStatus.COMPLETED
-        booking.payment_status = Booking.PaymentStatus.PAID
-        booking.save()
+            locked_driver = None
+            if booking.driver:
+                locked_driver = Driver.objects.select_for_update().filter(id=booking.driver.id).first()
 
-        if booking.driver:
-            booking.driver.total_trips += 1
-            booking.driver.save()
+            booking.status = Booking.BookingStatus.COMPLETED
+            booking.payment_status = Booking.PaymentStatus.PAID
+            booking.save(update_fields=['status', 'payment_status'])
 
-            # Credit driver wallet
-            wallet, _ = Wallet.objects.get_or_create(user=booking.driver.user)
-            wallet.balance += booking.total_fare
-            wallet.save()
+            if locked_driver:
+                locked_driver.is_available = True
+                locked_driver.active_ride = None
+                locked_driver.availability_status = Driver.AvailabilityStatus.ONLINE
+                locked_driver.total_trips += 1
+                locked_driver.save(update_fields=['is_available', 'active_ride', 'availability_status', 'total_trips'])
 
-            WalletTransaction.objects.create(
-                wallet=wallet,
-                amount=booking.total_fare,
-                transaction_type=WalletTransaction.TransactionType.CREDIT,
-                description=f"Earnings from Ride #{booking.booking_number}",
-                reference_id=str(booking.id)
+                # Credit driver wallet
+                wallet, _ = Wallet.objects.get_or_create(user=locked_driver.user)
+                wallet.balance += booking.total_fare
+                wallet.save(update_fields=['balance'])
+
+                WalletTransaction.objects.create(
+                    wallet=wallet,
+                    amount=booking.total_fare,
+                    transaction_type=WalletTransaction.TransactionType.CREDIT,
+                    description=f"Earnings from Ride #{booking.booking_number}",
+                    reference_id=str(booking.id)
+                )
+
+            BookingTracking.objects.create(
+                booking=booking,
+                status=Booking.BookingStatus.COMPLETED,
+                remarks="Trip completed successfully"
             )
 
-        BookingTracking.objects.create(
-            booking=booking,
-            status=Booking.BookingStatus.COMPLETED,
-            remarks="Trip completed successfully"
-        )
+            OutboxService.create_message(
+                event_type='ride_completed',
+                payload={
+                    'booking_id': str(booking.id),
+                    'ride_id': str(booking.id),
+                    'booking_number': booking.booking_number,
+                    'customer_id': str(booking.customer_id) if booking.customer_id else None,
+                    'driver_id': str(locked_driver.id) if locked_driver else None,
+                    'fare': float(booking.total_fare),
+                }
+            )
+
         return Response(BookingSerializer(booking).data, status=status.HTTP_200_OK)
 
 
@@ -1177,19 +1539,44 @@ class DriverRideCancelView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request, ride_id):
-        booking = Booking.objects.filter(id=ride_id).first()
-        if not booking:
-            return Response({'error': 'Ride not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        booking.status = Booking.BookingStatus.CANCELLED
-        booking.save()
-
         reason = request.data.get('reason', 'Cancelled by captain')
-        BookingTracking.objects.create(
-            booking=booking,
-            status=Booking.BookingStatus.CANCELLED,
-            remarks=f"Cancelled: {reason}"
-        )
+        with transaction.atomic():
+            booking = Booking.objects.select_for_update().filter(id=ride_id).first()
+            if not booking:
+                return Response({'error': 'Ride not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            locked_driver = None
+            if booking.driver:
+                locked_driver = Driver.objects.select_for_update().filter(id=booking.driver.id).first()
+
+            booking.status = Booking.BookingStatus.CANCELLED
+            booking.save(update_fields=['status'])
+
+            if locked_driver:
+                locked_driver.is_available = True
+                locked_driver.active_ride = None
+                locked_driver.availability_status = Driver.AvailabilityStatus.ONLINE
+                locked_driver.save(update_fields=['is_available', 'active_ride', 'availability_status'])
+
+            BookingTracking.objects.create(
+                booking=booking,
+                status=Booking.BookingStatus.CANCELLED,
+                remarks=f"Cancelled by captain: {reason}"
+            )
+
+            OutboxService.create_message(
+                event_type='ride_cancelled',
+                payload={
+                    'booking_id': str(booking.id),
+                    'ride_id': str(booking.id),
+                    'booking_number': booking.booking_number,
+                    'customer_id': str(booking.customer_id) if booking.customer_id else None,
+                    'driver_id': str(locked_driver.id) if locked_driver else None,
+                    'cancelled_by': 'driver',
+                    'reason': reason,
+                }
+            )
+
         return Response(BookingSerializer(booking).data, status=status.HTTP_200_OK)
 
 

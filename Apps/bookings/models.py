@@ -171,3 +171,80 @@ class BookingTracking(models.Model):
 
     def __str__(self):
         return f"Tracking #{self.booking.booking_number} - {self.status}"
+
+
+class RideOffer(models.Model):
+    class OfferStatus(models.TextChoices):
+        PENDING = 'Pending', 'Pending'
+        ACCEPTED = 'Accepted', 'Accepted'
+        REJECTED = 'Rejected', 'Rejected'
+        EXPIRED = 'Expired', 'Expired'
+        CANCELLED = 'Cancelled', 'Cancelled'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    booking = models.ForeignKey(
+        Booking,
+        on_delete=models.CASCADE,
+        related_name='offers'
+    )
+    driver = models.ForeignKey(
+        Driver,
+        on_delete=models.CASCADE,
+        related_name='ride_offers'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=OfferStatus.choices,
+        default=OfferStatus.PENDING
+    )
+    reservation_token = models.CharField(max_length=64, blank=True, null=True)
+    estimated_distance_km = models.DecimalField(max_digits=8, decimal_places=2, default=0.0)
+    estimated_fare = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
+    expires_at = models.DateTimeField()
+    responded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ride_offers'
+        verbose_name = 'Ride Offer'
+        verbose_name_plural = 'Ride Offers'
+        indexes = [
+            models.Index(fields=['booking', 'status']),
+            models.Index(fields=['driver', 'status']),
+            models.Index(fields=['expires_at']),
+        ]
+
+    def __str__(self):
+        return f"Offer {self.id} for Ride #{self.booking.booking_number} -> Driver {self.driver.id} ({self.status})"
+
+
+class OutboxMessage(models.Model):
+    class StatusChoices(models.TextChoices):
+        PENDING = 'Pending', 'Pending'
+        PROCESSED = 'Processed', 'Processed'
+        FAILED = 'Failed', 'Failed'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event_type = models.CharField(max_length=60)
+    payload = models.JSONField(default=dict)
+    status = models.CharField(
+        max_length=20,
+        choices=StatusChoices.choices,
+        default=StatusChoices.PENDING
+    )
+    retry_count = models.PositiveIntegerField(default=0)
+    last_error = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'outbox_messages'
+        verbose_name = 'Outbox Message'
+        verbose_name_plural = 'Outbox Messages'
+        indexes = [
+            models.Index(fields=['status', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"Outbox [{self.event_type}] ({self.status}) - {self.id}"

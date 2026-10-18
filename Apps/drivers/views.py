@@ -1,5 +1,6 @@
 import random
 import uuid
+from decimal import Decimal
 from datetime import date, datetime
 from pathlib import Path
 from django.conf import settings
@@ -624,11 +625,58 @@ class DriverViewSet(viewsets.ModelViewSet):
                     'max_duty_seconds': max_duty_sec
                 }, status=status.HTTP_400_BAD_REQUEST)
 
+            # Pick and save rider's / driver's current location to DB
+            lat = request.data.get('latitude') or request.data.get('lat') or request.query_params.get('driver_lat') or request.query_params.get('lat')
+            lon = request.data.get('longitude') or request.data.get('lng') or request.data.get('lon') or request.query_params.get('driver_lng') or request.query_params.get('lng')
+            heading = request.data.get('heading', 0)
+            speed = request.data.get('speed', 0)
+
+            if lat is not None and lon is not None:
+                try:
+                    lat_f = round(Decimal(str(lat)), 7)
+                    lon_f = round(Decimal(str(lon)), 7)
+                    driver.current_latitude = lat_f
+                    driver.current_longitude = lon_f
+                    driver.last_location_update = timezone.now()
+
+                    from tracking.models import DriverLocation
+                    DriverLocation.objects.update_or_create(
+                        driver=driver,
+                        defaults={
+                            'latitude': lat_f,
+                            'longitude': lon_f,
+                            'heading': Decimal(str(heading)),
+                            'speed': Decimal(str(speed)),
+                            'is_online': True
+                        }
+                    )
+                except Exception:
+                    pass
+            elif driver.current_latitude and driver.current_longitude:
+                try:
+                    from tracking.models import DriverLocation
+                    DriverLocation.objects.update_or_create(
+                        driver=driver,
+                        defaults={
+                            'latitude': driver.current_latitude,
+                            'longitude': driver.current_longitude,
+                            'heading': Decimal(str(heading)),
+                            'speed': Decimal(str(speed)),
+                            'is_online': True
+                        }
+                    )
+                except Exception:
+                    pass
+
             driver.last_online_start = timezone.now()
             driver.availability_status = Driver.AvailabilityStatus.ONLINE
             driver.save()
             return Response({
                 'status': 'Driver availability set to Online',
+                'is_online': True,
+                'is_available': True,
+                'latitude': float(driver.current_latitude) if driver.current_latitude else None,
+                'longitude': float(driver.current_longitude) if driver.current_longitude else None,
                 'current_daily_online_seconds': driver.get_current_daily_online_seconds(),
                 'max_duty_seconds': max_duty_sec
             }, status=status.HTTP_200_OK)
@@ -643,8 +691,17 @@ class DriverViewSet(viewsets.ModelViewSet):
 
             driver.availability_status = Driver.AvailabilityStatus.OFFLINE
             driver.save()
+
+            try:
+                from tracking.models import DriverLocation
+                DriverLocation.objects.filter(driver=driver).update(is_online=False)
+            except Exception:
+                pass
+
             return Response({
                 'status': 'Driver availability set to Offline',
+                'is_online': False,
+                'is_available': False,
                 'current_daily_online_seconds': driver.get_current_daily_online_seconds(),
                 'max_duty_seconds': max_duty_sec
             }, status=status.HTTP_200_OK)

@@ -140,6 +140,63 @@ export const reverseGeocodeGps = async (lat, lon) => {
 let lastCachedGpsLocation = null;
 let lastGpsFetchTime = 0;
 
+/**
+ * Force a real-time GPS fix from the browser — bypasses the 15-second cache.
+ * Use this for on-demand "locate me" button presses.
+ *
+ * Resolves with:
+ *   { lat, lon, accuracy, address, displayStatus }  on success
+ *   { error: true, errorCode: 'PERMISSION_DENIED' | 'POSITION_UNAVAILABLE' | 'TIMEOUT' | 'INSECURE_CONTEXT' | 'UNSUPPORTED' }  on failure
+ */
+export const getRealtimeGpsLocation = () => {
+  return new Promise((resolve) => {
+    // Browsers block geolocation on HTTP for non-localhost origins
+    if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      resolve({ error: true, errorCode: 'INSECURE_CONTEXT' });
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      resolve({ error: true, errorCode: 'UNSUPPORTED' });
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        const accuracy = position.coords.accuracy ? position.coords.accuracy.toFixed(0) : '10';
+
+        const address = await reverseGeocodeGps(lat, lon);
+
+        const result = {
+          lat,
+          lon,
+          accuracy,
+          address,
+          displayStatus: `GPS Active: ${address}`
+        };
+
+        try {
+          localStorage.setItem('raahgo_last_gps_location', JSON.stringify({ lat, lon, address }));
+        } catch (e) {}
+
+        // Also update the shared cache so getDeviceGpsLocation benefits
+        lastCachedGpsLocation = result;
+        lastGpsFetchTime = Date.now();
+        resolve(result);
+      },
+      (err) => {
+        // err.code: 1 = PERMISSION_DENIED, 2 = POSITION_UNAVAILABLE, 3 = TIMEOUT
+        const codeMap = { 1: 'PERMISSION_DENIED', 2: 'POSITION_UNAVAILABLE', 3: 'TIMEOUT' };
+        resolve({ error: true, errorCode: codeMap[err.code] || 'POSITION_UNAVAILABLE' });
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  });
+};
+
+
 export const getDeviceGpsLocation = () => {
   return new Promise((resolve) => {
     // Return cached GPS if fetched within last 15 seconds
@@ -172,21 +229,8 @@ export const getDeviceGpsLocation = () => {
         }
       } catch (e) {}
 
-      // 2. Default to Atarra, Banda, Uttar Pradesh (25.290689, 80.570636)
-      const defaultLat = 25.290689;
-      const defaultLon = 80.570636;
-      const defaultAddress = await reverseGeocodeGps(defaultLat, defaultLon);
-
-      const result = {
-        lat: defaultLat,
-        lon: defaultLon,
-        accuracy: '10',
-        address: defaultAddress || 'Atarra, Banda, Uttar Pradesh',
-        displayStatus: `GPS Active: Atarra, Banda, Uttar Pradesh`
-      };
-      lastCachedGpsLocation = result;
-      lastGpsFetchTime = Date.now();
-      resolve(result);
+      // No saved location — resolve with null so the UI can prompt the user
+      resolve(null);
     };
 
     if (!navigator.geolocation) {
