@@ -41,6 +41,7 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "localhost",
     "192.168.137.1",
+     "13.220.221.96",
 ]
 
 # Dynamically add hosts from .env (comma-separated)
@@ -111,11 +112,11 @@ TEMPLATES = [
 WSGI_APPLICATION = 'project.wsgi.application'
 ASGI_APPLICATION = 'project.asgi.application'
 
-NAME = os.getenv('NAME', 'raahgo_db')
-USER = int(os.getenv('USER', 'root'))
-PASSWORD = int(os.getenv('PASSWORD', 'root'))
-HOST = os.getenv('HOST', '127.0.0.1')
-PORT = os.getenv('PORT', '3306')
+NAME = os.getenv('DB_NAME', os.getenv('NAME', 'raahgo_db'))
+USER = os.getenv('DB_USER', os.getenv('USER', 'root'))
+PASSWORD = os.getenv('DB_PASSWORD', os.getenv('PASSWORD', 'root'))
+HOST = os.getenv('DB_HOST', os.getenv('HOST', '127.0.0.1'))
+PORT = os.getenv('DB_PORT', os.getenv('PORT', '3306'))
 
 
 
