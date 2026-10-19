@@ -38,10 +38,9 @@ DEBUG = True
 
 # Base local hosts
 ALLOWED_HOSTS = [
-    "127.0.0.1",
+    "13.220.221.96",
     "localhost",
-    "192.168.137.1",
-     "13.220.221.96",
+    "127.0.0.1",
 ]
 
 # Dynamically add hosts from .env (comma-separated)
