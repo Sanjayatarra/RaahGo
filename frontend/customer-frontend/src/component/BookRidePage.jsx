@@ -346,11 +346,13 @@ export default function BookRidePage({ user, onLogout }) {
             'Location permission was denied. Tap the 🔒 or settings icon in your browser address bar → Permissions → Allow Location, then tap again.'
           );
           break;
-        case 'INSECURE_CONTEXT':
+        case 'INSECURE_CONTEXT': {
+          const host = typeof window !== 'undefined' ? window.location.host : '';
           setLocationStatus(
-            'GPS requires HTTPS. Please open the URL starting with https:// (e.g. https://192.168.0.109:5173)'
+            `GPS requires HTTPS. Please open the URL starting with https://${host ? ` (e.g. https://${host})` : ''}`
           );
           break;
+        }
         case 'POSITION_UNAVAILABLE':
           setLocationStatus(
             'GPS location unavailable. Please ensure Device Location (GPS) is turned ON in your phone quick settings.'
