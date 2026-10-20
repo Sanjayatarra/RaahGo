@@ -111,11 +111,11 @@ TEMPLATES = [
 WSGI_APPLICATION = 'project.wsgi.application'
 ASGI_APPLICATION = 'project.asgi.application'
 
-DB_NAME = os.getenv('NAME', 'raahgo_db')
-USER = os.getenv('USER', 'root')
+DB_NAME =   os.getenv('NAME', 'raahgo_db')
+USER =      os.getenv('USER', 'root')
 PASSWORD =  os.getenv('PASSWORD', 'root')
-HOST = os.getenv('HOST', '127.0.0.1')
-PORT = os.getenv('PORT', '3306')
+HOST =      os.getenv('HOST', '127.0.0.1')
+PORT =      os.getenv('PORT', '3306')
 
 
 
