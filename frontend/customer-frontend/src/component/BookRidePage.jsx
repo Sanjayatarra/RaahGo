@@ -86,6 +86,7 @@ export default function BookRidePage({ user, onLogout }) {
   const [calculatedRouteInfo, setCalculatedRouteInfo] = useState(() => cachedBooking?.calculatedRouteInfo || null);
   const [notes, setNotes] = useState(() => cachedBooking?.notes || '');
 
+  
   const isClearingRideRef = useRef(false);
 
   // Helper to clear cached booking and reset address input fields
