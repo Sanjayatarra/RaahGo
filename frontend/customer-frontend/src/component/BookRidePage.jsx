@@ -1203,9 +1203,11 @@ export default function BookRidePage({ user, onLogout }) {
               </div>
 
               {/* Scrollable Content Area */}
-              <div className="flex-1 overflow-y-auto px-4 pt-4 pb-32 space-y-4 scrollbar-none scroll-smooth">
+              <div className="flex-1 overflow-y-auto px-4 pt-3 pb-2 space-y-3 scrollbar-none scroll-smooth">
                 {/* Mobile Map View */}
-                <div className="block lg:hidden h-56 sm:h-64 rounded-[24px] overflow-hidden border border-gray-200 relative z-10 shrink-0 shadow-sm">
+                <div className={`block lg:hidden rounded-[24px] overflow-hidden border border-gray-200 relative z-10 shrink-0 shadow-sm transition-all duration-300 ${
+                  showFares ? 'h-32 sm:h-40' : 'h-52 sm:h-60'
+                }`}>
                   <RealtimeMap
                     pickup={pickup}
                     destination={destination}
@@ -1420,50 +1422,52 @@ export default function BookRidePage({ user, onLogout }) {
                   />
                 </div>
 
-                {/* Show Fare Estimates Button */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    let hasErr = false;
-                    if (!pickup || !pickup.trim()) {
-                      setPickupError('Please enter pickup location');
-                      hasErr = true;
-                    } else {
-                      setPickupError('');
-                    }
+                {/* Show Fare Estimates Button (Only before fares are revealed) */}
+                {!showFares && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let hasErr = false;
+                      if (!pickup || !pickup.trim()) {
+                        setPickupError('Please enter pickup location');
+                        hasErr = true;
+                      } else {
+                        setPickupError('');
+                      }
 
-                    if (!destination || !destination.trim()) {
-                      setDestError('Please enter destination location');
-                      hasErr = true;
-                    } else {
-                      setDestError('');
-                    }
+                      if (!destination || !destination.trim()) {
+                        setDestError('Please enter destination location');
+                        hasErr = true;
+                      } else {
+                        setDestError('');
+                      }
 
-                    if (hasErr) return;
-                    setShowFares(true);
-                  }}
-                  className="w-full py-4 bg-[#063B28] hover:bg-[#084A33] active:scale-[0.98] text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-[#063B28]/20 transition-all text-center cursor-pointer border-none"
-                >
-                  Show Fare Estimates
-                </button>
+                      if (hasErr) return;
+                      setShowFares(true);
+                    }}
+                    className="w-full py-4 bg-[#063B28] hover:bg-[#084A33] active:scale-[0.98] text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-[#063B28]/20 transition-all text-center cursor-pointer border-none"
+                  >
+                    Show Fare Estimates
+                  </button>
+                )}
 
                 {/* Vehicle Fare Options List */}
                 {showFares && (
-                  <div ref={fareEstimatesRef} className="space-y-3 pt-2 animate-fade-in">
+                  <div ref={fareEstimatesRef} className="space-y-2.5 pt-1 animate-fade-in">
                     <h3 className="text-sm font-black text-gray-900">Choose vehicle · {currentDist} km</h3>
-                    <div className="space-y-2.5">
+                    <div className="space-y-2">
                       {rideTypes.map((ride) => {
                         const isSelected = selectedRide === ride.id;
                         return (
                           <div
                             key={ride.id}
                             onClick={() => setSelectedRide(ride.id)}
-                            className={`p-3.5 rounded-2xl border flex items-center justify-between transition-all cursor-pointer ${
+                            className={`p-2.5 sm:p-3 rounded-2xl border flex items-center justify-between transition-all cursor-pointer ${
                               isSelected ? 'border-2 border-[#16A34A] bg-[#EEF8F2]/90 shadow-sm' : 'glass-card border-gray-200/80 hover:bg-emerald-50/30'
                             }`}
                           >
-                            <div className="flex items-center gap-3.5">
-                              <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${
+                            <div className="flex items-center gap-3">
+                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
                                 isSelected ? 'bg-white text-[#16A34A] shadow-sm border border-[#D2EDD9]' : 'bg-gray-100 text-gray-600'
                               }`}>
                                 <span className="text-xl">{ride.icon}</span>
@@ -1487,7 +1491,7 @@ export default function BookRidePage({ user, onLogout }) {
                     </div>
 
                     {/* Payment Method Selection */}
-                    <div className="space-y-2 pt-2 border-t border-gray-100">
+                    <div className="space-y-1.5 pt-2 border-t border-gray-100">
                       <div className="flex items-center justify-between">
                         <label className="text-xs font-black text-gray-800 uppercase tracking-wider block">
                           Payment Method
@@ -1508,7 +1512,7 @@ export default function BookRidePage({ user, onLogout }) {
                               key={pm.id}
                               type="button"
                               onClick={() => setPaymentMethod(pm.id)}
-                              className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                              className={`p-2.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                                 isSelected
                                   ? 'border-2 border-[#16A34A] bg-[#EEF8F2] shadow-xs'
                                   : 'bg-white border-gray-200 hover:border-gray-300'
@@ -1539,14 +1543,14 @@ export default function BookRidePage({ user, onLogout }) {
 
               </div>
 
-              {/* Sticky Book Now button — always visible when fares are shown */}
+              {/* Sticky Book Now button — sits flush directly below without huge scroll gap */}
               {showFares && !isSearchingDriver && !isAcceptedRide && (
-                <div className="shrink-0 px-4 pb-5 pt-3 bg-gradient-to-t from-white via-white/95 to-transparent border-t border-gray-100">
+                <div className="shrink-0 px-4 pb-3 pt-2 bg-white border-t border-gray-100 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
                   <button
                     type="button"
                     onClick={handleBookRide}
                     disabled={isBooking}
-                    className="w-full py-4 bg-gradient-to-r from-[#063B28] to-[#0D5B3E] hover:from-[#084A33] hover:to-[#106A49] text-white font-black text-base rounded-2xl shadow-xl shadow-[#063B28]/30 active:scale-[0.98] transition-all cursor-pointer border-none flex items-center justify-center gap-2"
+                    className="w-full py-3.5 bg-gradient-to-r from-[#063B28] to-[#0D5B3E] hover:from-[#084A33] hover:to-[#106A49] text-white font-black text-base rounded-2xl shadow-xl shadow-[#063B28]/30 active:scale-[0.98] transition-all cursor-pointer border-none flex items-center justify-center gap-2"
                   >
                     {isBooking ? (
                       <>
