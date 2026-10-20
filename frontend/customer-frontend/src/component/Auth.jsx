@@ -51,11 +51,16 @@ export default function Auth() {
     // Check if there is a pending booking to resume
     const pendingBooking = localStorage.getItem('pending_booking');
     if (pendingBooking) {
-      navigate('/book-ride');
-    } else {
-      // Immediate navigation to /home to book a ride
-      navigate('/home');
+      try {
+        const parsed = JSON.parse(pendingBooking);
+        if (parsed && (parsed.pickup || parsed.destination)) {
+          navigate('/book-ride');
+          return;
+        }
+      } catch (e) {}
     }
+    // Immediate navigation to /home to book a ride
+    navigate('/home');
   };
 
   const handleProfileComplete = (completedData) => {
@@ -63,10 +68,15 @@ export default function Auth() {
     localStorage.setItem('raahgo_user', JSON.stringify(completedData));
     const pendingBooking = localStorage.getItem('pending_booking');
     if (pendingBooking) {
-      navigate('/book-ride');
-    } else {
-      navigate('/home');
+      try {
+        const parsed = JSON.parse(pendingBooking);
+        if (parsed && (parsed.pickup || parsed.destination)) {
+          navigate('/book-ride');
+          return;
+        }
+      } catch (e) {}
     }
+    navigate('/home');
   };
 
   const handleLogout = () => {

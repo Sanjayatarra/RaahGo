@@ -40,16 +40,29 @@ export default function BookRidePage({ user, onLogout }) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Selected ride passed via state or default
-  const initialRide = location.state?.selectedRide || 'bike';
+  // Read any cached pending booking from localStorage
+  const getCachedBooking = () => {
+    try {
+      const saved = localStorage.getItem('pending_booking');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.log('Error reading pending_booking cache:', e);
+    }
+    return null;
+  };
 
-  const [pickup, setPickup] = useState(location.state?.prefillPickup || '');
-  const [destination, setDestination] = useState(location.state?.prefillDrop || '');
+  const cachedBooking = getCachedBooking();
+
+  // Selected ride passed via state or cache or default
+  const initialRide = location.state?.selectedRide || cachedBooking?.selectedRide || 'bike';
+
+  const [pickup, setPickup] = useState(() => location.state?.prefillPickup || cachedBooking?.pickup || '');
+  const [destination, setDestination] = useState(() => location.state?.prefillDrop || location.state?.prefillDest || cachedBooking?.destination || '');
   const [pickupError, setPickupError] = useState('');
   const [destError, setDestError] = useState('');
   const [selectedRide, setSelectedRide] = useState(initialRide);
-  const [showFares, setShowFares] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState('COD'); // 'COD' | 'Online' | 'RaahGo Wallet'
+  const [showFares, setShowFares] = useState(() => Boolean((location.state?.prefillPickup || cachedBooking?.pickup) && (location.state?.prefillDrop || location.state?.prefillDest || cachedBooking?.destination)));
+  const [paymentMethod, setPaymentMethod] = useState(() => cachedBooking?.paymentMethod || 'COD'); // 'COD' | 'Online' | 'RaahGo Wallet'
   const [isBooking, setIsBooking] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [activeBookingData, setActiveBookingData] = useState(null);
@@ -68,41 +81,92 @@ export default function BookRidePage({ user, onLogout }) {
   const [searchTimeLeft, setSearchTimeLeft] = useState(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
-  const [pickupCoords, setPickupCoords] = useState(location.state?.pickupCoords || null);
-  const [destCoords, setDestCoords] = useState(location.state?.dropCoords || null);
-  const [calculatedRouteInfo, setCalculatedRouteInfo] = useState(null);
-  const [notes, setNotes] = useState('');
+  const [pickupCoords, setPickupCoords] = useState(() => location.state?.pickupCoords || cachedBooking?.pickupCoords || null);
+  const [destCoords, setDestCoords] = useState(() => location.state?.dropCoords || cachedBooking?.destCoords || null);
+  const [calculatedRouteInfo, setCalculatedRouteInfo] = useState(() => cachedBooking?.calculatedRouteInfo || null);
+  const [notes, setNotes] = useState(() => cachedBooking?.notes || '');
 
-  const [isLocating, setIsLocating] = useState(false);
-  const [gpsVerified, setGpsVerified] = useState(false);
-  const [locationStatus, setLocationStatus] = useState('');
+  const isClearingRideRef = useRef(false);
 
-  const [pickupSuggestions, setPickupSuggestions] = useState([]);
-  const [destSuggestions, setDestSuggestions] = useState([]);
-  const [isSearchingPickup, setIsSearchingPickup] = useState(false);
-  const [isSearchingDest, setIsSearchingDest] = useState(false);
-  const [showPickupDropdown, setShowPickupDropdown] = useState(false);
-  const [showDestDropdown, setShowDestDropdown] = useState(false);
+  // Helper to clear cached booking and reset address input fields
+  const clearRideCacheAndInputs = () => {
+    isClearingRideRef.current = true;
+    localStorage.removeItem('pending_booking');
+    setPickup('');
+    setDestination('');
+    setPickupCoords(null);
+    setDestCoords(null);
+    setCalculatedRouteInfo(null);
+    setShowFares(false);
+    setTimeout(() => {
+      isClearingRideRef.current = false;
+    }, 500);
+  };
 
-  const pickupContainerRef = useRef(null);
-  const destContainerRef = useRef(null);
-  const searchTimeoutRef = useRef(null);
-  const fareEstimatesRef = useRef(null);
-
-  const [backendVehicleTypes, setBackendVehicleTypes] = useState([]);
-
-  // Clear field errors as soon as input values are populated
+  // Sync inputs with cache continuously whenever user enters/changes addresses
   useEffect(() => {
-    if (pickup && pickup.trim()) {
-      setPickupError('');
-    }
-  }, [pickup]);
+    if (isClearingRideRef.current) return;
 
-  useEffect(() => {
-    if (destination && destination.trim()) {
-      setDestError('');
+    if (!pickup?.trim() && !destination?.trim()) {
+      if (!activeBookingData || !['Searching', 'Accepted', 'Arrived', 'In Trip'].includes(activeBookingData.status)) {
+        localStorage.removeItem('pending_booking');
+      }
+      return;
     }
-  }, [destination]);
+
+    if (activeBookingData && ['Completed', 'Cancelled'].includes(activeBookingData.status)) {
+      return;
+    }
+
+    try {
+      const currentCache = {
+        selectedRide,
+        pickup,
+        destination,
+        pickupCoords,
+        destCoords,
+        calculatedRouteInfo,
+        paymentMethod,
+        notes,
+        savedAt: Date.now()
+      };
+      localStorage.setItem('pending_booking', JSON.stringify(currentCache));
+    } catch (e) {
+      console.log('Error caching pending booking:', e);
+    }
+  }, [pickup, destination, pickupCoords, destCoords, selectedRide, paymentMethod, notes, calculatedRouteInfo, activeBookingData]);
+
+  // Auto-fetch cached addresses when user logs in or auth state updates
+  useEffect(() => {
+    if (isClearingRideRef.current) return;
+    const cached = getCachedBooking();
+    if (cached) {
+      if (!pickup && cached.pickup) {
+        setPickup(cached.pickup);
+      }
+      if (!destination && cached.destination) {
+        setDestination(cached.destination);
+      }
+      if (!pickupCoords && cached.pickupCoords) {
+        setPickupCoords(cached.pickupCoords);
+      }
+      if (!destCoords && cached.destCoords) {
+        setDestCoords(cached.destCoords);
+      }
+      if (cached.selectedRide) {
+        setSelectedRide(cached.selectedRide);
+      }
+      if (cached.paymentMethod) {
+        setPaymentMethod(cached.paymentMethod);
+      }
+      if (cached.notes) {
+        setNotes(cached.notes);
+      }
+      if ((cached.pickup || pickup) && (cached.destination || destination)) {
+        setShowFares(true);
+      }
+    }
+  }, [user]);
 
   // Fetch Vehicle Types dynamically from Django REST API
   useEffect(() => {
@@ -141,7 +205,9 @@ export default function BookRidePage({ user, onLogout }) {
 
   // Auto-detect GPS Location and restore active booking state on mount
   useEffect(() => {
-    if (!location.state?.prefillPickup) {
+    const cached = getCachedBooking();
+    const hasInitialPickup = location.state?.prefillPickup || cached?.pickup;
+    if (!hasInitialPickup) {
       handleDetectGpsLocation();
     }
 
@@ -152,7 +218,27 @@ export default function BookRidePage({ user, onLogout }) {
         if (res.ok) {
           const data = await res.json();
           if (data && !data.auto_cancelled && data.id) {
+            if (data.status === 'Completed' || data.status === 'Cancelled') {
+              clearRideCacheAndInputs();
+              if (data.status === 'Completed') {
+                setTripCompletedModal(true);
+              }
+              return;
+            }
+
             setActiveBookingData(data);
+            if (data.pickup_address) setPickup(data.pickup_address);
+            if (data.dropoff_address) setDestination(data.dropoff_address);
+            if (data.pickup_latitude && data.pickup_longitude) {
+              setPickupCoords({ lat: parseFloat(data.pickup_latitude), lng: parseFloat(data.pickup_longitude) });
+            }
+            if (data.dropoff_latitude && data.dropoff_longitude) {
+              setDestCoords({ lat: parseFloat(data.dropoff_latitude), lng: parseFloat(data.dropoff_longitude) });
+            }
+            if (data.selected_ride) {
+              setSelectedRide(data.selected_ride.toLowerCase());
+            }
+
             if (data.status === 'Searching') {
               setIsSearchingDriver(true);
               setBookingSuccess(false);
@@ -164,8 +250,6 @@ export default function BookRidePage({ user, onLogout }) {
             } else if (['Accepted', 'Arrived', 'In Trip'].includes(data.status)) {
               setIsSearchingDriver(false);
               setBookingSuccess(true);
-            } else if (data.status === 'Completed') {
-              setTripCompletedModal(true);
             }
           }
         }
@@ -192,6 +276,23 @@ export default function BookRidePage({ user, onLogout }) {
       autoGeocodePickup();
     }
   }, [pickup, pickupCoords]);
+
+  // Auto-geocode destination address text to coordinates if destCoords is null
+  useEffect(() => {
+    if (destination && destination.trim().length > 2 && !destCoords) {
+      const autoGeocodeDest = async () => {
+        const userCoords = pickupCoords ? { lat: pickupCoords.lat, lon: pickupCoords.lng } : null;
+        const results = await fetchLocationSuggestions(destination, userCoords);
+        if (results && results.length > 0 && results[0].coordinates) {
+          setDestCoords({
+            lat: parseFloat(results[0].coordinates[1]),
+            lng: parseFloat(results[0].coordinates[0])
+          });
+        }
+      };
+      autoGeocodeDest();
+    }
+  }, [destination, destCoords, pickupCoords]);
 
   // Animated Progress bar when searching for Captain
   useEffect(() => {
@@ -247,6 +348,7 @@ export default function BookRidePage({ user, onLogout }) {
                 message: `Captain ${data.driver_details?.captain_name || 'Partner'} accepted your ride request. Driver is en route!`
               });
             } else if (data.status === 'Cancelled' && activeBookingData?.status !== 'Cancelled') {
+              clearRideCacheAndInputs();
               setIsSearchingDriver(false);
               setBookingSuccess(false);
               setSearchTimeLeft(null);
@@ -257,6 +359,7 @@ export default function BookRidePage({ user, onLogout }) {
               });
               setActiveBookingData(null);
             } else if (data.status === 'Completed') {
+              clearRideCacheAndInputs();
               setIsSearchingDriver(false);
               setBookingSuccess(false);
               setSearchTimeLeft(null);
@@ -284,6 +387,7 @@ export default function BookRidePage({ user, onLogout }) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ reason: `Auto-cancelled: no driver found within ${waitMins} minutes.` })
             }).then(() => {
+              clearRideCacheAndInputs();
               setIsSearchingDriver(false);
               setBookingSuccess(false);
               setSearchTimeLeft(null);
@@ -639,6 +743,7 @@ export default function BookRidePage({ user, onLogout }) {
         console.log(err);
       }
     }
+    clearRideCacheAndInputs();
     setShowCancelModal(false);
     setIsSearchingDriver(false);
     setBookingSuccess(false);
@@ -652,14 +757,11 @@ export default function BookRidePage({ user, onLogout }) {
   };
 
   const handleCompleteRating = () => {
+    clearRideCacheAndInputs();
     setTripCompletedModal(false);
     setActiveBookingData(null);
     setBookingSuccess(false);
     setIsSearchingDriver(false);
-    setPickup('');
-    setDestination('');
-    setCalculatedRouteInfo(null);
-    setShowFares(false);
     navigate('/home');
   };
 

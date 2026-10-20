@@ -18,13 +18,22 @@ export default function HomePage({ user, onLogout }) {
 
   const [activeTab, setActiveTab] = useState('home');
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [pickup, setPickup] = useState('');
-  const [pickupCoords, setPickupCoords] = useState(null);
+  const getCachedBooking = () => {
+    try {
+      const saved = localStorage.getItem('pending_booking');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return null;
+  };
+
+  const cachedBooking = getCachedBooking();
+  const [pickup, setPickup] = useState(() => cachedBooking?.pickup || '');
+  const [pickupCoords, setPickupCoords] = useState(() => cachedBooking?.pickupCoords || null);
   const [currentGpsName, setCurrentGpsName] = useState('');
   const [isLocatingGps, setIsLocatingGps] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
-  const [drop, setDrop] = useState('');
-  const [dropCoords, setDropCoords] = useState(null);
+  const [drop, setDrop] = useState(() => cachedBooking?.destination || '');
+  const [dropCoords, setDropCoords] = useState(() => cachedBooking?.destCoords || null);
   const [rideHistory, setRideHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   
@@ -44,6 +53,38 @@ export default function HomePage({ user, onLogout }) {
   const [isDraggingSheet, setIsDraggingSheet] = useState(false);
   const dragStartY = useRef(0);
   const dragStartHeight = useRef(60);
+
+  // Cache pickup and drop addresses on HomePage
+  useEffect(() => {
+    if (pickup || drop) {
+      try {
+        const existing = JSON.parse(localStorage.getItem('pending_booking') || '{}');
+        localStorage.setItem('pending_booking', JSON.stringify({
+          ...existing,
+          pickup: pickup || existing.pickup || '',
+          destination: drop || existing.destination || '',
+          pickupCoords: pickupCoords || existing.pickupCoords || null,
+          destCoords: dropCoords || existing.destCoords || null,
+          savedAt: Date.now()
+        }));
+      } catch (e) {}
+    }
+  }, [pickup, drop, pickupCoords, dropCoords]);
+
+  // Auto-fetch cached addresses when user logs in or auth updates
+  useEffect(() => {
+    const cached = getCachedBooking();
+    if (cached) {
+      if (cached.pickup && !pickup) {
+        setPickup(cached.pickup);
+        if (cached.pickupCoords && !pickupCoords) setPickupCoords(cached.pickupCoords);
+      }
+      if (cached.destination && !drop) {
+        setDrop(cached.destination);
+        if (cached.destCoords && !dropCoords) setDropCoords(cached.destCoords);
+      }
+    }
+  }, [user]);
 
   const handleTouchStart = (e) => {
     setIsDraggingSheet(true);
@@ -98,10 +139,10 @@ export default function HomePage({ user, onLogout }) {
         const loc = await getDeviceGpsLocation();
         if (loc) {
           setCurrentGpsName(loc.address);
-          setPickupCoords({ lat: loc.lat, lng: loc.lon });
-          setPickup(loc.address);
+          setPickup(prev => prev || loc.address);
+          setPickupCoords(prev => prev || { lat: loc.lat, lng: loc.lon });
           if (miniMapInstance.current) {
-            adjustMapView({ lat: loc.lat, lng: loc.lon }, sheetHeight);
+            adjustMapView(pickupCoords || { lat: loc.lat, lng: loc.lon }, sheetHeight);
           }
         } else {
           setCurrentGpsName('📍 Enable location to auto-detect');
@@ -399,6 +440,18 @@ export default function HomePage({ user, onLogout }) {
       alert("Please enter both Pickup and Drop locations to continue.");
       return;
     }
+
+    try {
+      const existing = JSON.parse(localStorage.getItem('pending_booking') || '{}');
+      localStorage.setItem('pending_booking', JSON.stringify({
+        ...existing,
+        pickup,
+        destination: drop,
+        pickupCoords,
+        destCoords: dropCoords,
+        savedAt: Date.now()
+      }));
+    } catch (e) {}
 
     navigate('/book-ride', { 
       state: { 
