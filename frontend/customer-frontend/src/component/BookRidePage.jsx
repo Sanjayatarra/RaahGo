@@ -86,7 +86,24 @@ export default function BookRidePage({ user, onLogout }) {
   const [calculatedRouteInfo, setCalculatedRouteInfo] = useState(() => cachedBooking?.calculatedRouteInfo || null);
   const [notes, setNotes] = useState(() => cachedBooking?.notes || '');
 
-  
+  const [isLocating, setIsLocating] = useState(false);
+  const [gpsVerified, setGpsVerified] = useState(false);
+  const [locationStatus, setLocationStatus] = useState('');
+
+  const [pickupSuggestions, setPickupSuggestions] = useState([]);
+  const [destSuggestions, setDestSuggestions] = useState([]);
+  const [isSearchingPickup, setIsSearchingPickup] = useState(false);
+  const [isSearchingDest, setIsSearchingDest] = useState(false);
+  const [showPickupDropdown, setShowPickupDropdown] = useState(false);
+  const [showDestDropdown, setShowDestDropdown] = useState(false);
+
+  const pickupContainerRef = useRef(null);
+  const destContainerRef = useRef(null);
+  const searchTimeoutRef = useRef(null);
+  const fareEstimatesRef = useRef(null);
+
+  const [backendVehicleTypes, setBackendVehicleTypes] = useState([]);
+
   const isClearingRideRef = useRef(false);
 
   // Helper to clear cached booking and reset address input fields
