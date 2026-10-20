@@ -111,11 +111,11 @@ TEMPLATES = [
 WSGI_APPLICATION = 'project.wsgi.application'
 ASGI_APPLICATION = 'project.asgi.application'
 
-NAME = os.getenv('DB_NAME', os.getenv('NAME', 'raahgo_db'))
-USER = os.getenv('DB_USER', os.getenv('USER', 'root'))
-PASSWORD = os.getenv('DB_PASSWORD', os.getenv('PASSWORD', 'root'))
-HOST = os.getenv('DB_HOST', os.getenv('HOST', '127.0.0.1'))
-PORT = os.getenv('DB_PORT', os.getenv('PORT', '3306'))
+DB_NAME = os.getenv('NAME', 'raahgo_db')
+USER = os.getenv('USER', 'root')
+PASSWORD =  os.getenv('PASSWORD', 'root')
+HOST = os.getenv('HOST', '127.0.0.1')
+PORT = os.getenv('PORT', '3306')
 
 
 
@@ -125,7 +125,7 @@ PORT = os.getenv('DB_PORT', os.getenv('PORT', '3306'))
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': NAME,
+        'NAME': DB_NAME,
         'USER': USER,
         'PASSWORD': PASSWORD,
         'HOST': HOST,
